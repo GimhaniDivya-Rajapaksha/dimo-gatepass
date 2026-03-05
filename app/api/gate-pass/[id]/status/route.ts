@@ -111,5 +111,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
+  // INITIATOR: cancel their own PENDING_APPROVAL pass
+  if (action === "cancel") {
+    if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById !== session.user.id && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (gatePass.status !== "PENDING_APPROVAL") {
+      return NextResponse.json({ error: "Only pending passes can be cancelled" }, { status: 400 });
+    }
+
+    const updated = await prisma.gatePass.update({
+      where: { id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: { status: "CANCELLED" as any },
+    });
+
+    return NextResponse.json({ gatePass: updated });
+  }
+
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }

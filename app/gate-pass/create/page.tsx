@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY";
 type TransportMode = "CARRIER" | "DRIVER" | "CUSTOMER" | "OTHER";
-type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
+type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
 type LookupOption = { id: string; value: string; label: string; [key: string]: string };
 type LookupState = Record<LookupField, LookupOption[]>;
 
@@ -122,36 +122,78 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 /* ─── Add Vehicle Modal ─────────────────────────────────────────────── */
+const VEHICLE_MAKES = [
+  "Toyota","Mitsubishi","Honda","Nissan","Suzuki","Hyundai","KIA","Isuzu",
+  "Ford","Mazda","Subaru","Land Rover","Jeep","BMW","Mercedes-Benz","Audi",
+  "Volkswagen","Tata","Ashok Leyland","Bajaj","Other",
+];
+
+const COLOUR_FAMILIES = [
+  "White","Black","Silver","Grey","Red","Blue","Green",
+  "Yellow","Orange","Brown","Beige","Purple","Gold","Maroon","Navy",
+];
+
 function AddVehicleModal({ onClose, onAdd }: {
   onClose: () => void;
   onAdd: (opt: LookupOption) => void;
 }) {
-  const [vehicleNo, setVehicleNo] = useState("");
-  const [chassisNo, setChassisNo] = useState("");
-  const [description, setDescription] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [vehicleNo,    setVehicleNo]    = useState("");
+  const [model,        setModel]        = useState("");
+  const [make,         setMake]         = useState("");
+  const [colourFamily, setColourFamily] = useState("");
+  const [colourSearch, setColourSearch] = useState("");
+  const [colourOpen,   setColourOpen]   = useState(false);
+  const [colour,       setColour]       = useState("");
+  const [loading,      setLoading]      = useState(false);
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
+
+  const filteredColours = COLOUR_FAMILIES.filter((c) =>
+    c.toLowerCase().includes(colourSearch.toLowerCase())
+  );
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!vehicleNo.trim())    e.vehicleNo    = "Vehicle / chassis no is mandatory";
+    if (!model.trim())        e.model        = "Vehicle model is mandatory";
+    if (!make)                e.make         = "Vehicle make is mandatory";
+    if (!colourFamily)        e.colourFamily = "Vehicle model is mandatory";
+    return e;
+  };
 
   const handleSubmit = async () => {
-    if (!vehicleNo.trim()) { setError("Vehicle No is required"); return; }
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
     setLoading(true);
-    setError("");
+    setErrors({});
     try {
       const res = await fetch("/api/lookups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ field: "vehicle", vehicleNo: vehicleNo.trim(), chassisNo: chassisNo.trim(), description: description.trim() }),
+        body: JSON.stringify({
+          field: "vehicle",
+          vehicleNo: vehicleNo.trim(),
+          model: model.trim(),
+          make,
+          colourFamily,
+          colour: colour.trim(),
+        }),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();
       onAdd(data.option);
       onClose();
     } catch {
-      setError("Failed to add vehicle. Try again.");
+      setErrors({ submit: "Failed to add vehicle. Try again." });
     } finally {
       setLoading(false);
     }
   };
+
+  const inputStyle = (err?: string) => ({
+    background: "var(--surface2)",
+    borderColor: err ? "#ef4444" : "var(--border)",
+    color: "var(--text)",
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -160,7 +202,8 @@ function AddVehicleModal({ onClose, onAdd }: {
         className="w-full max-w-md rounded-2xl border p-6 shadow-2xl mx-4"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
-        <div className="flex items-center justify-between mb-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold" style={{ color: "var(--text)" }}>Add New Vehicle</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -169,24 +212,89 @@ function AddVehicleModal({ onClose, onAdd }: {
           </button>
         </div>
 
-        {/* Format hint */}
-        <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
-          <span className="font-semibold" style={{ color: "var(--text)" }}>Format:</span> Vehicle No / Chassis No / Description
-          <br />
-          <span className="opacity-70">e.g. &nbsp;CAB-1234 &nbsp;/ &nbsp;LC1234567890 &nbsp;/ &nbsp;Toyota Land Cruiser</span>
-        </div>
-
-        {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
+        {errors.submit && <p className="text-red-500 text-xs mb-3">{errors.submit}</p>}
 
         <div className="space-y-4">
-          <Field label="Vehicle No" required>
-            <TextInput value={vehicleNo} onChange={setVehicleNo} placeholder="e.g. CAB-1234" />
+          {/* Vehicle / Chassis No */}
+          <Field label="Vehicle / Chassis No" required error={errors.vehicleNo}>
+            <input
+              value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)}
+              placeholder="Enter vehicle no or chassis no"
+              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
+              style={inputStyle(errors.vehicleNo)}
+            />
           </Field>
-          <Field label="Chassis No">
-            <TextInput value={chassisNo} onChange={setChassisNo} placeholder="e.g. LC1234567890" />
+
+          {/* Vehicle Model */}
+          <Field label="Vehicle Model" required error={errors.model}>
+            <input
+              value={model} onChange={(e) => setModel(e.target.value)}
+              placeholder="Enter vehicle model"
+              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
+              style={inputStyle(errors.model)}
+            />
           </Field>
-          <Field label="Description">
-            <TextInput value={description} onChange={setDescription} placeholder="e.g. Toyota Land Cruiser" />
+
+          {/* Vehicle Make — dropdown */}
+          <Field label="Vehicle Make" required error={errors.make}>
+            <div className="relative">
+              <select
+                value={make} onChange={(e) => setMake(e.target.value)}
+                className="w-full appearance-none border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all pr-10"
+                style={inputStyle(errors.make)}
+              >
+                <option value="">Enter vehicle make</option>
+                {VEHICLE_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </Field>
+
+          {/* Colour Family — searchable dropdown */}
+          <Field label="Colour Family" required error={errors.colourFamily}>
+            <div className="relative">
+              <input
+                value={colourFamily ? colourFamily : colourSearch}
+                onChange={(e) => { setColourSearch(e.target.value); setColourFamily(""); setColourOpen(true); }}
+                onFocus={() => setColourOpen(true)}
+                onBlur={() => setTimeout(() => setColourOpen(false), 150)}
+                placeholder="Select vehicle colour"
+                className="w-full border rounded-xl px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
+                style={inputStyle(errors.colourFamily)}
+              />
+              <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {colourOpen && filteredColours.length > 0 && (
+                <div className="absolute z-30 mt-1 w-full max-h-44 overflow-auto rounded-xl border shadow-lg"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                  {filteredColours.map((c) => (
+                    <button key={c} type="button"
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-blue-500/10 flex items-center gap-2.5"
+                      style={{ color: "var(--text)" }}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setColourFamily(c); setColourSearch(""); setColourOpen(false); setErrors((p) => ({ ...p, colourFamily: "" })); }}
+                    >
+                      <span className="w-3 h-3 rounded-full flex-shrink-0 border border-black/10"
+                        style={{ background: c.toLowerCase() === "silver" ? "#c0c0c0" : c.toLowerCase() === "navy" ? "#001f5b" : c.toLowerCase() === "maroon" ? "#800000" : c.toLowerCase() === "beige" ? "#f5f0dc" : c.toLowerCase() === "gold" ? "#FFD700" : c.toLowerCase() }} />
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Field>
+
+          {/* Vehicle Colour */}
+          <Field label="Vehicle Colour">
+            <input
+              value={colour} onChange={(e) => setColour(e.target.value)}
+              placeholder="Enter vehicle colour"
+              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
+              style={inputStyle()}
+            />
           </Field>
         </div>
 
@@ -204,7 +312,7 @@ function AddVehicleModal({ onClose, onAdd }: {
             className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-70"
             style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
           >
-            {loading ? "Adding..." : "Add Vehicle"}
+            {loading ? "Adding..." : "Add"}
           </button>
         </div>
       </motion.div>
@@ -364,13 +472,13 @@ export default function CreateGatePassPage() {
   const [cdVehicles, setCdVehicles] = useState<BulkVehicle[]>([]);
 
   const [lookupOptions, setLookupOptions] = useState<LookupState>({
-    location: [], requestedBy: [], outReason: [], vehicle: [],
+    location: [], outReason: [], vehicle: [],
     approver: [], companyName: [], carrierRegNo: [],
   });
 
   // Location Transfer fields
   const [lt, setLt] = useState({
-    toLocation: "", requestedBy: "", outReason: "", vehicle: "",
+    toLocation: "", outReason: "", vehicle: "",
     approver: "", departureDate: "", departureTime: "", reasonToOut: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
@@ -378,7 +486,7 @@ export default function CreateGatePassPage() {
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
-    requestedBy: "", vehicleSearch: "", departureDate: "", departureTime: "",
+    approver: "", vehicleSearch: "", departureDate: "", departureTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
   });
@@ -402,7 +510,6 @@ export default function CreateGatePassPage() {
   useEffect(() => {
     if (status === "authenticated") {
       void fetchLookup("location");
-      void fetchLookup("requestedBy");
       void fetchLookup("outReason");
       void fetchLookup("vehicle");
       void fetchLookup("approver");
@@ -437,14 +544,13 @@ export default function CreateGatePassPage() {
     const e: Record<string, string> = {};
     if (passType === "LOCATION_TRANSFER") {
       if (!lt.toLocation) e.toLocation = "Required";
-      if (!lt.requestedBy) e.requestedBy = "Required";
       if (!lt.outReason) e.outReason = "Required";
       if (!lt.vehicle) e.vehicle = "Required";
       if (!lt.approver) e.approver = "Required";
       if (!lt.departureDate) e.departureDate = "Required";
       if (!lt.departureTime) e.departureTime = "Required";
     } else {
-      if (!cd.requestedBy) e.requestedBy = "Required";
+      if (!cd.approver) e.approver = "Required";
       if (cdVehicles.length === 0) e.vehicleDetails = "Add at least one vehicle";
       if (!cd.departureDate) e.departureDate = "Required";
       if (!cd.departureTime) e.departureTime = "Required";
@@ -477,7 +583,6 @@ export default function CreateGatePassPage() {
             passType: "LOCATION_TRANSFER",
             vehicle: lt.vehicle,
             toLocation: lt.toLocation,
-            requestedBy: lt.requestedBy,
             outReason: lt.outReason,
             approver: lt.approver,
             departureDate: lt.departureDate,
@@ -496,7 +601,7 @@ export default function CreateGatePassPage() {
             passType: "CUSTOMER_DELIVERY",
             vehicle: cdVehicles[0]?.vehicleNo ?? vehicleDetailsStr,
             vehicleDetails: vehicleDetailsStr,
-            requestedBy: cd.requestedBy,
+            approver: cd.approver,
             departureDate: cd.departureDate,
             departureTime: cd.departureTime,
             transportMode,
@@ -642,16 +747,6 @@ export default function CreateGatePassPage() {
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Vehicle Details</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Requested By" required error={errors.requestedBy}>
-                    <SearchInput
-                      value={lt.requestedBy}
-                      onChange={(v) => { setL("requestedBy", v); void fetchLookup("requestedBy", v); }}
-                      onFocus={() => void fetchLookup("requestedBy", lt.requestedBy)}
-                      placeholder="Search requester"
-                      error={errors.requestedBy}
-                      options={lookupOptions.requestedBy}
-                    />
-                  </Field>
                   <Field label="Out Reason" required error={errors.outReason}>
                     <SearchInput
                       value={lt.outReason}
@@ -732,14 +827,14 @@ export default function CreateGatePassPage() {
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Vehicle Details</SectionTitle>
                 <div className="grid grid-cols-1 gap-4">
-                  <Field label="Requested By" required error={errors.requestedBy}>
+                  <Field label="Select Approver" required error={errors.approver}>
                     <SearchInput
-                      value={cd.requestedBy}
-                      onChange={(v) => { setC("requestedBy", v); void fetchLookup("requestedBy", v); }}
-                      onFocus={() => void fetchLookup("requestedBy", cd.requestedBy)}
-                      placeholder="Search requester"
-                      error={errors.requestedBy}
-                      options={lookupOptions.requestedBy}
+                      value={cd.approver}
+                      onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
+                      onFocus={() => void fetchLookup("approver", cd.approver)}
+                      placeholder="Search approver"
+                      error={errors.approver}
+                      options={lookupOptions.approver}
                     />
                   </Field>
 

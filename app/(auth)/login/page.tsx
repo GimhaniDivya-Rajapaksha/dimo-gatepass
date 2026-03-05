@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -42,8 +42,7 @@ export default function LoginPage() {
       return;
     }
 
-    const res = await fetch("/api/auth/session");
-    const session = await res.json();
+    const session = await getSession();
     const role = session?.user?.role;
 
     if (role === "ADMIN") router.push("/admin");

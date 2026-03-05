@@ -20,9 +20,10 @@ type GatePassDetail = {
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
   PENDING_APPROVAL: { label: "Pending Approval", bg: "#fff7ed", color: "#c2410c", dot: "#f97316" },
   APPROVED:         { label: "Approved",          bg: "#f0fdf4", color: "#15803d", dot: "#22c55e" },
-  REJECTED:         { label: "Rejected",           bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
-  GATE_OUT:         { label: "Gate Out",            bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
-  COMPLETED:        { label: "Completed",           bg: "#f5f3ff", color: "#5b21b6", dot: "#8b5cf6" },
+  REJECTED:         { label: "Rejected",          bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
+  GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
+  COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6", dot: "#8b5cf6" },
+  CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
 };
 
 const colorDot: Record<string, string> = {
@@ -68,7 +69,9 @@ export default function InitiatorGatePassDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
 
   useEffect(() => {
     fetch(`/api/gate-pass/${id}`)
@@ -82,6 +85,24 @@ export default function InitiatorGatePassDetailPage() {
       setTimeout(() => window.print(), 500);
     }
   }, [data, searchParams]);
+
+  async function handleCancel() {
+    if (!confirm("Are you sure you want to cancel this gate pass request?")) return;
+    setCancelLoading(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setCancelled(true);
+      setTimeout(() => router.push("/gate-pass"), 2000);
+    } catch {
+      setCancelLoading(false);
+      setError("Could not cancel. Please try again.");
+    }
+  }
 
   async function handleMarkAsOut() {
     setActionLoading(true);
@@ -138,10 +159,35 @@ export default function InitiatorGatePassDetailPage() {
     );
   }
 
+  if (cancelled) {
+    return (
+      <div className="flex items-center justify-center h-[70vh]">
+        <motion.div
+          initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+          className="text-center p-12 rounded-3xl border shadow-xl"
+          style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+        >
+          <motion.div
+            initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+            className="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-5 shadow-lg"
+            style={{ background: "linear-gradient(135deg,#6b7280,#4b5563)" }}
+          >
+            <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </motion.div>
+          <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--text)" }}>Request Cancelled</h2>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>The gate pass request has been cancelled. Redirecting...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (!data) return null;
   const sc = statusCfg[data.status] || statusCfg["PENDING_APPROVAL"];
   const isLT = data.passType === "LOCATION_TRANSFER";
   const canMarkOut = data.status === "APPROVED";
+  const canCancel  = data.status === "PENDING_APPROVAL";
   const canPrint = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(data.status);
 
   return (
@@ -295,6 +341,27 @@ export default function InitiatorGatePassDetailPage() {
             Back
           </button>
           <div className="flex items-center gap-3">
+            {canCancel && (
+              <motion.button
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                onClick={handleCancel}
+                disabled={cancelLoading}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border disabled:opacity-50 transition-all"
+                style={{ background: "var(--surface)", borderColor: "#ef4444", color: "#ef4444" }}
+              >
+                {cancelLoading ? (
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                )}
+                Cancel Request
+              </motion.button>
+            )}
             {canPrint && (
               <button
                 onClick={() => window.print()}

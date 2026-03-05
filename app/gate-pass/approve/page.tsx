@@ -53,8 +53,6 @@ export default function ApproverListPage() {
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
   useEffect(() => { setPage(1); }, [activeType, search]);
 
-  const pending = passes.filter((p) => p.status === "PENDING_APPROVAL").length;
-
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="mb-6">
@@ -163,7 +161,7 @@ export default function ApproverListPage() {
                       <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>
                         {activeType === "LOCATION_TRANSFER" ? (p.toLocation || "-") : (p.vehicle || "-")}
                       </td>
-                      <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.requestedBy || p.createdBy.name}</td>
+                      <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.createdBy.name}</td>
                       <td className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>
                       <td className="px-4 py-3">
                         <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>

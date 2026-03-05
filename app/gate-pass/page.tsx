@@ -14,9 +14,10 @@ type GatePass = {
 const statusCfg: Record<string, { label: string; bg: string; color: string }> = {
   PENDING_APPROVAL: { label: "Pending Approval", bg: "#fff7ed", color: "#c2410c" },
   APPROVED:         { label: "Approved",          bg: "#f0fdf4", color: "#15803d" },
-  REJECTED:         { label: "Rejected",           bg: "#fef2f2", color: "#991b1b" },
-  GATE_OUT:         { label: "Gate Out",            bg: "#eff6ff", color: "#1d4ed8" },
-  COMPLETED:        { label: "Completed",           bg: "#f5f3ff", color: "#5b21b6" },
+  REJECTED:         { label: "Rejected",          bg: "#fef2f2", color: "#991b1b" },
+  GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8" },
+  COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6" },
+  CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280" },
 };
 
 export default function GatePassListPage() {
@@ -29,6 +30,7 @@ export default function GatePassListPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
@@ -50,6 +52,21 @@ export default function GatePassListPage() {
 
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
   useEffect(() => { setPage(1); }, [search, statusFilter]);
+
+  async function handleCancel(id: string) {
+    if (!confirm("Cancel this gate pass request?")) return;
+    setCancellingId(id);
+    try {
+      await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      fetchPasses();
+    } finally {
+      setCancellingId(null);
+    }
+  }
 
   // Sync statusFilter when URL changes (sidebar navigation)
   useEffect(() => {
@@ -134,7 +151,8 @@ export default function GatePassListPage() {
               ) : (
                 passes.map((p, i) => {
                   const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
-                  const canPrint = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
+                  const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
+                  const canCancel = p.status === "PENDING_APPROVAL";
                   return (
                     <motion.tr
                       key={p.id}
@@ -170,6 +188,26 @@ export default function GatePassListPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                             </svg>
                           </button>
+                          {canCancel && (
+                            <button
+                              onClick={() => handleCancel(p.id)}
+                              disabled={cancellingId === p.id}
+                              className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
+                              style={{ background: "var(--surface)", borderColor: "#ef4444", color: "#ef4444", opacity: cancellingId === p.id ? 0.5 : 1 }}
+                              title="Cancel request"
+                            >
+                              {cancellingId === p.id ? (
+                                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              )}
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 font-mono font-bold text-xs" style={{ color: "var(--accent)" }}>{p.gatePassNumber}</td>

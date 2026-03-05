@@ -75,9 +75,11 @@ export async function GET(req: NextRequest) {
         where: q
           ? {
               OR: [
-                { vehicleNo: { contains: q, mode: "insensitive" } },
-                { chassisNo: { contains: q, mode: "insensitive" } },
+                { vehicleNo:   { contains: q, mode: "insensitive" } },
+                { chassisNo:   { contains: q, mode: "insensitive" } },
                 { description: { contains: q, mode: "insensitive" } },
+                { model:       { contains: q, mode: "insensitive" } },
+                { make:        { contains: q, mode: "insensitive" } },
               ],
             }
           : undefined,
@@ -158,9 +160,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Only vehicle creation is supported." }, { status: 400 });
   }
 
-  const vehicleNo = normalize(body.vehicleNo ?? "");
-  const chassisNo = normalize(body.chassisNo ?? "");
-  const description = normalize(body.description ?? "");
+  const vehicleNo    = normalize(body.vehicleNo    ?? "");
+  const chassisNo    = normalize(body.chassisNo    ?? "");
+  const description  = normalize(body.description  ?? "");
+  const model        = normalize(body.model        ?? "");
+  const make         = normalize(body.make         ?? "");
+  const colourFamily = normalize(body.colourFamily ?? "");
+  const colour       = normalize(body.colour       ?? "");
 
   if (!vehicleNo) {
     return NextResponse.json({ error: "vehicleNo is required." }, { status: 400 });
@@ -170,13 +176,21 @@ export async function POST(req: NextRequest) {
     const created = await prisma.vehicleOption.upsert({
       where: { vehicleNo },
       update: {
-        chassisNo: chassisNo || null,
-        description: description || null,
+        chassisNo:    chassisNo    || null,
+        description:  description  || null,
+        model:        model        || null,
+        make:         make         || null,
+        colourFamily: colourFamily || null,
+        colour:       colour       || null,
       },
       create: {
         vehicleNo,
-        chassisNo: chassisNo || null,
-        description: description || null,
+        chassisNo:    chassisNo    || null,
+        description:  description  || null,
+        model:        model        || null,
+        make:         make         || null,
+        colourFamily: colourFamily || null,
+        colour:       colour       || null,
       },
     });
     return NextResponse.json({

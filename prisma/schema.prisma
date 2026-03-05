@@ -25,6 +25,7 @@ enum GatePassStatus {
   REJECTED
   GATE_OUT
   COMPLETED
+  CANCELLED
 }
 
 model User {
@@ -120,12 +121,16 @@ model OutReasonOption {
 }
 
 model VehicleOption {
-  id          String   @id @default(cuid())
-  vehicleNo   String   @unique
-  chassisNo   String?
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  vehicleNo    String   @unique
+  chassisNo    String?
+  description  String?
+  model        String?
+  make         String?
+  colourFamily String?
+  colour       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model CarrierOption {
