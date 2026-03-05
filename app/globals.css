@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+/* Class-based dark mode for next-themes */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --bg: #f0f4f8;
+  --surface: #ffffff;
+  --surface2: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  /* Sidebar — always dark navy (hardcoded in Sidebar.tsx) */
+  --sidebar-bg: #0d1b3e;
+  --sidebar-border: rgba(255,255,255,0.07);
+  --accent: #1B2B5E;
+  --accent-hover: #162249;
+  --lime: #B5CC18;
+  --green: #6abf1e;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.05);
+}
+
+.dark {
+  --bg: #080f1c;
+  --surface: #0f1829;
+  --surface2: #162035;
+  --border: #1e2d45;
+  --text: #e2e8f0;
+  --text-muted: #8899b4;
+  /* Sidebar — dark: deep navy */
+  --sidebar-bg: #060c18;
+  --sidebar-border: rgba(255,255,255,0.05);
+  --accent: #4f7de8;
+  --accent-hover: #3b6cd6;
+  --lime: #c8d820;
+  --green: #84cc16;
+  --card-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 4px 24px rgba(0,0,0,0.35);
+}
+
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.2s ease;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist), system-ui, -apple-system, sans-serif;
+}
+
+/* DIMO brand typography */
+.title-font {
+  font-family: var(--font-playfair), Georgia, 'Times New Roman', serif;
+}
+
+/* Subtle dot grid background for main content */
+.main-bg {
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* ===== Shimmer skeleton loading ===== */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface2) 25%,
+    var(--border) 50%,
+    var(--surface2) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* ===== Premium card ===== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Glow effects */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.2), 0 0 40px rgba(59, 130, 246, 0.08);
+}
+.glow-sm {
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
+}
+.dark .glow-sm {
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* Gradient text — DIMO navy → lime */
+.gradient-text {
+  background: linear-gradient(135deg, #1B2B5E, #B5CC18);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dark .gradient-text {
+  background: linear-gradient(135deg, #7da4f5, #c8d820);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* Glass card */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.dark .glass {
+  background: rgba(15, 24, 41, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 45, 69, 0.8);
+}
+
+/* Sidebar nav active glow */
+.nav-active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.22), rgba(26, 79, 158, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.18);
+}
+
+/* Page enter animation */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: fadeSlideUp 0.35s ease forwards;
+}
+.stagger-1 { animation-delay: 0.05s; opacity: 0; animation-fill-mode: forwards; }
+.stagger-2 { animation-delay: 0.1s;  opacity: 0; animation-fill-mode: forwards; }
+.stagger-3 { animation-delay: 0.15s; opacity: 0; animation-fill-mode: forwards; }
+.stagger-4 { animation-delay: 0.2s;  opacity: 0; animation-fill-mode: forwards; }
+.stagger-5 { animation-delay: 0.25s; opacity: 0; animation-fill-mode: forwards; }

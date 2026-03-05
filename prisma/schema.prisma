@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  INITIATOR
+  APPROVER
+  RECIPIENT
+  ADMIN
+}
+
+enum PassType {
+  LOCATION_TRANSFER
+  CUSTOMER_DELIVERY
+}
+
+enum GatePassStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  GATE_OUT
+  COMPLETED
+}
+
+model User {
+  id               String         @id @default(cuid())
+  name             String
+  email            String         @unique
+  passwordHash     String
+  role             Role?
+  resetToken       String?        @unique
+  resetTokenExpiry DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  initiatedPasses  GatePass[]     @relation("InitiatedBy")
+  approvedPasses   GatePass[]     @relation("ApprovedBy")
+  notifications    Notification[]
+}
+
+model GatePass {
+  id             String         @id @default(cuid())
+  gatePassNumber String         @unique
+  passType       PassType       @default(LOCATION_TRANSFER)
+  status         GatePassStatus @default(PENDING_APPROVAL)
+
+  vehicle        String
+  vehicleColor   String?
+  shipmentId     String?
+  chassis        String?
+  make           String?
+
+  toLocation     String?
+  arrivalDate    String?
+  arrivalTime    String?
+
+  vehicleDetails String?
+  departureDate  String?
+  departureTime  String?
+
+  requestedBy    String?
+  outReason      String?
+
+  transportMode  String?
+  companyName    String?
+  carrierName    String?
+  carrierRegNo   String?
+  driverName     String?
+  driverNIC      String?
+  driverContact  String?
+
+  mileage        String?
+  insurance      String?
+  garagePlate    String?
+  comments       String?
+  rejectionReason String?
+
+  createdById    String
+  createdBy      User           @relation("InitiatedBy", fields: [createdById], references: [id])
+
+  approvedById   String?
+  approvedBy     User?          @relation("ApprovedBy", fields: [approvedById], references: [id])
+  approvedAt     DateTime?
+
+  notifications  Notification[]
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model LocationOption {
+  id                 String   @id @default(cuid())
+  plantCode          String
+  plantDescription   String
+  storageLocation    String
+  storageDescription String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([plantCode, storageLocation])
+}
+
+model RequestedByOption {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OutReasonOption {
+  id        String   @id @default(cuid())
+  value     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VehicleOption {
+  id          String   @id @default(cuid())
+  vehicleNo   String   @unique
+  chassisNo   String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CarrierOption {
+  id             String   @id @default(cuid())
+  companyName    String
+  registrationNo String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  type       String
+  title      String
+  message    String
+  gatePassId String?
+  gatePass   GatePass? @relation(fields: [gatePassId], references: [id])
+  read       Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+}
