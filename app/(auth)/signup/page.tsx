@@ -5,15 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 
-const roles = [
-  { value: "INITIATOR", label: "Gate Initiator", desc: "Creates gate passes" },
-  { value: "APPROVER", label: "Approver", desc: "Reviews and approves passes" },
-  { value: "RECIPIENT", label: "Recipient", desc: "Acknowledges vehicle receipt" },
-];
-
 export default function SignupPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "", role: "INITIATOR" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
@@ -40,7 +34,7 @@ export default function SignupPage() {
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: form.name, email: form.email, password: form.password, role: form.role }),
+      body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
     });
 
     const data = await res.json();
@@ -80,17 +74,6 @@ export default function SignupPage() {
             Create your account to start managing gate passes with role-based access and real-time tracking.
           </p>
 
-          <div className="mt-10 w-full space-y-3">
-            {roles.map((r) => (
-              <div key={r.value} className="flex items-center gap-3 p-3 rounded-xl text-left" style={{ background: "rgba(255,255,255,0.1)" }}>
-                <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white text-xs font-bold">{r.label[0]}</div>
-                <div>
-                  <p className="text-sm font-semibold text-white">{r.label}</p>
-                  <p className="text-xs text-blue-200">{r.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </motion.div>
       </motion.div>
 
@@ -139,21 +122,6 @@ export default function SignupPage() {
                   className="w-full px-4 py-3 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
                 />
-              </div>
-
-              {/* Role */}
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Role</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => update("role", e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-                >
-                  {roles.map((r) => (
-                    <option key={r.value} value={r.value}>{r.label} — {r.desc}</option>
-                  ))}
-                </select>
               </div>
 
               {/* Password */}
