@@ -28,7 +28,7 @@ const roleColors: Record<string, string> = {
 };
 
 const roleBadges: Record<string, string> = {
-  INITIATOR: "Gate Initiator",
+  INITIATOR: "Gate Pass Initiator",
   APPROVER:  "Approver",
   RECIPIENT: "Recipient",
   ADMIN:     "Admin",

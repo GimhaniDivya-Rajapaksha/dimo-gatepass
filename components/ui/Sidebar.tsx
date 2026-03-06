@@ -14,7 +14,7 @@ interface SidebarProps {
 }
 
 const roleLabels: Record<string, string> = {
-  INITIATOR: "Gate Initiator",
+  INITIATOR: "Gate Pass Initiator",
   APPROVER:  "Approver",
   RECIPIENT: "Recipient",
   ADMIN:     "Administrator",

@@ -207,7 +207,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] mb-1.5" style={{ color: "var(--lime)" }}>
-            Gate Initiator
+            Gate Pass Initiator
           </p>
           <h1 className="text-3xl font-bold title-font leading-tight gradient-text">
             Welcome back, {user.name?.split(" ")[0]}
