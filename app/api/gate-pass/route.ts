@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = {};
 
   if (role === "INITIATOR") where.createdById = session.user.id;
-  else if (role === "RECIPIENT") where.status = { in: ["APPROVED", "GATE_OUT"] };
+  else if (role === "RECIPIENT") where.status = { in: ["GATE_OUT", "COMPLETED"] };
   // APPROVER and ADMIN see all
 
   if (passType) where.passType = passType;
