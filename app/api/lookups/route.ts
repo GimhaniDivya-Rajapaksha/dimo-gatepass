@@ -17,22 +17,26 @@ export async function GET(req: NextRequest) {
   const field = searchParams.get("field") as LookupField | null;
   const q = normalize(searchParams.get("q") ?? "");
   const take = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 50);
+  const locationType = searchParams.get("locationType") ?? undefined;
 
   if (!field) return NextResponse.json({ options: [] });
 
   try {
     if (field === "location") {
       const options = await prisma.locationOption.findMany({
-        where: q
-          ? {
-              OR: [
-                { plantCode: { contains: q, mode: "insensitive" } },
-                { plantDescription: { contains: q, mode: "insensitive" } },
-                { storageLocation: { contains: q, mode: "insensitive" } },
-                { storageDescription: { contains: q, mode: "insensitive" } },
-              ],
-            }
-          : undefined,
+        where: {
+          ...(locationType ? { locationType } : {}),
+          ...(q
+            ? {
+                OR: [
+                  { plantCode: { contains: q, mode: "insensitive" } },
+                  { plantDescription: { contains: q, mode: "insensitive" } },
+                  { storageLocation: { contains: q, mode: "insensitive" } },
+                  { storageDescription: { contains: q, mode: "insensitive" } },
+                ],
+              }
+            : {}),
+        },
         orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
         take,
       });

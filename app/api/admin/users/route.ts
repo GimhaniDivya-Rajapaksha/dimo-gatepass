@@ -9,8 +9,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
   try {
-    const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const users = await (prisma.user as any).findMany({
+      select: {
+        id: true, name: true, email: true, role: true, createdAt: true,
+        approverId: true,
+        approver: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(users);

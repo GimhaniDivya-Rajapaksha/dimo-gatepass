@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY";
+type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
+type LocationType = "DEALER" | "DIMO" | "PROMOTION" | "FINANCE";
 type TransportMode = "CARRIER" | "DRIVER" | "CUSTOMER" | "OTHER";
 type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
 type LookupOption = { id: string; value: string; label: string; [key: string]: string };
@@ -463,6 +464,7 @@ export default function CreateGatePassPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const [passType, setPassType] = useState<PassType>("LOCATION_TRANSFER");
+  const [locationType, setLocationType] = useState<LocationType | "">("");
   const [transportMode, setTransportMode] = useState<TransportMode>("CARRIER");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -470,13 +472,14 @@ export default function CreateGatePassPage() {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [cdVehicles, setCdVehicles] = useState<BulkVehicle[]>([]);
+  const [assignedApprover, setAssignedApprover] = useState<{ id: string; name: string } | null>(null);
 
   const [lookupOptions, setLookupOptions] = useState<LookupState>({
     location: [], outReason: [], vehicle: [],
     approver: [], companyName: [], carrierRegNo: [],
   });
 
-  // Location Transfer fields
+  // Location Transfer / After Sales fields (shared structure)
   const [lt, setLt] = useState({
     toLocation: "", outReason: "", vehicle: "",
     approver: "", departureDate: "", departureTime: "", reasonToOut: "",
@@ -495,9 +498,26 @@ export default function CreateGatePassPage() {
     if (status === "authenticated" && session?.user?.role !== "INITIATOR") router.replace("/");
   }, [status, session, router]);
 
-  const fetchLookup = async (field: LookupField, q = "") => {
+  // Auto-fetch the initiator's assigned approver
+  useEffect(() => {
+    if (status === "authenticated") {
+      fetch("/api/me")
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d?.user?.approver) {
+            setAssignedApprover(d.user.approver);
+            setLt(p => ({ ...p, approver: d.user.approver.name }));
+            setCd(p => ({ ...p, approver: d.user.approver.name }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [status]);
+
+  const fetchLookup = async (field: LookupField, q = "", lt_type?: string) => {
     try {
       const params = new URLSearchParams({ field, q, limit: "40" });
+      if (field === "location" && lt_type) params.set("locationType", lt_type);
       const res = await fetch(`/api/lookups?${params.toString()}`);
       if (!res.ok) return;
       const data = (await res.json()) as { options?: LookupOption[] };
@@ -509,14 +529,15 @@ export default function CreateGatePassPage() {
 
   useEffect(() => {
     if (status === "authenticated") {
-      void fetchLookup("location");
+      void fetchLookup("location", "", locationType || undefined);
       void fetchLookup("outReason");
       void fetchLookup("vehicle");
       void fetchLookup("approver");
       void fetchLookup("companyName");
       void fetchLookup("carrierRegNo");
     }
-  }, [status]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, locationType]);
 
   if (status === "loading") return null;
 
@@ -530,19 +551,21 @@ export default function CreateGatePassPage() {
     setErrors((p) => { const n = { ...p }; delete n[k]; return n; });
   };
 
+  const isLtLike = passType === "LOCATION_TRANSFER" || passType === "AFTER_SALES";
+
   const setCarrier = (k: string, v: string) => {
-    if (passType === "LOCATION_TRANSFER") setL(k as keyof typeof lt, v);
+    if (isLtLike) setL(k as keyof typeof lt, v);
     else setC(k as keyof typeof cd, v);
   };
 
   const setMileage = (k: string, v: string) => {
-    if (passType === "LOCATION_TRANSFER") setL(k as keyof typeof lt, v);
+    if (isLtLike) setL(k as keyof typeof lt, v);
     else setC(k as keyof typeof cd, v);
   };
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (passType === "LOCATION_TRANSFER") {
+    if (isLtLike) {
       if (!lt.toLocation) e.toLocation = "Required";
       if (!lt.outReason) e.outReason = "Required";
       if (!lt.vehicle) e.vehicle = "Required";
@@ -556,7 +579,7 @@ export default function CreateGatePassPage() {
       if (!cd.departureTime) e.departureTime = "Required";
     }
     if (transportMode === "CARRIER") {
-      const src = passType === "LOCATION_TRANSFER" ? lt : cd;
+      const src = isLtLike ? lt : cd;
       if (!src.companyName) e.companyName = "Required";
       if (!src.driverNIC) e.driverNIC = "Required";
       if (!src.driverName) e.driverName = "Required";
@@ -574,46 +597,31 @@ export default function CreateGatePassPage() {
       .map(v => v.chassisNo ? `${v.vehicleNo}/${v.chassisNo}` : v.vehicleNo)
       .join(", ");
 
-    const carrierFields = passType === "LOCATION_TRANSFER" ? lt : cd;
-    const mileageFields = passType === "LOCATION_TRANSFER" ? lt : cd;
+    const ltCarrierMileage = { companyName: lt.companyName, carrierRegNo: lt.carrierRegNo, driverName: lt.driverName, driverNIC: lt.driverNIC, driverContact: lt.contactNo, mileage: lt.mileage, insurance: lt.insurance, garagePlate: lt.garagePlate };
+    const cdCarrierMileage = { companyName: cd.companyName, carrierRegNo: cd.carrierRegNo, driverName: cd.driverName, driverNIC: cd.driverNIC, driverContact: cd.contactNo, mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate };
 
-    const payload =
-      passType === "LOCATION_TRANSFER"
-        ? {
-            passType: "LOCATION_TRANSFER",
-            vehicle: lt.vehicle,
-            toLocation: lt.toLocation,
-            outReason: lt.outReason,
-            approver: lt.approver,
-            departureDate: lt.departureDate,
-            departureTime: lt.departureTime,
-            transportMode,
-            companyName: carrierFields.companyName,
-            carrierRegNo: carrierFields.carrierRegNo,
-            driverName: carrierFields.driverName,
-            driverNIC: carrierFields.driverNIC,
-            driverContact: carrierFields.contactNo,
-            mileage: mileageFields.mileage,
-            insurance: mileageFields.insurance,
-            garagePlate: mileageFields.garagePlate,
-          }
-        : {
-            passType: "CUSTOMER_DELIVERY",
-            vehicle: cdVehicles[0]?.vehicleNo ?? vehicleDetailsStr,
-            vehicleDetails: vehicleDetailsStr,
-            approver: cd.approver,
-            departureDate: cd.departureDate,
-            departureTime: cd.departureTime,
-            transportMode,
-            companyName: carrierFields.companyName,
-            carrierRegNo: carrierFields.carrierRegNo,
-            driverName: carrierFields.driverName,
-            driverNIC: carrierFields.driverNIC,
-            driverContact: carrierFields.contactNo,
-            mileage: mileageFields.mileage,
-            insurance: mileageFields.insurance,
-            garagePlate: mileageFields.garagePlate,
-          };
+    const payload = isLtLike
+      ? {
+          passType,
+          vehicle: lt.vehicle,
+          toLocation: lt.toLocation,
+          outReason: lt.outReason,
+          approver: lt.approver,
+          departureDate: lt.departureDate,
+          departureTime: lt.departureTime,
+          transportMode,
+          ...ltCarrierMileage,
+        }
+      : {
+          passType: "CUSTOMER_DELIVERY",
+          vehicle: cdVehicles[0]?.vehicleNo ?? vehicleDetailsStr,
+          vehicleDetails: vehicleDetailsStr,
+          approver: cd.approver,
+          departureDate: cd.departureDate,
+          departureTime: cd.departureTime,
+          transportMode,
+          ...cdCarrierMileage,
+        };
 
     try {
       const res = await fetch("/api/gate-pass", {
@@ -650,20 +658,19 @@ export default function CreateGatePassPage() {
     );
   }
 
-  const transportModes =
-    passType === "CUSTOMER_DELIVERY"
-      ? (["CARRIER", "DRIVER", "CUSTOMER"] as TransportMode[])
-      : (["CARRIER", "OTHER"] as TransportMode[]);
+  const transportModes = isLtLike
+    ? (["CARRIER", "OTHER"] as TransportMode[])
+    : (["CARRIER", "DRIVER", "CUSTOMER"] as TransportMode[]);
 
   const modeLabel: Record<TransportMode, string> = {
     CARRIER: "Carrier", DRIVER: "Driver", CUSTOMER: "Customer", OTHER: "Other",
   };
 
-  const carrierFields = passType === "LOCATION_TRANSFER"
+  const carrierFields = isLtLike
     ? { companyName: lt.companyName, carrierRegNo: lt.carrierRegNo, driverNIC: lt.driverNIC, driverName: lt.driverName, contactNo: lt.contactNo }
     : { companyName: cd.companyName, carrierRegNo: cd.carrierRegNo, driverNIC: cd.driverNIC, driverName: cd.driverName, contactNo: cd.contactNo };
 
-  const mileageFields = passType === "LOCATION_TRANSFER"
+  const mileageFields = isLtLike
     ? { mileage: lt.mileage, insurance: lt.insurance, garagePlate: lt.garagePlate }
     : { mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate };
 
@@ -703,13 +710,17 @@ export default function CreateGatePassPage() {
       </div>
 
       {/* Type Toggle */}
-      <div className="flex gap-3 mb-6">
-        {(["LOCATION_TRANSFER", "CUSTOMER_DELIVERY"] as PassType[]).map((t) => (
+      <div className="flex flex-wrap gap-3 mb-6">
+        {([
+          { type: "LOCATION_TRANSFER", label: "Location Transfer" },
+          { type: "CUSTOMER_DELIVERY", label: "Customer Delivery" },
+          { type: "AFTER_SALES", label: "After Sales IN/OUT" },
+        ] as { type: PassType; label: string }[]).map(({ type: t, label }) => (
           <motion.button
             key={t}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => { setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCdVehicles([]); }}
+            onClick={() => { setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCdVehicles([]); setLocationType(""); }}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
             style={passType === t
               ? { background: "linear-gradient(135deg, #1a4f9e, #2563eb)", color: "#fff", border: "none" }
@@ -719,23 +730,50 @@ export default function CreateGatePassPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
             </svg>
-            {t === "LOCATION_TRANSFER" ? "Location Transfer" : "Customer Delivery"}
+            {label}
           </motion.button>
         ))}
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-4xl">
         <AnimatePresence mode="wait">
-          {passType === "LOCATION_TRANSFER" ? (
+          {isLtLike ? (
             <motion.div key="lt" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.2 }}>
 
-              {/* To Location */}
+              {/* Location Type Radio + To Location */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Location Details</SectionTitle>
+
+                {/* Location Type Radio Buttons */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2" style={{ color: "var(--text)" }}>Location Type</label>
+                  <div className="flex flex-wrap gap-4">
+                    {([
+                      { value: "", label: "All" },
+                      { value: "DEALER", label: "Dealer" },
+                      { value: "DIMO", label: "DIMO" },
+                      { value: "PROMOTION", label: "Promotion" },
+                      { value: "FINANCE", label: "Finance Institution" },
+                    ] as { value: LocationType | ""; label: string }[]).map(({ value: v, label: lbl }) => (
+                      <label key={v || "all"} className="flex items-center gap-2 cursor-pointer">
+                        <div
+                          onClick={() => { setLocationType(v); setL("toLocation", ""); }}
+                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                          style={{ borderColor: locationType === v ? "#2563eb" : "var(--border)" }}
+                        >
+                          {locationType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                        </div>
+                        <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{lbl}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
                 <Field label="To Location" required error={errors.toLocation}>
                   <SearchInput
                     value={lt.toLocation}
-                    onChange={(v) => { setL("toLocation", v); void fetchLookup("location", v); }}
-                    onFocus={() => void fetchLookup("location", lt.toLocation)}
+                    onChange={(v) => { setL("toLocation", v); void fetchLookup("location", v, locationType || undefined); }}
+                    onFocus={() => void fetchLookup("location", lt.toLocation, locationType || undefined)}
                     placeholder="Search location"
                     error={errors.toLocation}
                     options={lookupOptions.location}
@@ -791,14 +829,25 @@ export default function CreateGatePassPage() {
                   </Field>
 
                   <Field label="Approver" required error={errors.approver} className="md:col-span-2">
-                    <SearchInput
-                      value={lt.approver}
-                      onChange={(v) => { setL("approver", v); void fetchLookup("approver", v); }}
-                      onFocus={() => void fetchLookup("approver", lt.approver)}
-                      placeholder="Search approver"
-                      error={errors.approver}
-                      options={lookupOptions.approver}
-                    />
+                    {assignedApprover ? (
+                      <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        <span className="font-medium">{assignedApprover.name}</span>
+                        <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
+                      </div>
+                    ) : (
+                      <SearchInput
+                        value={lt.approver}
+                        onChange={(v) => { setL("approver", v); void fetchLookup("approver", v); }}
+                        onFocus={() => void fetchLookup("approver", lt.approver)}
+                        placeholder="Search approver"
+                        error={errors.approver}
+                        options={lookupOptions.approver}
+                      />
+                    )}
                   </Field>
                 </div>
               </div>
@@ -828,14 +877,25 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Vehicle Details</SectionTitle>
                 <div className="grid grid-cols-1 gap-4">
                   <Field label="Select Approver" required error={errors.approver}>
-                    <SearchInput
-                      value={cd.approver}
-                      onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
-                      onFocus={() => void fetchLookup("approver", cd.approver)}
-                      placeholder="Search approver"
-                      error={errors.approver}
-                      options={lookupOptions.approver}
-                    />
+                    {assignedApprover ? (
+                      <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        <span className="font-medium">{assignedApprover.name}</span>
+                        <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
+                      </div>
+                    ) : (
+                      <SearchInput
+                        value={cd.approver}
+                        onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
+                        onFocus={() => void fetchLookup("approver", cd.approver)}
+                        placeholder="Search approver"
+                        error={errors.approver}
+                        options={lookupOptions.approver}
+                      />
+                    )}
                   </Field>
 
                   <Field label="Vehicles" required error={errors.vehicleDetails}>
@@ -1002,7 +1062,7 @@ export default function CreateGatePassPage() {
 
         {/* Mileage / Additional Details */}
         <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-          <SectionTitle>{passType === "LOCATION_TRANSFER" ? "Mileage Details" : "Additional Details"}</SectionTitle>
+          <SectionTitle>{isLtLike ? "Mileage Details" : "Additional Details"}</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Mileage (Km) / Meter Reading (H)">
               <TextInput value={mileageFields.mileage} onChange={(v) => setMileage("mileage", v)} placeholder="Enter mileage or meter reading" numericOnly />

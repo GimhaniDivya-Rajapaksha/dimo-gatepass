@@ -17,6 +17,7 @@ enum Role {
 enum PassType {
   LOCATION_TRANSFER
   CUSTOMER_DELIVERY
+  AFTER_SALES
 }
 
 enum GatePassStatus {
@@ -34,6 +35,9 @@ model User {
   email            String         @unique
   passwordHash     String
   role             Role?
+  approverId       String?
+  approver         User?          @relation("InitiatorApprover", fields: [approverId], references: [id])
+  initiators       User[]         @relation("InitiatorApprover")
   resetToken       String?        @unique
   resetTokenExpiry DateTime?
   createdAt        DateTime       @default(now())
@@ -100,6 +104,7 @@ model LocationOption {
   plantDescription   String
   storageLocation    String
   storageDescription String
+  locationType       String?  // DEALER | DIMO | PROMOTION | FINANCE
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

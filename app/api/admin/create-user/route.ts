@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { name, email, password, role } = await req.json();
+    const { name, email, password, role, approverId } = await req.json();
 
     if (!name?.trim() || !email?.trim() || !password?.trim()) {
       return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
@@ -19,12 +19,14 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = await prisma.user.create({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = await (prisma.user as any).create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         passwordHash,
         role: role || null,
+        ...(approverId ? { approverId } : {}),
       },
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });
