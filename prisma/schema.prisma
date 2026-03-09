@@ -82,8 +82,16 @@ model GatePass {
   mileage        String?
   insurance      String?
   garagePlate    String?
-  comments       String?
+  comments        String?
   rejectionReason String?
+  resubmitCount   Int     @default(0)
+  resubmitNote    String? // initiator's correction note when resubmitting
+
+  passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
+  parentPassId   String?
+  parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
+  subPasses      GatePass[] @relation("SubPasses")
+  fromLocation   String?
 
   createdById    String
   createdBy      User           @relation("InitiatedBy", fields: [createdById], references: [id])
@@ -144,6 +152,17 @@ model CarrierOption {
   registrationNo String   @unique
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model LocationBrandMapping {
+  id            String   @id @default(cuid())
+  location      String
+  brand         String
+  initiatorName String
+  approverName  String
+  createdAt     DateTime @default(now())
+
+  @@unique([location, brand])
 }
 
 model Notification {

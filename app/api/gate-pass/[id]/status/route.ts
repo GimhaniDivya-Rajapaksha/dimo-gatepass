@@ -111,6 +111,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
+  // INITIATOR: resubmit a rejected pass
+  if (action === "resubmit") {
+    if (session.user.role !== "INITIATOR") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (gatePass.status !== "REJECTED") {
+      return NextResponse.json({ error: "Only rejected passes can be resubmitted" }, { status: 400 });
+    }
+
+    const { resubmitNote, departureDate, departureTime } = body;
+    const updated = await prisma.gatePass.update({
+      where: { id },
+      data: {
+        status: "PENDING_APPROVAL",
+        resubmitCount: (gatePass.resubmitCount ?? 0) + 1,
+        resubmitNote: resubmitNote || null,
+        ...(departureDate ? { departureDate } : {}),
+        ...(departureTime ? { departureTime } : {}),
+      },
+    });
+
+    // Notify all approvers
+    const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+    if (approvers.length > 0) {
+      await prisma.notification.createMany({
+        data: approvers.map((a) => ({
+          userId: a.id,
+          type: "GATE_PASS_RESUBMITTED",
+          title: "Gate Pass Resubmitted",
+          message: `Gate pass ${gatePass.gatePassNumber} was resubmitted after rejection and needs your review.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    return NextResponse.json({ gatePass: updated });
+  }
+
   // INITIATOR: cancel their own PENDING_APPROVAL pass
   if (action === "cancel") {
     if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN") {

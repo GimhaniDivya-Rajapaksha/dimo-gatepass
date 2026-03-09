@@ -146,3 +146,24 @@ body {
 .stagger-3 { animation-delay: 0.15s; opacity: 0; animation-fill-mode: forwards; }
 .stagger-4 { animation-delay: 0.2s;  opacity: 0; animation-fill-mode: forwards; }
 .stagger-5 { animation-delay: 0.25s; opacity: 0; animation-fill-mode: forwards; }
+
+
+/* ── Print: hide chrome, reset layout ─────────────────────────── */
+@media print {
+  aside,
+  header { display: none !important; }
+
+  .ml-64 { margin-left: 0 !important; }
+  .flex-1.ml-64 { margin-left: 0 !important; }
+
+  main {
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+  }
+}

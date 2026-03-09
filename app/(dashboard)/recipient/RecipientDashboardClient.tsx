@@ -14,9 +14,28 @@ type GatePass = {
 };
 
 const colorDot: Record<string, string> = {
-  Red: "#ef4444", White: "#d1d5db", Blue: "#3b82f6", Black: "#1f2937",
-  Silver: "#94a3b8", "Dark Red": "#991b1b", Grey: "#6b7280",
+  Red: "#ef4444", "Dark Red": "#991b1b", Maroon: "#800000", Crimson: "#dc143c",
+  White: "#f3f4f6", "Off White": "#fafaf9", Ivory: "#fffff0",
+  Blue: "#3b82f6", "Dark Blue": "#1d4ed8", Navy: "#001f5b", "Sky Blue": "#0ea5e9",
+  Black: "#111827",
+  Silver: "#c0c0c0", Grey: "#6b7280", Gray: "#6b7280",
+  Green: "#16a34a", "Dark Green": "#14532d", Olive: "#6b7a00",
+  Yellow: "#fbbf24", Gold: "#d97706",
+  Orange: "#f97316",
+  Brown: "#92400e", Beige: "#e5d5b8",
+  Purple: "#7c3aed", Violet: "#7c3aed",
 };
+
+function resolveColor(colorName: string | null): string {
+  if (!colorName) return "#94a3b8";
+  // Exact match first
+  if (colorDot[colorName]) return colorDot[colorName];
+  // Title-case match (e.g. "black" → "Black")
+  const title = colorName.charAt(0).toUpperCase() + colorName.slice(1).toLowerCase();
+  if (colorDot[title]) return colorDot[title];
+  // Fall back to CSS named color (works for "black", "red", "blue", etc.)
+  return colorName.toLowerCase();
+}
 
 function SlideToConfirm({ onConfirm, label = "Slide to Confirm Gate IN" }: { onConfirm: () => void; label?: string }) {
   const x = useMotionValue(0);
@@ -92,7 +111,7 @@ function SlideToConfirm({ onConfirm, label = "Slide to Confirm Gate IN" }: { onC
 }
 
 function GatePassCard({ pass, onClick }: { pass: GatePass; onClick: () => void }) {
-  const dot = colorDot[pass.vehicleColor || ""] || "#94a3b8";
+  const dot = resolveColor(pass.vehicleColor);
   const isGateOut = pass.status === "GATE_OUT";
   return (
     <motion.button
@@ -146,13 +165,11 @@ function GatePassCard({ pass, onClick }: { pass: GatePass; onClick: () => void }
 function DetailDrawer({ pass, onClose, onConfirm }: { pass: GatePass; onClose: () => void; onConfirm: () => void }) {
   const [mismatch, setMismatch] = useState(false);
   const [mismatchNote, setMismatchNote] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(false);
-  const dot = colorDot[pass.vehicleColor || ""] || "#94a3b8";
+  const dot = resolveColor(pass.vehicleColor);
   const isGateOut = pass.status === "GATE_OUT";
 
   async function handleConfirm() {
-    setConfirming(true);
     try {
       await fetch(`/api/gate-pass/${pass.id}/status`, {
         method: "PATCH",
@@ -162,7 +179,7 @@ function DetailDrawer({ pass, onClose, onConfirm }: { pass: GatePass; onClose: (
       setDone(true);
       setTimeout(() => { onClose(); onConfirm(); }, 1800);
     } catch {
-      setConfirming(false);
+      // ignore
     }
   }
 
@@ -347,8 +364,24 @@ interface Props {
   user: { name?: string | null; email?: string | null; role: string | null };
 }
 
+type TabKey = "lt_in" | "lt_out" | "cd_out" | "sr_out";
+
+const TABS: { key: TabKey; label: string; passType: string; status: string | null }[] = [
+  { key: "lt_in",  label: "Location Transfer IN",  passType: "LOCATION_TRANSFER", status: "GATE_OUT"   },
+  { key: "lt_out", label: "Location Transfer OUT",  passType: "LOCATION_TRANSFER", status: "COMPLETED"  },
+  { key: "cd_out", label: "Customer Delivery",      passType: "CUSTOMER_DELIVERY", status: null         },
+  { key: "sr_out", label: "Service/Repair",         passType: "AFTER_SALES",       status: null         },
+];
+
+const TAB_COLORS: Record<TabKey, { gradient: string; shadow: string; badge: string }> = {
+  lt_in:  { gradient: "linear-gradient(135deg,#10b981,#059669)", shadow: "rgba(16,185,129,0.35)",  badge: "#10b981" },
+  lt_out: { gradient: "linear-gradient(135deg,#1a4f9e,#2563eb)", shadow: "rgba(37,99,235,0.35)",   badge: "#2563eb" },
+  cd_out: { gradient: "linear-gradient(135deg,#5b21b6,#7c3aed)", shadow: "rgba(124,58,237,0.35)", badge: "#7c3aed" },
+  sr_out: { gradient: "linear-gradient(135deg,#d97706,#b45309)", shadow: "rgba(217,119,6,0.35)",   badge: "#d97706" },
+};
+
 export default function RecipientDashboardClient({ user }: Props) {
-  const [tab, setTab] = useState<"in" | "out">("in");
+  const [tab, setTab] = useState<TabKey>("lt_in");
   const [search, setSearch] = useState("");
   const [passes, setPasses] = useState<GatePass[]>([]);
   const [loading, setLoading] = useState(true);
@@ -357,7 +390,7 @@ export default function RecipientDashboardClient({ user }: Props) {
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "50" });
+      const params = new URLSearchParams({ limit: "100" });
       if (search) params.set("search", search);
       const res = await fetch(`/api/gate-pass?${params}`);
       if (res.ok) {
@@ -371,30 +404,40 @@ export default function RecipientDashboardClient({ user }: Props) {
 
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
 
-  const gateInList = passes.filter((p) => p.status === "GATE_OUT");
-  const gateOutList = passes.filter((p) => p.status === "COMPLETED");
-  const displayed = tab === "in" ? gateInList : gateOutList;
+  const pendingCount = passes.filter(p => p.status === "GATE_OUT").length;
+
+  const displayed = passes.filter(p => {
+    const t = TABS.find(x => x.key === tab)!;
+    if (p.passType !== t.passType) return false;
+    if (t.status) return p.status === t.status;
+    return true; // CD_OUT: show all statuses
+  });
+
+  const countFor = (key: TabKey) => {
+    const t = TABS.find(x => x.key === key)!;
+    return passes.filter(p => p.passType === t.passType && (t.status ? p.status === t.status : true)).length;
+  };
+
+  const colors = TAB_COLORS[tab];
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] mb-1.5" style={{ color: "var(--lime)" }}>Recipient</p>
-          <h1 className="text-3xl font-bold title-font leading-tight gradient-text">
-            Welcome, {user.name?.split(" ")[0]}
-          </h1>
-          {gateInList.length > 0 && (
-            <p className="text-sm mt-0.5 font-medium" style={{ color: "#10b981" }}>
-              {gateInList.length} vehicle{gateInList.length > 1 ? "s" : ""} en route to you
-            </p>
-          )}
-        </div>
+      <div className="mb-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] mb-1.5" style={{ color: "var(--lime)" }}>Recipient</p>
+        <h1 className="text-3xl font-bold title-font leading-tight gradient-text">
+          Welcome, {user.name?.split(" ")[0]}
+        </h1>
+        {pendingCount > 0 && (
+          <p className="text-sm mt-0.5 font-medium" style={{ color: "#10b981" }}>
+            {pendingCount} vehicle{pendingCount > 1 ? "s" : ""} en route to you
+          </p>
+        )}
       </div>
 
       {/* Search */}
-      <div className="relative mb-4">
+      <div className="relative mb-5">
         <input
           type="text"
           value={search}
@@ -408,68 +451,81 @@ export default function RecipientDashboardClient({ user }: Props) {
         </svg>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-3 mb-5">
-        <button
-          onClick={() => setTab("in")}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
-          style={tab === "in"
-            ? { background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", borderColor: "transparent", boxShadow: "0 4px 14px rgba(16,185,129,0.35)" }
-            : { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" }
-          }
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-          </svg>
-          Gate IN
-          <span className="ml-0.5 px-2 py-0.5 rounded-full text-xs font-bold" style={tab === "in" ? { background: "rgba(255,255,255,0.25)" } : { background: "var(--surface2)", color: "#10b981" }}>
-            {gateInList.length}
-          </span>
-        </button>
-        <button
-          onClick={() => setTab("out")}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
-          style={tab === "out"
-            ? { background: "linear-gradient(135deg,#5b21b6,#7c3aed)", color: "#fff", borderColor: "transparent", boxShadow: "0 4px 14px rgba(91,33,182,0.35)" }
-            : { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" }
-          }
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-          </svg>
-          Gate OUT
-          <span className="ml-0.5 px-2 py-0.5 rounded-full text-xs font-bold" style={tab === "out" ? { background: "rgba(255,255,255,0.25)" } : { background: "var(--surface2)", color: "#5b21b6" }}>
-            {gateOutList.length}
-          </span>
-        </button>
+      {/* Sliding 3-tab segmented control */}
+      <div
+        className="relative flex rounded-2xl p-1 mb-6"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+      >
+        {/* Sliding pill */}
+        <motion.div
+          layout
+          layoutId="tab-pill"
+          className="absolute top-1 bottom-1 rounded-xl"
+          style={{
+            background: colors.gradient,
+            boxShadow: `0 4px 14px ${colors.shadow}`,
+            width: `calc(${100/4}% - 4px)`,
+            left: `calc(${TABS.findIndex(t => t.key === tab)} * ${100/4}% + 2px)`,
+          }}
+          transition={{ type: "spring", stiffness: 400, damping: 35 }}
+        />
+        {TABS.map((t) => {
+          const isActive = tab === t.key;
+          const cnt = countFor(t.key);
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className="relative flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-xs font-semibold transition-colors z-10"
+              style={{ color: isActive ? "#fff" : "var(--text-muted)" }}
+            >
+              <span className="truncate">{t.label}</span>
+              {cnt > 0 && (
+                <span
+                  className="flex-shrink-0 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                  style={{
+                    background: isActive ? "rgba(255,255,255,0.25)" : "var(--surface2)",
+                    color: isActive ? "#fff" : TAB_COLORS[t.key].badge,
+                  }}
+                >
+                  {cnt}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* List */}
-      <div className="space-y-3">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-28 rounded-2xl animate-pulse" style={{ background: "var(--surface)" }} />
-          ))
-        ) : displayed.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center justify-center py-20 text-center"
-          >
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-3" style={{ background: "var(--surface)" }}>
-              {tab === "in" ? "🚗" : "✅"}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}
+          transition={{ duration: 0.18 }}
+          className="space-y-3"
+        >
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 rounded-2xl animate-pulse" style={{ background: "var(--surface)" }} />
+            ))
+          ) : displayed.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-3" style={{ background: "var(--surface)" }}>
+                {tab === "lt_in" ? "🚗" : tab === "lt_out" ? "📦" : tab === "cd_out" ? "🚚" : "🔧"}
+              </div>
+              <p className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>
+                {tab === "lt_in" ? "No vehicles en route" : tab === "lt_out" ? "No completed transfers" : tab === "cd_out" ? "No customer deliveries yet" : "No service/repair requests yet"}
+              </p>
             </div>
-            <p className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>
-              {tab === "in" ? "No vehicles en route" : "No completed deliveries yet"}
-            </p>
-          </motion.div>
-        ) : (
-          displayed.map((p, i) => (
-            <motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <GatePassCard pass={p} onClick={() => setSelected(p)} />
-            </motion.div>
-          ))
-        )}
-      </div>
+          ) : (
+            displayed.map((p, i) => (
+              <motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
+                <GatePassCard pass={p} onClick={() => setSelected(p)} />
+              </motion.div>
+            ))
+          )}
+        </motion.div>
+      </AnimatePresence>
 
       {/* Detail Drawer */}
       <AnimatePresence>

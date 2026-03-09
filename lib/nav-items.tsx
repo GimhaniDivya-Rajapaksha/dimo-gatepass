@@ -39,6 +39,11 @@ const BoxIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
   </svg>
 );
+const XCircleIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
 
 const UsersIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -55,6 +60,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
+    { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon /> },
     { label: "Sent to Recipient", href: "/gate-pass?status=GATE_OUT", icon: <BoxIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
   ],

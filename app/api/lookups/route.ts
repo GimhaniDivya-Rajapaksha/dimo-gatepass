@@ -23,31 +23,55 @@ export async function GET(req: NextRequest) {
 
   try {
     if (field === "location") {
-      const options = await prisma.locationOption.findMany({
-        where: {
-          ...(locationType ? { locationType } : {}),
-          ...(q
-            ? {
-                OR: [
-                  { plantCode: { contains: q, mode: "insensitive" } },
-                  { plantDescription: { contains: q, mode: "insensitive" } },
-                  { storageLocation: { contains: q, mode: "insensitive" } },
-                  { storageDescription: { contains: q, mode: "insensitive" } },
-                ],
-              }
-            : {}),
-        },
-        orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
-        take,
-      });
+      type LocRow = { id: string; plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string };
+      let rows: LocRow[];
+
+      if (locationType) {
+        // Use raw SQL — locationType column may not be in generated Prisma client yet
+        if (q) {
+          const like = `%${q}%`;
+          rows = await prisma.$queryRaw<LocRow[]>`
+            SELECT id, "plantCode", "plantDescription", "storageLocation", "storageDescription"
+            FROM "LocationOption"
+            WHERE "locationType" = ${locationType}
+              AND ("plantCode" ILIKE ${like} OR "plantDescription" ILIKE ${like}
+                OR "storageLocation" ILIKE ${like} OR "storageDescription" ILIKE ${like})
+            ORDER BY "plantCode" ASC, "storageDescription" ASC
+            LIMIT ${take}
+          `;
+        } else {
+          rows = await prisma.$queryRaw<LocRow[]>`
+            SELECT id, "plantCode", "plantDescription", "storageLocation", "storageDescription"
+            FROM "LocationOption"
+            WHERE "locationType" = ${locationType}
+            ORDER BY "plantCode" ASC, "storageDescription" ASC
+            LIMIT ${take}
+          `;
+        }
+      } else {
+        rows = await prisma.locationOption.findMany({
+          where: q ? {
+            OR: [
+              { plantCode: { contains: q, mode: "insensitive" } },
+              { plantDescription: { contains: q, mode: "insensitive" } },
+              { storageLocation: { contains: q, mode: "insensitive" } },
+              { storageDescription: { contains: q, mode: "insensitive" } },
+            ],
+          } : {},
+          orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
+          take,
+        });
+      }
+
       return NextResponse.json({
-        options: options.map((row) => ({
+        options: rows.map((row) => ({
           id: row.id,
-          value: `${row.plantCode} - ${row.storageDescription}`,
-          label: `${row.plantCode} - ${row.storageDescription}`,
+          value: `${row.plantDescription} - ${row.storageDescription}`,
+          label: `${row.plantDescription} – ${row.storageDescription}`,
           plantCode: row.plantCode,
           plantDescription: row.plantDescription,
           storageLocation: row.storageLocation,
+          storageDescription: row.storageDescription,
         })),
       });
     }
@@ -94,8 +118,12 @@ export async function GET(req: NextRequest) {
         options: options.map((row) => ({
           id: row.id,
           value: row.vehicleNo,
-          chassisNo: row.chassisNo ?? "",
-          description: row.description ?? "",
+          chassisNo:    row.chassisNo    ?? "",
+          description:  row.description  ?? "",
+          model:        row.model        ?? "",
+          make:         row.make         ?? "",
+          colourFamily: row.colourFamily ?? "",
+          colour:       row.colour       ?? "",
           label: row.chassisNo ? `${row.vehicleNo} / ${row.chassisNo}` : row.vehicleNo,
         })),
       });
@@ -160,6 +188,53 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const field = body.field as LookupField | undefined;
 
+  // ── Create a new Promotion / Finance location ───────────────────────
+  if (field === "location") {
+    const plantDescription = normalize(body.plantDescription ?? "");
+    const locationType = normalize(body.locationType ?? "") as string;
+
+    if (!plantDescription) return NextResponse.json({ error: "plantDescription required" }, { status: 400 });
+    if (!["PROMOTION", "FINANCE"].includes(locationType)) {
+      return NextResponse.json({ error: "locationType must be PROMOTION or FINANCE" }, { status: 400 });
+    }
+
+    // Use provided storageDescription or fall back to type default
+    const storageDescRaw = normalize(body.storageDescription ?? "");
+    const storageDescription = storageDescRaw || (locationType === "PROMOTION" ? "Promo Location" : "Finan Institute");
+
+    // Derive plantCode from initials (up to 6 chars)
+    const plantCode = plantDescription.split(/\s+/).map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 6);
+
+    try {
+      // Find next available Sloc number for this plantCode
+      const existing = await prisma.locationOption.findMany({
+        where: { plantCode },
+        orderBy: { storageLocation: "desc" },
+        take: 1,
+      });
+      const lastNum = existing.length > 0 ? (parseInt(existing[0].storageLocation.replace(/\D/g, ""), 10) || 99) : 99;
+      const storageLocation = `S${lastNum + 1}`;
+
+      const created = await prisma.locationOption.create({
+        data: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
+      });
+      return NextResponse.json({
+        option: {
+          id: created.id,
+          value: `${created.plantDescription} - ${created.storageDescription}`,
+          label: `${created.plantDescription} – ${created.storageDescription}`,
+          plantCode: created.plantCode,
+          plantDescription: created.plantDescription,
+          storageLocation: created.storageLocation,
+          storageDescription: created.storageDescription,
+        },
+      });
+    } catch (e) {
+      console.error("Location create error:", e);
+      return NextResponse.json({ error: "Failed to create location." }, { status: 500 });
+    }
+  }
+
   if (field !== "vehicle") {
     return NextResponse.json({ error: "Only vehicle creation is supported." }, { status: 400 });
   }
@@ -201,7 +276,12 @@ export async function POST(req: NextRequest) {
       option: {
         id: created.id,
         value: created.vehicleNo,
-        chassisNo: created.chassisNo ?? "",
+        chassisNo:    created.chassisNo    ?? "",
+        description:  created.description  ?? "",
+        model:        created.model        ?? "",
+        make:         created.make         ?? "",
+        colourFamily: created.colourFamily ?? "",
+        colour:       created.colour       ?? "",
         label: created.chassisNo ? `${created.vehicleNo} / ${created.chassisNo}` : created.vehicleNo,
       },
     });

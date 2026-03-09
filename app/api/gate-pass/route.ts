@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sendApprovalRequestEmail } from "@/lib/email";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -19,11 +20,27 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = {};
 
   if (role === "INITIATOR") where.createdById = session.user.id;
-  else if (role === "RECIPIENT") where.status = { in: ["GATE_OUT", "COMPLETED"] };
   // APPROVER and ADMIN see all
 
   if (passType) where.passType = passType;
-  if (status) where.status = status;
+
+  const parentOnly = searchParams.get("parentOnly") === "true";
+  if (passType === "AFTER_SALES" && parentOnly) {
+    where.parentPassId = null;
+  } else if (!passType) {
+    // In "All" view, hide AFTER_SALES sub-passes
+    where.NOT = { AND: [{ passType: "AFTER_SALES" }, { parentPassId: { not: null } }] };
+  }
+
+  if (role === "RECIPIENT") {
+    // Recipients only see GATE_OUT and COMPLETED; honour further narrowing by ?status=
+    const allowedStatuses = ["GATE_OUT", "COMPLETED"];
+    where.status = status && allowedStatuses.includes(status)
+      ? status
+      : { in: allowedStatuses };
+  } else if (status) {
+    where.status = status;
+  }
   if (search) {
     where.OR = [
       { gatePassNumber: { contains: search, mode: "insensitive" } },
@@ -33,6 +50,9 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  const passSubType = searchParams.get("passSubType");
+  if (passSubType) where.passSubType = passSubType;
+
   const [total, passes] = await Promise.all([
     prisma.gatePass.count({ where }),
     prisma.gatePass.findMany({
@@ -40,6 +60,10 @@ export async function GET(req: NextRequest) {
       include: {
         createdBy: { select: { id: true, name: true, email: true } },
         approvedBy: { select: { id: true, name: true } },
+        parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
+        subPasses: (passType === "AFTER_SALES" && parentOnly)
+          ? { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
+          : false,
       },
       orderBy: { createdAt: "desc" },
       skip,
@@ -90,6 +114,9 @@ export async function POST(req: NextRequest) {
       insurance: body.insurance || null,
       garagePlate: body.garagePlate || null,
       comments: body.comments || null,
+      passSubType: body.passSubType || null,
+      parentPassId: body.parentPassId || null,
+      fromLocation: body.fromLocation || null,
       createdById: session.user.id,
     },
   });
@@ -119,6 +146,29 @@ export async function POST(req: NextRequest) {
         gatePassId: gatePass.id,
       })),
     });
+  }
+
+  // Send email to all APPROVER users
+  try {
+    const approvers = await prisma.user.findMany({ where: { role: "APPROVER" }, select: { id: true, name: true, email: true } });
+    const createdByUser = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true } });
+    for (const approver of approvers) {
+      await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        passType: gatePass.passType,
+        passSubType: gatePass.passSubType,
+        vehicle: gatePass.vehicle,
+        chassis: gatePass.chassis,
+        toLocation: gatePass.toLocation,
+        fromLocation: gatePass.fromLocation,
+        departureDate: gatePass.departureDate,
+        departureTime: gatePass.departureTime,
+        createdByName: createdByUser?.name || session.user.name || "Unknown",
+      });
+    }
+  } catch (emailErr) {
+    console.error("[email] Failed to send approval email:", emailErr);
+    // Don't fail the request if email fails
   }
 
   return NextResponse.json({ gatePass }, { status: 201 });
