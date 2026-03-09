@@ -17,7 +17,9 @@ const pageInfo: Record<string, { title: string; subtitle: string }> = {
   "/gate-pass":         { title: "Gate Passes",      subtitle: "All gate pass records" },
   "/gate-pass/create":  { title: "Create Gate Pass", subtitle: "Submit a new gate pass request" },
   "/gate-pass/approve": { title: "New Requests",     subtitle: "Review pending approvals" },
-  "/gate-pass/receive": { title: "Receive Vehicles", subtitle: "Acknowledge incoming vehicles" },
+  "/gate-pass/receive":  { title: "Receive Vehicles",  subtitle: "Acknowledge incoming vehicles" },
+  "/gate-pass/rejected": { title: "Rejected Passes",   subtitle: "Passes rejected by approver" },
+  "/vehicle-report":     { title: "Vehicle Report",    subtitle: "Search vehicle history & download reports" },
 };
 
 const roleColors: Record<string, string> = {

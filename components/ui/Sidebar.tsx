@@ -117,38 +117,19 @@ export default function Sidebar({ user, role }: SidebarProps) {
                   color: isActive ? c.textActive : c.text,
                 }}
               >
-                {/* Active left indicator */}
                 {isActive && (
-                  <span
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-                    style={{ background: lime }}
-                  />
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full" style={{ background: lime }} />
                 )}
-                {/* Hover overlay */}
                 {!isActive && (
-                  <span
-                    className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ background: c.itemHoverBg }}
-                  />
+                  <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: c.itemHoverBg }} />
                 )}
-                {/* Icon box */}
-                <span
-                  className="relative z-10 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
-                  style={{
-                    background: isActive ? c.iconActiveBg : c.iconBg,
-                    color: isActive ? lime : c.text,
-                    boxShadow: isActive ? c.iconGlow : "none",
-                  }}
-                >
+                <span className="relative z-10 w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all"
+                  style={{ background: isActive ? c.iconActiveBg : c.iconBg, color: isActive ? lime : c.text, boxShadow: isActive ? c.iconGlow : "none" }}>
                   {item.icon}
                 </span>
                 <span className="relative z-10 truncate">{item.label}</span>
                 {isActive && (
-                  <motion.span
-                    layoutId="nav-dot"
-                    className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
-                    style={{ background: lime }}
-                  />
+                  <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>
             </motion.div>

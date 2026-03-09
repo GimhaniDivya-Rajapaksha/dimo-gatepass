@@ -268,6 +268,7 @@ export default function VehicleReportPage() {
 
       <motion.div
         className="print-report"
+        style={{ minWidth: 0, width: "100%", overflowX: "hidden" }}
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -497,7 +498,7 @@ export default function VehicleReportPage() {
             ) : hasPasses ? (
               <motion.div
                 className="rounded-2xl border overflow-hidden"
-                style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+                style={{ background: "var(--surface)", borderColor: "var(--border)", minWidth: 0 }}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.18 }}
@@ -507,8 +508,8 @@ export default function VehicleReportPage() {
                   <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Gate Pass History</p>
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{passes!.length} record{passes!.length !== 1 ? "s" : ""}</p>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+                  <table style={{ minWidth: "1400px", width: "100%" }} className="text-sm">
                     <thead>
                       <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
                         {[
@@ -632,7 +633,7 @@ export default function VehicleReportPage() {
                                       style={{ color: "var(--text-muted)" }}>
                                       Sub-passes ({p.subPasses.length})
                                     </p>
-                                    <table className="w-full text-xs">
+                                    <table className="w-full text-xs" style={{ minWidth: "600px" }}>
                                       <thead>
                                         <tr>
                                           {["GP Number", "Type", "Status", "From", "To", "Departure", "Created By", "Date"].map((h) => (
