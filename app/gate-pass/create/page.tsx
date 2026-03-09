@@ -714,11 +714,9 @@ export default function CreateGatePassPage() {
           // Auto-select the right pass type based on current state
           const subs = found.subPasses ?? [];
           const sorted = [...subs].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          const lastActive = sorted.find((sp: any) => !["COMPLETED", "CANCELLED"].includes(sp.status));
-          const lastType = lastActive?.passSubType;
-          const lastStatus = lastActive?.status;
-          if (lastType === "SUB_OUT" && lastStatus === "APPROVED") setAsSubType("SUB_IN");
-          else if (lastType === "SUB_IN") setAsSubType("SUB_OUT");
+          const lastAnySub = sorted[0]; // most recent sub regardless of status
+          // SUB IN only available when last sub was SUB_OUT confirmed COMPLETED by recipient
+          if (lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED") setAsSubType("SUB_IN");
           else setAsSubType("SUB_OUT");
         }
       }
@@ -1625,31 +1623,42 @@ export default function CreateGatePassPage() {
                       {/* Pass type cards — only after found */}
                       {asFoundPass && (() => {
                         const subPasses = asFoundPass.subPasses ?? [];
-                        const mainInApproved = ["APPROVED", "COMPLETED"].includes(asFoundPass.status);
                         const sortedSubs = [...subPasses].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        // Most recent sub of ANY status (including completed)
+                        const lastAnySub = sortedSubs[0];
+                        // Most recent sub that is still active (not completed/cancelled)
                         const lastActiveSub = sortedSubs.find((sp: any) => !["COMPLETED", "CANCELLED"].includes(sp.status));
-                        const lastSubType = lastActiveSub?.passSubType;
-                        const lastSubStatus = lastActiveSub?.status;
-                        // Vehicle is out when there is an active SUB_OUT (pending or approved)
-                        const vehicleIsOut = lastSubType === "SUB_OUT";
-                        // SUB_IN only unlocks when SUB_OUT has been approved
-                        const subOutApproved = lastSubType === "SUB_OUT" && lastSubStatus === "APPROVED";
-                        // SUB_OUT: locked while vehicle is out (SUB_OUT active in any state)
-                        const subOutLocked = !mainInApproved || vehicleIsOut;
-                        // SUB_IN: only available when SUB_OUT is approved (vehicle is at another plant)
-                        const subInLocked = !mainInApproved || !subOutApproved;
-                        // MAIN_OUT: locked while vehicle is out
-                        const mainOutLocked = !mainInApproved || vehicleIsOut;
-                        const notApprovedReason = "Waiting for Main Gate IN approval";
+                        // MAIN IN must be COMPLETED (recipient marked as IN) to unlock next steps
+                        const mainInConfirmed = asFoundPass.status === "COMPLETED";
+                        // For warning message: whether MAIN IN is at least approved (just not yet confirmed)
+                        const mainInApprovedOrBetter = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(asFoundPass.status);
+                        // Vehicle confirmed out = last sub (any) was SUB_OUT and recipient marked COMPLETED
+                        const vehicleConfirmedOut = lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED";
+                        // Active sub blocks = there's still an unfinished sub-pass in progress
+                        const activeSubBlocks = !!lastActiveSub;
+                        // SUB OUT: available when MAIN IN confirmed AND no active sub AND vehicle not already confirmed out
+                        const subOutLocked = !mainInConfirmed || activeSubBlocks || vehicleConfirmedOut;
+                        // SUB IN: only available when vehicle is confirmed out (SUB_OUT COMPLETED by recipient)
+                        const subInLocked = !mainInConfirmed || !vehicleConfirmedOut;
+                        // MAIN OUT: same condition as SUB OUT
+                        const mainOutLocked = !mainInConfirmed || activeSubBlocks || vehicleConfirmedOut;
+
+                        const notApprovedReason = !mainInApprovedOrBetter
+                          ? "Waiting for Main Gate IN approval"
+                          : asFoundPass.status === "APPROVED"
+                          ? "Initiator must click 'Mark as IN' first"
+                          : asFoundPass.status === "GATE_OUT"
+                          ? "Waiting for recipient to confirm Gate IN"
+                          : "Main Gate IN not yet confirmed";
                         return (
                           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.1 }}>
-                            {!mainInApproved && (
+                            {!mainInConfirmed && (
                               <div className="mb-4 flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
                                 style={{ background: "#fefce8", borderColor: "#fde047", color: "#854d0e" }}>
                                 <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                 </svg>
-                                Main Gate IN pass must be approved before creating sub-passes
+                                {notApprovedReason}
                               </div>
                             )}
                             {/* Pass sub-type selector */}
@@ -1667,7 +1676,7 @@ export default function CreateGatePassPage() {
                                       </svg>
                                     ),
                                     locked: subOutLocked,
-                                    lockReason: !mainInApproved ? notApprovedReason : "Vehicle is out — wait for Sub Gate IN",
+                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is at another plant — complete Sub Gate IN first" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
                                     bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6",
                                   },
                                   {
@@ -1680,7 +1689,7 @@ export default function CreateGatePassPage() {
                                       </svg>
                                     ),
                                     locked: subInLocked,
-                                    lockReason: !mainInApproved ? notApprovedReason : vehicleIsOut && !subOutApproved ? "Waiting for Sub Gate OUT approval" : "Create Sub Gate OUT first",
+                                    lockReason: !mainInConfirmed ? notApprovedReason : activeSubBlocks ? "Waiting for Sub Gate OUT to be confirmed by recipient" : "Create & confirm Sub Gate OUT first",
                                     bg: "#fffbeb", color: "#92400e", dot: "#f59e0b",
                                   },
                                   {
@@ -1693,7 +1702,7 @@ export default function CreateGatePassPage() {
                                       </svg>
                                     ),
                                     locked: mainOutLocked,
-                                    lockReason: !mainInApproved ? notApprovedReason : "Vehicle is at another plant — complete Sub Gate IN first",
+                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is at another plant — complete Sub Gate IN first" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
                                     bg: "#fdf4ff", color: "#6b21a8", dot: "#a855f7",
                                   },
                                 ]).map(({ value: v, label, desc, icon, locked, lockReason, bg, color, dot }) => {

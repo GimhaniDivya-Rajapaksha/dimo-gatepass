@@ -44,6 +44,13 @@ const XCircleIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
   </svg>
 );
+const VehicleReportIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 8h4l3 3v5h-7V8z" />
+  </svg>
+);
 
 const UsersIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,12 +70,14 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon /> },
     { label: "Sent to Recipient", href: "/gate-pass?status=GATE_OUT", icon: <BoxIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
   APPROVER: [
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
     { label: "New Requests", href: "/gate-pass/approve", icon: <CheckIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
   RECIPIENT: [
     { label: "Dashboard", href: "/recipient", icon: <DashboardIcon /> },
