@@ -17,9 +17,11 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        // Use raw SQL to bypass stale Prisma client enum validation (CASHIER, AREA_SALES_OFFICER not in generated client)
+        const rows = await prisma.$queryRaw<{ id: string; name: string; email: string; passwordHash: string; role: string | null }[]>`
+          SELECT id, name, email, "passwordHash", role::text FROM "User" WHERE email = ${credentials.email} LIMIT 1
+        `;
+        const user = rows[0];
 
         if (!user) return null;
 
@@ -43,11 +45,13 @@ export const authOptions: NextAuthOptions = {
         token.role = (user as { role: string | null }).role ?? null;
       } else if (token.id) {
         // Every session read: re-fetch role from DB so admin role changes take effect on refresh
-        const dbUser = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          select: { role: true },
-        });
-        if (dbUser) token.role = dbUser.role ?? null;
+        const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null }[]>`
+          SELECT role, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
+        `;
+        if (rows[0]) {
+          token.role = rows[0].role ?? null;
+          token.defaultLocation = rows[0].defaultLocation ?? null;
+        }
       }
       return token;
     },
@@ -55,6 +59,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
+        session.user.defaultLocation = (token.defaultLocation as string | null) ?? null;
       }
       return session;
     },

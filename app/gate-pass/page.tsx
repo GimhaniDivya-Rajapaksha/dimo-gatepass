@@ -25,6 +25,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string; dot:
   GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
   COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6", dot: "#a855f7" },
   CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
+  CASHIER_REVIEW:   { label: "Cashier Review",      bg: "#fef3c7", color: "#b45309", dot: "#f59e0b" },
 };
 
 const subTypeCfg: Record<string, { label: string; short: string; color: string; dot: string; bg: string }> = {

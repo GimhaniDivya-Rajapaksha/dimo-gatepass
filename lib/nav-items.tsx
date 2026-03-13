@@ -62,6 +62,21 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   ADMIN: [
     { label: "User Management", href: "/admin", icon: <UsersIcon /> },
   ],
+  AREA_SALES_OFFICER: [
+    { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
+    { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "Create Sub-Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
+    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+  ],
+  CASHIER: [
+    { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
+    { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
+    { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+  ],
   INITIATOR: [
     { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
     { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
@@ -74,7 +89,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   ],
   APPROVER: [
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
-    { label: "New Requests", href: "/gate-pass/approve", icon: <CheckIcon /> },
+    { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },

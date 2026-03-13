@@ -5,10 +5,11 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 
 type GatePass = {
-  id: string; gatePassNumber: string; passType: string; status: string;
+  id: string; gatePassNumber: string; passType: string; passSubType: string | null; status: string;
   vehicle: string; chassis: string | null; departureDate: string | null;
   requestedBy: string | null; toLocation: string | null; vehicleDetails: string | null;
   createdBy: { name: string }; createdAt: string;
+  parentPass: { id: string; gatePassNumber: string; passSubType: string | null } | null;
 };
 
 type Stats = { pending: number; approved: number; rejected: number; gateOut: number; completed: number; total: number };
@@ -23,6 +24,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string }> = 
   REJECTED:         { label: "Rejected",          bg: "rgba(239,68,68,0.12)",   color: "#ef4444" },
   GATE_OUT:         { label: "Gate Out",           bg: "rgba(59,130,246,0.12)", color: "#3b82f6" },
   COMPLETED:        { label: "Completed",          bg: "rgba(139,92,246,0.12)", color: "#8b5cf6" },
+  CASHIER_REVIEW:   { label: "Cashier Review",      bg: "rgba(245,158,11,0.12)",  color: "#b45309" },
 };
 
 function AnimatedNumber({ value }: { value: number }) {
@@ -369,6 +371,14 @@ export default function InitiatorDashboardClient({ user }: Props) {
                       </td>
                       <td className="px-4 py-3">
                         <span className="font-mono font-bold text-xs" style={{ color: "var(--accent)" }}>{p.gatePassNumber}</span>
+                        {p.passSubType && (
+                          <span className="block text-xs mt-0.5 font-semibold" style={{ color: p.passSubType === "MAIN_IN" ? "#059669" : p.passSubType === "MAIN_OUT" ? "#7c3aed" : "#d97706" }}>
+                            {p.passSubType.replace("_", " ")}
+                          </span>
+                        )}
+                        {p.parentPass && (
+                          <span className="block text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>↳ {p.parentPass.gatePassNumber}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-sm" style={{ color: "var(--text)" }}>{p.vehicle}</p>

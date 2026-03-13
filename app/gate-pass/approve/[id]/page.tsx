@@ -23,6 +23,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string; dot:
   REJECTED:         { label: "Rejected",           bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
   GATE_OUT:         { label: "Gate Out",            bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
   COMPLETED:        { label: "Completed",           bg: "#f5f3ff", color: "#5b21b6", dot: "#8b5cf6" },
+  CASHIER_REVIEW:   { label: "Cashier Review",      bg: "#fef3c7", color: "#b45309", dot: "#f59e0b" },
 };
 
 const colorDot: Record<string, string> = {

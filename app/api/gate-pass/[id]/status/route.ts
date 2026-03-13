@@ -46,9 +46,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // INITIATOR: mark as gate out (only for their own APPROVED passes)
+  // INITIATOR / AREA_SALES_OFFICER: mark as gate out (only for their own APPROVED passes)
   if (action === "gate_out") {
-    if (session.user.role !== "INITIATOR") {
+    const canGateOut = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER";
+    if (!canGateOut) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.createdById !== session.user.id) {
@@ -80,9 +81,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // RECIPIENT: confirm vehicle received (gate in = completed)
+  // RECIPIENT / INITIATOR / AREA_SALES_OFFICER: confirm vehicle received (gate in = completed)
   if (action === "gate_in") {
-    if (session.user.role !== "RECIPIENT") {
+    const canGateIn = session.user.role === "RECIPIENT"
+      || ((session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER") && gatePass.passType === "AFTER_SALES");
+    if (!canGateIn) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.status !== "GATE_OUT") {
@@ -111,9 +114,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // INITIATOR: resubmit a rejected pass
+  // INITIATOR / AREA_SALES_OFFICER: resubmit a rejected pass
   if (action === "resubmit") {
-    if (session.user.role !== "INITIATOR") {
+    const canResubmit = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER";
+    if (!canResubmit) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.createdById !== session.user.id) {

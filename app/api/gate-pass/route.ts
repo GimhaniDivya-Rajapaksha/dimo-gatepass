@@ -19,16 +19,24 @@ export async function GET(req: NextRequest) {
   const role = session.user.role;
   const where: Record<string, unknown> = {};
 
-  if (role === "INITIATOR") where.createdById = session.user.id;
-  // APPROVER and ADMIN see all
+  if (role === "INITIATOR") {
+    // INITIATOR sees own passes AND sub-passes linked to their main passes
+    where.AND = [{
+      OR: [
+        { createdById: session.user.id },
+        { parentPass: { createdById: session.user.id } },
+      ]
+    }];
+  }
+  // AREA_SALES_OFFICER, APPROVER and ADMIN see all
 
   if (passType) where.passType = passType;
 
   const parentOnly = searchParams.get("parentOnly") === "true";
   if (passType === "AFTER_SALES" && parentOnly) {
     where.parentPassId = null;
-  } else if (!passType) {
-    // In "All" view, hide AFTER_SALES sub-passes
+  } else if (!passType && role !== "INITIATOR") {
+    // In "All" view, hide AFTER_SALES sub-passes (except for INITIATOR who needs to see them)
     where.NOT = { AND: [{ passType: "AFTER_SALES" }, { parentPassId: { not: null } }] };
   }
 
@@ -76,50 +84,91 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session || session.user.role !== "INITIATOR") {
+  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER"];
+  if (!session || !allowedRoles.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
   const body = await req.json();
 
+  // AREA_SALES_OFFICER can only create AFTER_SALES sub-passes (SUB_IN, SUB_OUT, MAIN_OUT)
+  if (session.user.role === "AREA_SALES_OFFICER") {
+    if (body.passType !== "AFTER_SALES" || !["SUB_IN", "SUB_OUT", "MAIN_OUT"].includes(body.passSubType)) {
+      return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
+    }
+  }
+
+  // MAIN_OUT for After Sales → goes to CASHIER_REVIEW instead of PENDING_APPROVAL
+  const isAfterSalesMainOut = body.passType === "AFTER_SALES" && body.passSubType === "MAIN_OUT";
+
   const count = await prisma.gatePass.count();
   const gatePassNumber = `GP-${String(count + 1).padStart(4, "0")}`;
 
-  const gatePass = await prisma.gatePass.create({
-    data: {
-      gatePassNumber,
-      passType: body.passType,
-      status: "PENDING_APPROVAL",
-      vehicle: body.vehicle || body.vehicleDetails || "Unknown",
-      vehicleColor: body.vehicleColor || null,
-      shipmentId: body.shipmentId || null,
-      chassis: body.chassis || null,
-      make: body.make || null,
-      toLocation: body.toLocation || null,
-      arrivalDate: body.arrivalDate || null,
-      arrivalTime: body.arrivalTime || null,
-      vehicleDetails: body.vehicleDetails || null,
-      departureDate: body.departureDate || null,
-      departureTime: body.departureTime || null,
-      requestedBy: body.requestedBy || null,
-      outReason: body.outReason || null,
-      transportMode: body.transportMode || null,
-      companyName: body.companyName || null,
-      carrierName: body.carrierName || null,
-      carrierRegNo: body.carrierRegNo || null,
-      driverName: body.driverName || null,
-      driverNIC: body.driverNIC || null,
-      driverContact: body.driverContact || null,
-      mileage: body.mileage || null,
-      insurance: body.insurance || null,
-      garagePlate: body.garagePlate || null,
-      comments: body.comments || null,
-      passSubType: body.passSubType || null,
-      parentPassId: body.parentPassId || null,
-      fromLocation: body.fromLocation || null,
-      createdById: session.user.id,
-    },
+  const createData: Record<string, unknown> = {
+    gatePassNumber,
+    passType: body.passType,
+    status: "PENDING_APPROVAL", // always create with known status; update to CASHIER_REVIEW below if needed
+    vehicle: body.vehicle || body.vehicleDetails || "Unknown",
+    vehicleColor: body.vehicleColor || null,
+    shipmentId: body.shipmentId || null,
+    chassis: body.chassis || null,
+    make: body.make || null,
+    toLocation: body.toLocation || null,
+    arrivalDate: body.arrivalDate || null,
+    arrivalTime: body.arrivalTime || null,
+    vehicleDetails: body.vehicleDetails || null,
+    departureDate: body.departureDate || null,
+    departureTime: body.departureTime || null,
+    requestedBy: body.requestedBy || null,
+    outReason: body.outReason || null,
+    transportMode: body.transportMode || null,
+    companyName: body.companyName || null,
+    carrierName: body.carrierName || null,
+    carrierRegNo: body.carrierRegNo || null,
+    driverName: body.driverName || null,
+    driverNIC: body.driverNIC || null,
+    driverContact: body.driverContact || null,
+    mileage: body.mileage || null,
+    insurance: body.insurance || null,
+    garagePlate: body.garagePlate || null,
+    comments: body.comments || null,
+    passSubType: body.passSubType || null,
+    parentPassId: body.parentPassId || null,
+    fromLocation: body.fromLocation || null,
+    createdById: session.user.id,
+  };
+
+  // Only include serviceJobNo for After Sales passes (field added via db push, stale client)
+  if (body.passType === "AFTER_SALES" && body.serviceJobNo) {
+    createData.serviceJobNo = body.serviceJobNo;
+  }
+
+  const gatePass = await (prisma.gatePass.create as any)({
+    data: createData,
   });
+
+  // If After Sales MAIN_OUT: update status to CASHIER_REVIEW via raw SQL (stale Prisma client doesn't know this enum value)
+  if (isAfterSalesMainOut) {
+    await prisma.$executeRaw`UPDATE "GatePass" SET status = 'CASHIER_REVIEW'::"GatePassStatus" WHERE id = ${gatePass.id}`;
+    gatePass.status = "CASHIER_REVIEW";
+  }
+
+  // For CASHIER_REVIEW: notify all CASHIERs
+  if (isAfterSalesMainOut) {
+    const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+    if (cashiers.length > 0) {
+      await prisma.notification.createMany({
+        data: cashiers.map((c) => ({
+          userId: c.id,
+          type: "CASHIER_REVIEW_REQUIRED",
+          title: "Order Review Required",
+          message: `${gatePassNumber} — ${gatePass.vehicle} is ready for order review.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+    return NextResponse.json({ gatePass }, { status: 201 });
+  }
 
   // Notify selected approver if provided; otherwise notify all APPROVERs.
   const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
@@ -148,11 +197,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Send email to all APPROVER users
   try {
-    const approvers = await prisma.user.findMany({ where: { role: "APPROVER" }, select: { id: true, name: true, email: true } });
+    const approversEmail = await prisma.user.findMany({ where: { role: "APPROVER" }, select: { id: true, name: true, email: true } });
     const createdByUser = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true } });
-    for (const approver of approvers) {
+    for (const approver of approversEmail) {
       await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
         gatePassNumber: gatePass.gatePassNumber,
         passType: gatePass.passType,
@@ -168,7 +216,6 @@ export async function POST(req: NextRequest) {
     }
   } catch (emailErr) {
     console.error("[email] Failed to send approval email:", emailErr);
-    // Don't fail the request if email fails
   }
 
   return NextResponse.json({ gatePass }, { status: 201 });

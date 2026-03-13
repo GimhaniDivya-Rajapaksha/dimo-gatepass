@@ -257,11 +257,14 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
             </div>
           )}
 
-          {/* Rows */}
+          {/* Rows — hide generic placeholder entries */}
           <div className="max-h-52 overflow-auto">
-            {options.length === 0 ? (
+            {options.filter(o => o.storageDescription !== "Finan Institute" && o.storageDescription !== "Promo Location")
+              .length === 0 ? (
               <p className="text-center text-sm py-4" style={{ color: "var(--text-muted)" }}>No options — click ADD to create one</p>
-            ) : options.map(o => (
+            ) : options
+                .filter(o => o.storageDescription !== "Finan Institute" && o.storageDescription !== "Promo Location")
+                .map(o => (
               <button key={o.id} type="button"
                 onClick={() => { onSelect(o); setOpen(false); setShowAdd(false); }}
                 className="w-full flex items-center px-3 py-2.5 text-sm border-b last:border-0 hover:bg-blue-500/10 transition-colors"
@@ -278,9 +281,9 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
   );
 }
 
-function TextInput({ value, onChange, placeholder, error, type = "text", numericOnly = false, nicOnly = false, maxLength }: {
+function TextInput({ value, onChange, placeholder, error, type = "text", numericOnly = false, nicOnly = false, maxLength, min }: {
   value: string; onChange: (v: string) => void; placeholder?: string; error?: string; type?: string;
-  numericOnly?: boolean; nicOnly?: boolean; maxLength?: number;
+  numericOnly?: boolean; nicOnly?: boolean; maxLength?: number; min?: string;
 }) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let v = e.target.value;
@@ -306,6 +309,7 @@ function TextInput({ value, onChange, placeholder, error, type = "text", numeric
         placeholder={placeholder}
         inputMode={numericOnly ? "numeric" : undefined}
         maxLength={maxLength}
+        min={min}
         className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
         style={{ background: "var(--surface2)", borderColor: error ? "#f87171" : "var(--border)", color: "var(--text)" }}
       />
@@ -554,6 +558,7 @@ export default function CreateGatePassPage() {
   } | null>(null);
   const [selectedVehicleDetail, setSelectedVehicleDetail] = useState<{
     chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
+    currentLocation?: string;
   } | null>(null);
   const [selectedCdVehicleDetail, setSelectedCdVehicleDetail] = useState<{
     vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
@@ -569,7 +574,7 @@ export default function CreateGatePassPage() {
 
   // Location Transfer / After Sales fields (shared structure)
   const [lt, setLt] = useState({
-    toLocation: "", outReason: "", vehicle: "",
+    toLocation: "", fromLocation: "", outReason: "", vehicle: "",
     approver: "", departureDate: "", departureTime: "", reasonToOut: "",
     arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
@@ -586,7 +591,7 @@ export default function CreateGatePassPage() {
   // Service/Repair fields
   const [sr, setSr] = useState({
     approver: "", approver2: "", vehicle: "",
-    onBy: "", jobType: "", serviceDate: "",
+    onBy: "", jobType: "", serviceDate: "", serviceJobNo: "",
     customerName: "", customerContact: "",
     receivingLocation: "", arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
@@ -617,8 +622,14 @@ export default function CreateGatePassPage() {
   const [dimoLocations, setDimoLocations] = useState<LookupOption[]>([]);
 
   useEffect(() => {
-    if (status === "authenticated" && session?.user?.role !== "INITIATOR") router.replace("/");
+    const allowed = ["INITIATOR", "AREA_SALES_OFFICER"];
+    if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
+
+  useEffect(() => {
+    if (session?.user?.role === "AREA_SALES_OFFICER") setSrMode("out");
+  }, [session?.user?.role]);
+
 
   // Auto-fetch the initiator's assigned approver
   useEffect(() => {
@@ -687,6 +698,23 @@ export default function CreateGatePassPage() {
   const isLtLike = passType === "LOCATION_TRANSFER";
   const isSr = passType === "AFTER_SALES";
 
+  // Determine vehicle's current location from most recent completed gate pass
+  const fetchVehicleCurrentLocation = async (vehicleNo: string): Promise<string | undefined> => {
+    if (!vehicleNo.trim()) return undefined;
+    try {
+      const res = await fetch(`/api/gate-pass/by-vehicle?vehicleNo=${encodeURIComponent(vehicleNo)}`);
+      const d = await res.json();
+      const passes: { status: string; toLocation: string | null }[] = d.passes ?? [];
+      // Most recent COMPLETED → vehicle arrived at toLocation
+      const completed = passes.find((p) => p.status === "COMPLETED" && p.toLocation);
+      if (completed?.toLocation) return completed.toLocation;
+      // Fall back to user's default location
+      return session?.user?.defaultLocation ?? undefined;
+    } catch {
+      return session?.user?.defaultLocation ?? undefined;
+    }
+  };
+
   const searchVehiclePasses = async (vehicleNo: string) => {
     if (!vehicleNo.trim()) { setAsVehiclePasses([]); return; }
     setAsVehicleLoading(true);
@@ -709,7 +737,9 @@ export default function CreateGatePassPage() {
         const normalizedInput = gpNumber.trim().toUpperCase().replace(/^GP-(\d+)$/, (_, n) => `GP-${n.padStart(4, "0")}`);
         const found = d.passes?.find((p: any) => p.gatePassNumber === normalizedInput && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_IN"));
         setAsFoundPass(found || null);
-        if (found?.toLocation) setAsToLocation(found.toLocation);
+        setAsToLocation("");
+        if (found?.toLocation) setAsFromLocation(found.toLocation);
+        else setAsFromLocation("");
         if (found) {
           // Auto-select the right pass type based on current state
           const subs = found.subPasses ?? [];
@@ -746,8 +776,8 @@ export default function CreateGatePassPage() {
       if (!lt.departureTime) e.departureTime = "Required";
     } else if (isSr && srMode === "out") {
       if (!asFoundPass) e.asGateIn = "Please find a valid Gate IN pass first";
-      if (!asToLocation) e.asToLocation = "Required";
-      if (!asFromLocation) e.asFromLocation = "Required";
+      if (!asToLocation && asSubType !== "MAIN_OUT") e.asToLocation = "Required";
+      if (!asFromLocation && asSubType !== "MAIN_OUT") e.asFromLocation = "Required";
       if (!cd.departureDate) e.departureDate = "Required";
       if (!cd.departureTime) e.departureTime = "Required";
     } else if (isSr) {
@@ -792,6 +822,7 @@ export default function CreateGatePassPage() {
         chassis: asFoundPass?.chassis,
         make: asFoundPass?.make,
         vehicleColor: asFoundPass?.vehicleColor,
+        serviceJobNo: asFoundPass?.serviceJobNo ?? null,
         toLocation: asToLocation,
         fromLocation: asFromLocation || null,
         approver: asFoundPass?.approver || sr.approver || null,
@@ -824,6 +855,7 @@ export default function CreateGatePassPage() {
           make: selectedVehicleDetail?.make || null,
           vehicleColor: selectedVehicleDetail?.colour || null,
           toLocation: lt.toLocation,
+          fromLocation: lt.fromLocation || null,
           outReason: lt.outReason,
           approver: lt.approver,
           departureDate: lt.departureDate,
@@ -849,6 +881,7 @@ export default function CreateGatePassPage() {
           arrivalTime: sr.arrivalTime || null,
           departureDate: sr.serviceDate || sr.arrivalDate || null,
           departureTime: sr.arrivalTime || null,
+          serviceJobNo: sr.serviceJobNo || null,
           transportMode,
           comments: srParts.length > 0 ? JSON.stringify(srParts.map(p => `${p.partName} (${p.partId})`)) : null,
           ...srCarrierMileage,
@@ -1001,8 +1034,8 @@ export default function CreateGatePassPage() {
           {isSr ? (
             <motion.div key="sr" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
 
-              {/* SR Mode toggle */}
-              <div className="grid grid-cols-2 gap-3 mb-5">
+              {/* SR Mode toggle — AREA_SALES_OFFICER only sees "Vehicle Move" (out) */}
+              <div className={`gap-3 mb-5 ${session?.user?.role === "AREA_SALES_OFFICER" ? "hidden" : "grid grid-cols-2"}`}>
                 {([
                   {
                     value: "in" as const,
@@ -1194,6 +1227,15 @@ export default function CreateGatePassPage() {
                     {/* On/by field */}
                     <Field label="On/by" className="mb-3">
                       <TextInput value={sr.onBy} onChange={(v) => setS("onBy", v)} placeholder="e.g. customer name or contact" />
+                    </Field>
+
+                    {/* Service Job Number */}
+                    <Field label="Service Job No." className="mb-3">
+                      <TextInput
+                        value={sr.serviceJobNo}
+                        onChange={(v) => setS("serviceJobNo", v)}
+                        placeholder="e.g. SV30-0169298 (optional)"
+                      />
                     </Field>
 
                     {/* Job type */}
@@ -1753,30 +1795,31 @@ export default function CreateGatePassPage() {
                             </div>
 
                             {/* Location + Departure */}
+                            {asSubType !== "MAIN_OUT" && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                              {/* To Location — auto-filled from found pass, read-only */}
-                              <Field label="To Location (Current Plant)" required error={errors.asToLocation}>
+                              {/* From Location — auto-filled from found pass (vehicle's current location), read-only */}
+                              <Field label="From Location (Current Plant)" required error={errors.asFromLocation}>
                                 <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                                  style={{ background: "var(--surface2)", borderColor: errors.asToLocation ? "#f87171" : "var(--border)", color: "var(--text)" }}>
+                                  style={{ background: "var(--surface2)", borderColor: errors.asFromLocation ? "#f87171" : "var(--border)", color: "var(--text)" }}>
                                   <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                   </svg>
-                                  <span className="font-medium truncate">{asToLocation || <span className="italic opacity-50">Auto-filled from gate pass</span>}</span>
+                                  <span className="font-medium truncate">{asFromLocation || <span className="italic opacity-50">Auto-filled from gate pass</span>}</span>
                                   <span className="ml-auto text-xs flex-shrink-0 px-2 py-0.5 rounded-md" style={{ background: "var(--surface)", color: "var(--text-muted)" }}>auto</span>
                                 </div>
                               </Field>
-                              {/* From Location — DIMO plant list dropdown */}
-                              <Field label="From Location (DIMO Plant)" required error={errors.asFromLocation}>
+                              {/* To Location — editable destination */}
+                              <Field label="To Location (Destination)" required error={errors.asToLocation}>
                                 <SearchInput
-                                  value={asFromLocation}
-                                  onChange={(v) => { setAsFromLocation(v); setErrors(p => { const n = {...p}; delete n.asFromLocation; return n; }); }}
-                                  placeholder="Select DIMO plant"
-                                  error={errors.asFromLocation}
+                                  value={asToLocation}
+                                  onChange={(v) => { setAsToLocation(v); setErrors(p => { const n = {...p}; delete n.asToLocation; return n; }); }}
+                                  placeholder="Select destination"
+                                  error={errors.asToLocation}
                                   options={dimoLocations.filter(o =>
-                                    !asFromLocation || o.label?.toLowerCase().includes(asFromLocation.toLowerCase()) || o.value?.toLowerCase().includes(asFromLocation.toLowerCase())
+                                    !asToLocation || o.label?.toLowerCase().includes(asToLocation.toLowerCase()) || o.value?.toLowerCase().includes(asToLocation.toLowerCase())
                                   )}
-                                  onSelect={(o) => { setAsFromLocation(o.storageDescription || o.label || o.value); setErrors(p => { const n = {...p}; delete n.asFromLocation; return n; }); }}
+                                  onSelect={(o) => { setAsToLocation(o.storageDescription || o.label || o.value); setErrors(p => { const n = {...p}; delete n.asToLocation; return n; }); }}
                                   renderOption={(o) => (
                                     <div className="py-0.5">
                                       <p className="font-medium text-sm" style={{ color: "var(--text)" }}>{o.storageDescription || o.label}</p>
@@ -1786,6 +1829,16 @@ export default function CreateGatePassPage() {
                                 />
                               </Field>
                             </div>
+                            )}
+                            {asSubType === "MAIN_OUT" && (
+                              <div className="mb-4 flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
+                                style={{ background: "#f5f3ff", borderColor: "#c4b5fd", color: "#5b21b6" }}>
+                                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Main Gate OUT — Customer Handover. No location transfer required.
+                              </div>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <Field label="Departure Date" required error={errors.departureDate}>
                                 <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} />
@@ -1944,12 +1997,20 @@ export default function CreateGatePassPage() {
                           options={lookupOptions.vehicle}
                           onSelect={(o) => {
                             setL("vehicle", o.value);
-                            setSelectedVehicleDetail({
+                            const detail = {
                               chassisNo:    o.chassisNo    ?? "",
                               model:        o.model        ?? "",
                               make:         o.make         ?? "",
                               colourFamily: o.colourFamily ?? "",
                               colour:       o.colour       ?? "",
+                            };
+                            setSelectedVehicleDetail(detail);
+                            // Auto-detect vehicle's current location
+                            void fetchVehicleCurrentLocation(o.value).then((loc) => {
+                              if (loc) {
+                                setL("fromLocation", loc);
+                                setSelectedVehicleDetail({ ...detail, currentLocation: loc });
+                              }
                             });
                           }}
                           renderOption={(o) => (
@@ -1995,8 +2056,24 @@ export default function CreateGatePassPage() {
                     </div>
                     {/* Vehicle detail card */}
                     {selectedVehicleDetail && (
-                      <div className="mt-3 rounded-xl border grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 px-4 py-3"
+                      <div className="mt-3 rounded-xl border px-4 py-3"
                         style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                        {/* Current Location — prominent row at top */}
+                        <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
+                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Current Location</p>
+                            <p className="text-sm font-semibold" style={{ color: selectedVehicleDetail.currentLocation ? "#2563eb" : "var(--text-muted)" }}>
+                              {selectedVehicleDetail.currentLocation ?? (
+                                <span className="italic font-normal">Detecting…</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
                         {[
                           { label: "Chassis No",    val: selectedVehicleDetail.chassisNo },
                           { label: "Model",         val: selectedVehicleDetail.model },
@@ -2011,6 +2088,7 @@ export default function CreateGatePassPage() {
                             </p>
                           </div>
                         ))}
+                        </div>
                       </div>
                     )}
                   </Field>
@@ -2060,7 +2138,7 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Gate In — Expected Arrival</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Expected Arrival Date">
-                    <TextInput type="date" value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} />
+                    <TextInput type="date" value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || undefined} />
                   </Field>
                   <Field label="Expected Arrival Time">
                     <TextInput type="time" value={lt.arrivalTime} onChange={(v) => setL("arrivalTime", v)} />
@@ -2332,7 +2410,8 @@ export default function CreateGatePassPage() {
           </AnimatePresence>
             </div>
 
-            {/* Mileage / Additional Details */}
+            {/* Mileage / Additional Details — hidden for Service/Repair */}
+            {!isSr && (
             <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           <SectionTitle>{isLtLike ? "Mileage Details" : "Additional Details"}</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2347,6 +2426,7 @@ export default function CreateGatePassPage() {
             </Field>
           </div>
             </div>
+            )}
           </>
         )}
 

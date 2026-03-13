@@ -10,9 +10,9 @@ type User = {
   approver?: { id: string; name: string } | null;
 };
 
-const ROLES = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN"];
-const roleColors: Record<string, string> = { INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669", ADMIN: "#dc2626" };
-const roleBg: Record<string, string> = { INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5", ADMIN: "#fef2f2" };
+const ROLES = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN", "CASHIER", "AREA_SALES_OFFICER"];
+const roleColors: Record<string, string> = { INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669", ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2" };
+const roleBg: Record<string, string> = { INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5", ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff" };
 
 /* ─── Add User Modal ──────────────────────────────────────────────── */
 function AddUserModal({ onClose, onCreated, approvers }: {

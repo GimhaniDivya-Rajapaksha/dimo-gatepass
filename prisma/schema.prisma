@@ -12,6 +12,8 @@ enum Role {
   APPROVER
   RECIPIENT
   ADMIN
+  AREA_SALES_OFFICER
+  CASHIER
 }
 
 enum PassType {
@@ -27,6 +29,7 @@ enum GatePassStatus {
   GATE_OUT
   COMPLETED
   CANCELLED
+  CASHIER_REVIEW
 }
 
 model User {
@@ -38,6 +41,7 @@ model User {
   approverId       String?
   approver         User?          @relation("InitiatorApprover", fields: [approverId], references: [id])
   initiators       User[]         @relation("InitiatorApprover")
+  defaultLocation  String?
   resetToken       String?        @unique
   resetTokenExpiry DateTime?
   createdAt        DateTime       @default(now())
@@ -88,6 +92,7 @@ model GatePass {
   resubmitNote    String? // initiator's correction note when resubmitting
 
   passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
+  serviceJobNo   String?   // After Sales service job/work order number
   parentPassId   String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
   subPasses      GatePass[] @relation("SubPasses")
@@ -101,9 +106,21 @@ model GatePass {
   approvedAt     DateTime?
 
   notifications  Notification[]
+  serviceOrders  ServiceOrder[]
 
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+}
+
+model ServiceOrder {
+  id          String   @id @default(cuid())
+  gatePassId  String
+  gatePass    GatePass @relation(fields: [gatePassId], references: [id])
+  orderId     String
+  orderStatus String   // "Open" | "Close"
+  payTerm     String   // "Immediate" | "Credit" | etc.
+  isAssigned  Boolean  @default(false)
+  createdAt   DateTime @default(now())
 }
 
 model LocationOption {

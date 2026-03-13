@@ -9,10 +9,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
   const { userId, role } = await req.json();
-  const validRoles = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN"];
+  const validRoles = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN", "CASHIER", "AREA_SALES_OFFICER"];
   if (!userId || !validRoles.includes(role)) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
-  await prisma.user.update({ where: { id: userId }, data: { role } });
+  await prisma.user.update({ where: { id: userId }, data: { role: role as any } });
   return NextResponse.json({ success: true });
 }

@@ -16,24 +16,30 @@ const pageInfo: Record<string, { title: string; subtitle: string }> = {
   "/admin":             { title: "User Management",  subtitle: "Manage system users" },
   "/gate-pass":         { title: "Gate Passes",      subtitle: "All gate pass records" },
   "/gate-pass/create":  { title: "Create Gate Pass", subtitle: "Submit a new gate pass request" },
-  "/gate-pass/approve": { title: "New Requests",     subtitle: "Review pending approvals" },
+  "/gate-pass/approve": { title: "Pending Requests",  subtitle: "Review pending approvals" },
   "/gate-pass/receive":  { title: "Receive Vehicles",  subtitle: "Acknowledge incoming vehicles" },
   "/gate-pass/rejected": { title: "Rejected Passes",   subtitle: "Passes rejected by approver" },
-  "/vehicle-report":     { title: "Vehicle Report",    subtitle: "Search vehicle history & download reports" },
+  "/vehicle-report":          { title: "Vehicle Report",    subtitle: "Search vehicle history & download reports" },
+  "/gate-pass/cashier-review": { title: "Order Review",      subtitle: "Review service orders and complete jobs" },
 };
 
+
 const roleColors: Record<string, string> = {
-  INITIATOR: "#3b82f6",
-  APPROVER:  "#f59e0b",
-  RECIPIENT: "#10b981",
-  ADMIN:     "#8b5cf6",
+  INITIATOR:          "#3b82f6",
+  APPROVER:           "#f59e0b",
+  RECIPIENT:          "#10b981",
+  ADMIN:              "#8b5cf6",
+  AREA_SALES_OFFICER: "#0891b2",
+  CASHIER:            "#16a34a",
 };
 
 const roleBadges: Record<string, string> = {
-  INITIATOR: "Gate Pass Initiator",
-  APPROVER:  "Approver",
-  RECIPIENT: "Recipient",
-  ADMIN:     "Admin",
+  INITIATOR:          "Gate Pass Initiator",
+  APPROVER:           "Approver",
+  RECIPIENT:          "Recipient",
+  ADMIN:              "Admin",
+  AREA_SALES_OFFICER: "Area Sales Officer",
+  CASHIER:            "Cashier",
 };
 
 function SunIcon() {

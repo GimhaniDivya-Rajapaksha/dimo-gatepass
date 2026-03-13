@@ -34,6 +34,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string; dot:
   GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
   COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6", dot: "#8b5cf6" },
   CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
+  CASHIER_REVIEW:   { label: "Cashier Review",      bg: "#fef3c7", color: "#b45309", dot: "#f59e0b" },
 };
 
 const colorDot: Record<string, string> = {
@@ -128,6 +129,23 @@ export default function InitiatorGatePassDetailPage() {
     } catch {
       setCancelLoading(false);
       setError("Could not cancel. Please try again.");
+    }
+  }
+
+  async function handleMarkAsIn() {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "gate_in" }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setDone(true);
+      setTimeout(() => router.push("/initiator"), 2000);
+    } catch {
+      setActionLoading(false);
+      setError("Action failed. Please try again.");
     }
   }
 
@@ -237,8 +255,8 @@ export default function InitiatorGatePassDetailPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </motion.div>
-          <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--text)" }}>Marked as Gate Out!</h2>
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Recipients have been notified. Redirecting...</p>
+          <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--text)" }}>Action Completed!</h2>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Status updated successfully. Redirecting...</p>
         </motion.div>
       </div>
     );
@@ -293,11 +311,17 @@ export default function InitiatorGatePassDetailPage() {
   }
 
   if (!data) return null;
-  const sc = statusCfg[data.status] || statusCfg["PENDING_APPROVAL"];
+  const rawSc = statusCfg[data.status] || statusCfg["PENDING_APPROVAL"];
+  // For MAIN_IN/SUB_IN passes, GATE_OUT status means the vehicle came IN — show "Gate In" label
+  const isInboundPass = ["MAIN_IN", "SUB_IN"].includes(data.passSubType ?? "");
+  const sc = (data.status === "GATE_OUT" && isInboundPass)
+    ? { ...rawSc, label: "Gate In" }
+    : rawSc;
   const isLT = data.passType === "LOCATION_TRANSFER";
-  const canCancel  = data.status === "PENDING_APPROVAL" && role === "INITIATOR";
+  const canCancel  = data.status === "PENDING_APPROVAL" && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
   const canPrint = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(data.status);
   const isApproverView = role === "APPROVER" || role === "ADMIN";
+  const isInitiatorView = role === "INITIATOR" || role === "AREA_SALES_OFFICER";
   const pendingApproval = data.status === "PENDING_APPROVAL";
 
   return (
@@ -810,8 +834,8 @@ export default function InitiatorGatePassDetailPage() {
               </>
             )}
 
-            {/* ── INITIATOR buttons ── */}
-            {!isApproverView && (
+            {/* ── INITIATOR / AREA_SALES_OFFICER buttons (own passes only) ── */}
+            {isInitiatorView && (
               <>
                 {canCancel && (
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
@@ -835,13 +859,24 @@ export default function InitiatorGatePassDetailPage() {
                         : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>}
                       {actionLoading ? "Marking..." : (["MAIN_IN", "SUB_IN"].includes(data.passSubType ?? "") ? "Mark as IN" : "Mark as OUT")}
                     </motion.button>
+                  ) : data.status === "GATE_OUT" && data.passType === "AFTER_SALES" ? (
+                    // After Sales GATE_OUT — INITIATOR/ASO must confirm arrival or handover
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleMarkAsIn} disabled={actionLoading}
+                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                      {actionLoading
+                        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                      {actionLoading ? "Confirming..." : (data.passSubType === "MAIN_OUT" ? "Confirm Handover" : "Mark as Arrived")}
+                    </motion.button>
                   ) : (
                     <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border"
                       style={{ background: "var(--surface)", borderColor: "#3b82f6", color: "#3b82f6", opacity: 0.7 }}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
-                      {data.status === "GATE_OUT" ? "Marked as Out" : "Completed"}
+                      {data.status === "GATE_OUT" ? "Marked as Out" : data.status === "CASHIER_REVIEW" ? "Awaiting Cashier Review" : "Completed"}
                     </div>
                   )
                 )}

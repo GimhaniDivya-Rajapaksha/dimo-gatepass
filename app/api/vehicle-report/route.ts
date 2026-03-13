@@ -53,5 +53,9 @@ export async function GET(req: NextRequest) {
     cancelled: passes.filter(p => p.status === "CANCELLED").length,
   };
 
-  return NextResponse.json({ vehicleMaster, passes, stats });
+  // Current location = toLocation of the most recent COMPLETED pass
+  const currentLocation =
+    passes.find(p => p.status === "COMPLETED" && p.toLocation)?.toLocation ?? null;
+
+  return NextResponse.json({ vehicleMaster, passes, stats, currentLocation });
 }

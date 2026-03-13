@@ -49,6 +49,8 @@ export default function LoginPage() {
     else if (role === "INITIATOR") router.push("/initiator");
     else if (role === "APPROVER") router.push("/approver");
     else if (role === "RECIPIENT") router.push("/recipient");
+    else if (role === "CASHIER") router.push("/initiator");
+    else if (role === "AREA_SALES_OFFICER") router.push("/initiator");
     else router.push("/");
   }
 

@@ -19,6 +19,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string }> = 
   REJECTED:         { label: "Rejected",           bg: "#fef2f2", color: "#991b1b" },
   GATE_OUT:         { label: "Gate Out",            bg: "#eff6ff", color: "#1d4ed8" },
   COMPLETED:        { label: "Completed",           bg: "#f5f3ff", color: "#5b21b6" },
+  CASHIER_REVIEW:   { label: "Cashier Review",      bg: "#fef3c7", color: "#b45309" },
 };
 
 const subTypeCfg: Record<string, { label: string; short: string; bg: string; color: string; dot: string; step: number; stepLabel: string }> = {
@@ -37,6 +38,24 @@ export default function ApproverListPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({
+    LOCATION_TRANSFER: 0, CUSTOMER_DELIVERY: 0, AFTER_SALES: 0,
+  });
+
+  const fetchCounts = useCallback(async () => {
+    const types = ["LOCATION_TRANSFER", "CUSTOMER_DELIVERY", "AFTER_SALES"] as const;
+    const results = await Promise.all(
+      types.map((t) =>
+        fetch(`/api/gate-pass?passType=${t}&status=PENDING_APPROVAL&limit=1`)
+          .then((r) => r.json())
+          .then((d) => ({ type: t, count: d.total ?? 0 }))
+          .catch(() => ({ type: t, count: 0 }))
+      )
+    );
+    const counts: Record<string, number> = {};
+    results.forEach(({ type, count }) => { counts[type] = count; });
+    setTabCounts(counts);
+  }, []);
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
@@ -60,7 +79,7 @@ export default function ApproverListPage() {
     }
   }, [activeType, page, search]);
 
-  useEffect(() => { fetchPasses(); }, [fetchPasses]);
+  useEffect(() => { fetchPasses(); void fetchCounts(); }, [fetchPasses, fetchCounts]);
   useEffect(() => { setPage(1); }, [activeType, search]);
 
   const handleView = (id: string) => {
@@ -71,7 +90,7 @@ export default function ApproverListPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>New Requests</h1>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Pending Requests</h1>
         <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Review and approve submitted gate pass requests</p>
       </div>
 
@@ -87,19 +106,34 @@ export default function ApproverListPage() {
       <div className="rounded-2xl border overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         <div className="flex items-center justify-between p-4 border-b gap-4" style={{ borderColor: "var(--border)" }}>
           <div className="flex gap-2">
-            {(["LOCATION_TRANSFER", "CUSTOMER_DELIVERY", "AFTER_SALES"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveType(t)}
-                className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-                style={activeType === t
-                  ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
-                  : { background: "var(--surface2)", color: "var(--text-muted)" }
-                }
-              >
-                {t === "LOCATION_TRANSFER" ? "Location Transfer" : t === "CUSTOMER_DELIVERY" ? "Customer Delivery" : "Service / Repair"}
-              </button>
-            ))}
+            {(["LOCATION_TRANSFER", "CUSTOMER_DELIVERY", "AFTER_SALES"] as const).map((t) => {
+              const label = t === "LOCATION_TRANSFER" ? "Location Transfer" : t === "CUSTOMER_DELIVERY" ? "Customer Delivery" : "Service / Repair";
+              const cnt = tabCounts[t] ?? 0;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setActiveType(t)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+                  style={activeType === t
+                    ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
+                    : { background: "var(--surface2)", color: "var(--text-muted)" }
+                  }
+                >
+                  {label}
+                  {cnt > 0 && (
+                    <span
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold"
+                      style={activeType === t
+                        ? { background: "rgba(255,255,255,0.25)", color: "#fff" }
+                        : { background: "#ef4444", color: "#fff" }
+                      }
+                    >
+                      {cnt}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div className="relative w-64">
             <input

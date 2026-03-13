@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 
-export default async function VehicleReportLayout({ children }: { children: React.ReactNode }) {
+export default async function CashierReviewLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
