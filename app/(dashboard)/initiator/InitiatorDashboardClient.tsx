@@ -423,6 +423,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [markingOutId, setMarkingOutId] = useState<string | null>(null);
 
   // ASO only: vehicles en route (SUB_OUT at GATE_OUT)
   const [incoming, setIncoming] = useState<IncomingVehicle[]>([]);
@@ -518,23 +519,23 @@ export default function InitiatorDashboardClient({ user }: Props) {
 
   useEffect(() => { void fetchMainInActive(); }, [fetchMainInActive]);
 
-  // INITIATOR only: fetch AFTER_SALES SUB_IN + SUB_OUT_IN passes arriving at initiator's location
-  // SUB_IN     = vehicle sent to service center, ASO created receipt — INITIATOR acknowledges
-  // SUB_OUT_IN = vehicle returning from service center — INITIATOR physically receives it
+  // INITIATOR only: fetch AFTER_SALES SUB_OUT_IN passes returning to initiator's location
+  // SUB_OUT_IN = vehicle returning from service center back to DIMO — INITIATOR physically receives it
+  // SUB_IN passes are handled by ASO (informational only, not shown here)
   const fetchArrivingVehicles = useCallback(async () => {
     if (isASO) return;
     setArrivingLoading(true);
     try {
-      // Fetch all AFTER_SALES passes visible to INITIATOR (API applies parentPass filter)
-      // then filter client-side for the inbound sub-types
       const params = new URLSearchParams({ passType: "AFTER_SALES", limit: "100" });
       const res = await fetch(`/api/gate-pass?${params}`);
       if (!res.ok) return;
       const d = await res.json();
       setArrivingVehicles(
         (d.passes || []).filter((p: GatePass) =>
-          (p.passSubType === "SUB_IN" || p.passSubType === "SUB_OUT_IN") &&
-          (p.status === "APPROVED" || p.status === "GATE_OUT")
+          // SUB_OUT_IN: vehicle actively returning to HQ — needs confirm on arrival
+          (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
+          // SUB_IN at GATE_OUT: vehicle is at service center, ASO hasn't dispatched return yet — informational
+          || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
         )
       );
     } finally {
@@ -572,6 +573,21 @@ export default function InitiatorDashboardClient({ user }: Props) {
 
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
   useEffect(() => { setPage(1); }, [search, statusFilter]);
+
+  // Mark a non-AFTER_SALES (LT/CD) approved pass as Gate Out directly from table
+  const handleMarkOut = useCallback(async (id: string) => {
+    setMarkingOutId(id);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "gate_out" }),
+      });
+      if (res.ok) await fetchPasses();
+    } finally {
+      setMarkingOutId(null);
+    }
+  }, [fetchPasses]);
 
   const handleConfirmArrived = useCallback(async (id: string) => {
     if (!confirm("Confirm vehicle has arrived?")) return;
@@ -799,8 +815,8 @@ export default function InitiatorDashboardClient({ user }: Props) {
                 </svg>
               </div>
               <div>
-                <h2 className="font-bold text-sm" style={{ color: "#065f46" }}>Vehicles Arriving</h2>
-                <p className="text-xs" style={{ color: "#10b981" }}>SUB IN passes created by ASO — confirm when vehicle arrives</p>
+                <h2 className="font-bold text-sm" style={{ color: "#065f46" }}>After Sales Vehicles</h2>
+                <p className="text-xs" style={{ color: "#10b981" }}>Track service vehicles — confirm arrival when returned from service centre</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -831,21 +847,24 @@ export default function InitiatorDashboardClient({ user }: Props) {
                 <svg className="w-5 h-5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <p className="text-sm" style={{ color: "var(--text-muted)" }}>No vehicles arriving. When ASO creates a SUB IN pass for your vehicle, it will appear here.</p>
+                <p className="text-sm" style={{ color: "var(--text-muted)" }}>No active after sales vehicles. When a vehicle is at a service centre or returning, it will appear here.</p>
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                {arrivingVehicles.map((v) => (
+                {arrivingVehicles.map((v) => {
+                  const isReturning = v.passSubType === "SUB_OUT_IN";
+                  return (
                   <motion.div
                     key={v.id}
                     className="rounded-xl border overflow-hidden"
-                    style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}
+                    style={{ background: isReturning ? "#f0fdf4" : "#fffbeb", borderColor: isReturning ? "#bbf7d0" : "#fde68a" }}
                     initial={{ opacity: 0, x: -8 }}
                     animate={{ opacity: 1, x: 0 }}
                   >
                     <div className="flex items-center gap-3 px-4 py-3">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
-                        <svg className="w-4 h-4" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isReturning ? "#dcfce7" : "#fef3c7" }}>
+                        <svg className="w-4 h-4" style={{ color: isReturning ? "#15803d" : "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 8h4l3 3v5h-7V8z" />
@@ -853,7 +872,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-xs font-mono" style={{ color: "#065f46" }}>{v.gatePassNumber}</span>
+                          <span className="font-bold text-xs font-mono" style={{ color: isReturning ? "#065f46" : "#92400e" }}>{v.gatePassNumber}</span>
                           <span className="font-bold text-sm" style={{ color: "var(--text)" }}>{v.vehicle}</span>
                           {v.chassis && <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>{v.chassis}</span>}
                         </div>
@@ -864,7 +883,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
                               <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                               </svg>
-                              <span className="font-semibold" style={{ color: "#059669" }}>{v.toLocation || "—"}</span>
+                              <span className="font-semibold" style={{ color: isReturning ? "#059669" : "#b45309" }}>{v.toLocation || "—"}</span>
                             </div>
                           )}
                           {v.departureDate && (
@@ -874,12 +893,15 @@ export default function InitiatorDashboardClient({ user }: Props) {
                             <span className="text-xs" style={{ color: "var(--text-muted)" }}>By: {v.createdBy.name}</span>
                           )}
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                            style={{ background: v.status === "GATE_OUT" ? "#dbeafe" : "#dcfce7", color: v.status === "GATE_OUT" ? "#1d4ed8" : "#15803d" }}>
-                            {v.status === "GATE_OUT" ? "En Route" : "Ready"}
+                            style={{
+                              background: isReturning ? (v.status === "GATE_OUT" ? "#dbeafe" : "#dcfce7") : "#fef3c7",
+                              color: isReturning ? (v.status === "GATE_OUT" ? "#1d4ed8" : "#15803d") : "#92400e",
+                            }}>
+                            {isReturning ? (v.status === "GATE_OUT" ? "En Route" : "Ready") : "At Service Centre"}
                           </span>
                         </div>
                       </div>
-                      {v.passSubType === "SUB_OUT_IN" ? (
+                      {isReturning ? (
                         <button
                           onClick={() => void handleConfirmArrived(v.id)}
                           disabled={confirmingArrivedId === v.id}
@@ -899,17 +921,18 @@ export default function InitiatorDashboardClient({ user }: Props) {
                           Confirm Arrived
                         </button>
                       ) : (
-                        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold flex-shrink-0"
-                          style={{ background: "#fef9c3", color: "#854d0e", border: "1px solid #fde047" }}>
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        <span className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0"
+                          style={{ background: "#fef3c7", color: "#b45309", border: "1px solid #fde68a" }}>
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
-                          At Service Centre
+                          Awaiting ASO
                         </span>
                       )}
                     </div>
                   </motion.div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1192,10 +1215,27 @@ export default function InitiatorDashboardClient({ user }: Props) {
                       <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.requestedBy || p.createdBy.name}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.color }} />
-                          {sc.label}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.color }} />
+                            {sc.label}
+                          </span>
+                          {/* Mark as OUT — only for APPROVED non-AFTER_SALES (LT/CD) */}
+                          {p.status === "APPROVED" && p.passType !== "AFTER_SALES" && (
+                            <button
+                              onClick={() => handleMarkOut(p.id)}
+                              disabled={markingOutId === p.id}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold disabled:opacity-50 transition-all hover:opacity-80"
+                              style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}
+                              title="Mark as Gate Out"
+                            >
+                              {markingOutId === p.id
+                                ? <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg>}
+                              {markingOutId === p.id ? "..." : "Mark OUT"}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </motion.tr>
                   );
