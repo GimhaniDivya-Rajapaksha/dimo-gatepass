@@ -84,7 +84,7 @@ export default function ApproverListPage() {
 
   const handleView = (id: string) => {
     fetch(`/api/notifications/read`, { method: "POST" });
-    router.push(`/gate-pass/approve/${id}`);
+    router.push(`/gate-pass/${id}`);
   };
 
   return (

@@ -6,8 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 type Stats = { pending: number; approved: number; rejected: number; gateOut: number; completed: number; total: number };
 
 type GatePass = {
-  id: string; gatePassNumber: string; passType: string; status: string;
-  vehicle: string; chassis: string | null;
+  id: string; gatePassNumber: string; passType: string; passSubType: string | null; status: string;
+  vehicle: string; chassis: string | null; serviceJobNo: string | null;
   requestedBy: string | null; toLocation: string | null;
   createdBy: { name: string }; createdAt: string;
 };
@@ -299,6 +299,15 @@ export default function ApproverDashboardClient({ user }: Props) {
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-sm" style={{ color: "var(--text)" }}>{gp.vehicle}</p>
                       {gp.chassis && <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{gp.chassis}</p>}
+                      {gp.passSubType === "MAIN_OUT" && (
+                        <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+                          style={{ background: "#fef3c7", color: "#b45309" }}>
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                          </svg>
+                          Partial Payment — Needs Special Approval
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-sm" style={{ color: "var(--text)" }}>
                       {gp.toLocation || gp.requestedBy || "-"}
@@ -308,7 +317,7 @@ export default function ApproverDashboardClient({ user }: Props) {
                     </td>
                     <td className="px-5 py-3.5">
                       <Link
-                        href="/gate-pass/approve"
+                        href={`/gate-pass/${gp.id}`}
                         className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:opacity-80"
                         style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}
                       >

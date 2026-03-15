@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -99,10 +99,11 @@ const passTypeCfg: Record<string, { label: string; bg: string; color: string }> 
 };
 
 const subTypeCfg: Record<string, { label: string; bg: string; color: string }> = {
-  MAIN_IN:  { label: "Main IN",  bg: "#f0fdf4", color: "#15803d" },
-  SUB_OUT:  { label: "Sub OUT",  bg: "#eff6ff", color: "#1d4ed8" },
-  SUB_IN:   { label: "Sub IN",   bg: "#fffbeb", color: "#92400e" },
-  MAIN_OUT: { label: "Main OUT", bg: "#fdf4ff", color: "#6b21a8" },
+  MAIN_IN:    { label: "Main IN",    bg: "#f0fdf4", color: "#15803d" },
+  SUB_OUT:    { label: "Sub OUT",    bg: "#eff6ff", color: "#1d4ed8" },
+  SUB_IN:     { label: "Sub IN",     bg: "#fffbeb", color: "#92400e" },
+  SUB_OUT_IN: { label: "Sub OUT/IN", bg: "#fff7ed", color: "#c2410c" },
+  MAIN_OUT:   { label: "Main OUT",   bg: "#fdf4ff", color: "#6b21a8" },
 };
 
 // ── CSV ───────────────────────────────────────────────────────────────────────
@@ -162,6 +163,13 @@ export default function VehicleReportPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
+  useEffect(() => {
+    if (status === "loading") return;
+    if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
+      router.replace("/");
+    }
+  }, [status, session, router]);
+
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -183,8 +191,7 @@ export default function VehicleReportPage() {
       </div>
     );
   }
-  if (!session || !["INITIATOR", "APPROVER", "ADMIN"].includes(session.user?.role ?? "")) {
-    router.replace("/");
+  if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
     return null;
   }
 

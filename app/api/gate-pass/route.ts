@@ -27,16 +27,34 @@ export async function GET(req: NextRequest) {
         { parentPass: { createdById: session.user.id } },
       ]
     }];
+  } else if (role === "AREA_SALES_OFFICER") {
+    // ASO sees only their own passes — UNLESS locationView=true (Vehicles Incoming)
+    // OR searching AFTER_SALES by GP number (to link passes created by other roles)
+    const locationView = searchParams.get("locationView") === "true";
+    const isAfterSalesSearch = searchParams.get("passType") === "AFTER_SALES" && searchParams.get("search");
+    if (!locationView && !isAfterSalesSearch) {
+      where.AND = [{
+        OR: [
+          { createdById: session.user.id },
+          { parentPass: { createdById: session.user.id } },
+        ]
+      }];
+    }
   }
-  // AREA_SALES_OFFICER, APPROVER and ADMIN see all
+  // APPROVER and ADMIN see all
+
+  // toLocation filter (used by Vehicles Incoming to scope to this location)
+  const toLocationFilter = searchParams.get("toLocation");
+  if (toLocationFilter) where.toLocation = toLocationFilter;
 
   if (passType) where.passType = passType;
 
   const parentOnly = searchParams.get("parentOnly") === "true";
   if (passType === "AFTER_SALES" && parentOnly) {
     where.parentPassId = null;
-  } else if (!passType && role !== "INITIATOR") {
-    // In "All" view, hide AFTER_SALES sub-passes (except for INITIATOR who needs to see them)
+  } else if (!passType && role !== "INITIATOR" && !status) {
+    // In "All" view (no specific status filter), hide AFTER_SALES sub-passes to reduce clutter.
+    // But when filtering by status (e.g. PENDING_APPROVAL for approver queue), show everything.
     where.NOT = { AND: [{ passType: "AFTER_SALES" }, { parentPassId: { not: null } }] };
   }
 
@@ -69,9 +87,9 @@ export async function GET(req: NextRequest) {
         createdBy: { select: { id: true, name: true, email: true } },
         approvedBy: { select: { id: true, name: true } },
         parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
-        subPasses: (passType === "AFTER_SALES" && parentOnly)
-          ? { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
-          : false,
+        ...(passType === "AFTER_SALES" && parentOnly ? {
+        subPasses: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
+      } : {}),
       },
       orderBy: { createdAt: "desc" },
       skip,
@@ -83,6 +101,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const session = await getServerSession(authOptions);
   const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER"];
   if (!session || !allowedRoles.includes(session.user.role ?? "")) {
@@ -91,23 +110,31 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
-  // AREA_SALES_OFFICER can only create AFTER_SALES sub-passes (SUB_IN, SUB_OUT, MAIN_OUT)
+  // AREA_SALES_OFFICER can only create AFTER_SALES sub-passes
   if (session.user.role === "AREA_SALES_OFFICER") {
-    if (body.passType !== "AFTER_SALES" || !["SUB_IN", "SUB_OUT", "MAIN_OUT"].includes(body.passSubType)) {
+    if (body.passType !== "AFTER_SALES" || !["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
       return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
     }
   }
 
-  // MAIN_OUT for After Sales → goes to CASHIER_REVIEW instead of PENDING_APPROVAL
+  // After Sales status routing:
+  // - MAIN_OUT → CASHIER_REVIEW (cashier checks orders; partial → PENDING_APPROVAL for approver)
+  // - MAIN_IN / SUB_IN / SUB_OUT / SUB_OUT_IN → APPROVED directly (no approver needed for these sub-passes)
+  // - All other pass types → PENDING_APPROVAL (normal approval flow)
   const isAfterSalesMainOut = body.passType === "AFTER_SALES" && body.passSubType === "MAIN_OUT";
+  const isAfterSalesSubPass = body.passType === "AFTER_SALES" && ["MAIN_IN", "SUB_IN", "SUB_OUT", "SUB_OUT_IN"].includes(body.passSubType);
 
-  const count = await prisma.gatePass.count();
-  const gatePassNumber = `GP-${String(count + 1).padStart(4, "0")}`;
+  // Use max existing number (not count) to avoid collisions after deletions
+  const lastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
+  const lastNum = lastPass ? parseInt(lastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
+  const gatePassNumber = `GP-${String(lastNum + 1).padStart(4, "0")}`;
+
+  const initialStatus = isAfterSalesSubPass ? "APPROVED" : "PENDING_APPROVAL";
 
   const createData: Record<string, unknown> = {
     gatePassNumber,
     passType: body.passType,
-    status: "PENDING_APPROVAL", // always create with known status; update to CASHIER_REVIEW below if needed
+    status: initialStatus, // AFTER_SALES sub-passes auto-approved; update to CASHIER_REVIEW below for MAIN_OUT
     vehicle: body.vehicle || body.vehicleDetails || "Unknown",
     vehicleColor: body.vehicleColor || null,
     shipmentId: body.shipmentId || null,
@@ -136,6 +163,8 @@ export async function POST(req: NextRequest) {
     parentPassId: body.parentPassId || null,
     fromLocation: body.fromLocation || null,
     createdById: session.user.id,
+    // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
+    ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
   };
 
   // Only include serviceJobNo for After Sales passes (field added via db push, stale client)
@@ -219,4 +248,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ gatePass }, { status: 201 });
+  } catch (err) {
+    console.error("[POST /api/gate-pass] Error:", err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
 }

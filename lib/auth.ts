@@ -46,7 +46,7 @@ export const authOptions: NextAuthOptions = {
       } else if (token.id) {
         // Every session read: re-fetch role from DB so admin role changes take effect on refresh
         const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null }[]>`
-          SELECT role, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
+          SELECT role::text, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
         `;
         if (rows[0]) {
           token.role = rows[0].role ?? null;

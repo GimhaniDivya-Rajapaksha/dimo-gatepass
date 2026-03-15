@@ -49,7 +49,7 @@ function OrderModal({
 }: {
   pass: GatePass;
   onClose: () => void;
-  onProceed: (result: "COMPLETED" | "PENDING_APPROVAL") => void;
+  onProceed: (result: "APPROVED" | "PENDING_APPROVAL") => void;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
 
@@ -57,6 +57,8 @@ function OrderModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sapSyncing, setSapSyncing] = useState(false);
+  const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
 
   // New order form
   const [newOrderId, setNewOrderId] = useState("");
@@ -85,7 +87,68 @@ function OrderModal({
     }
   }, [pass.id]);
 
+  /** Sync orders from SAP into the DB, then refresh the list */
+  const syncFromSap = useCallback(async () => {
+    setSapSyncing(true);
+    setSapSyncMsg(null);
+    try {
+      const vin      = pass.chassis  ?? "";
+      const licplate = pass.vehicle  ?? "";
+      const params   = new URLSearchParams();
+      if (vin)      params.set("vin",      vin);
+      if (licplate) params.set("licplate", licplate);
+
+      const res = await fetch(`/api/sap/orders?${params.toString()}`);
+      if (!res.ok) { setSapSyncMsg("SAP unavailable"); return; }
+
+      type RawSapOrder = {
+        orderId: string; orderStatus: string; billingType: string;
+        payTerm: string; payTermCode: string; cancelled: boolean; isHappyPath: boolean;
+      };
+      const d: { orders?: RawSapOrder[]; error?: string } = await res.json();
+      const sapOrders: RawSapOrder[] = d.orders ?? [];
+
+      if (sapOrders.length === 0) {
+        setSapSyncMsg("No orders found in SAP for this vehicle.");
+        return;
+      }
+
+      // Upsert each SAP order into the DB (skip cancelled ones)
+      const active = sapOrders.filter((o) => !o.cancelled);
+      let added = 0;
+      const existingIds = new Set(orders.map((o) => o.orderId));
+
+      for (const o of active) {
+        if (!o.orderId || existingIds.has(o.orderId)) continue;
+        await fetch("/api/service-orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            gatePassId:  pass.id,
+            orderId:     o.orderId,
+            orderStatus: o.orderStatus || "Open",
+            payTerm:     o.payTerm     || o.payTermCode || "Immediate",
+          }),
+        });
+        added++;
+      }
+
+      await fetchOrders();
+      setSapSyncMsg(
+        added > 0
+          ? `${added} order${added > 1 ? "s" : ""} imported from SAP.`
+          : "All SAP orders already loaded."
+      );
+    } catch {
+      setSapSyncMsg("Failed to sync from SAP.");
+    } finally {
+      setSapSyncing(false);
+    }
+  }, [pass.id, pass.chassis, pass.vehicle, orders, fetchOrders]);
+
+  // Auto-sync from SAP when modal first opens
   useEffect(() => { void fetchOrders(); }, [fetchOrders]);
+  useEffect(() => { void syncFromSap(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAddOrder() {
     if (!newOrderId.trim()) return;
@@ -158,7 +221,7 @@ function OrderModal({
       });
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Failed to proceed"); return; }
-      onProceed(d.status as "COMPLETED" | "PENDING_APPROVAL");
+      onProceed(d.status as "APPROVED" | "PENDING_APPROVAL");
     } finally {
       setSaving(false);
     }
@@ -188,47 +251,66 @@ function OrderModal({
               {pass.vehicle} · {pass.gatePassNumber}
             </p>
           </div>
-          <button onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity"
-            style={{ background: "var(--surface2)" }}>
-            <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Add order row */}
-        <div className="px-6 py-3 border-b flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newOrderId}
-              onChange={(e) => setNewOrderId(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddOrder()}
-              placeholder="Order ID (e.g. 293084)"
-              className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-            />
-            <select value={newOrderStatus} onChange={(e) => setNewOrderStatus(e.target.value)}
-              className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
-              <option value="Open">Open</option>
-              <option value="Close">Close</option>
-            </select>
-            <select value={newPayTerm} onChange={(e) => setNewPayTerm(e.target.value)}
-              className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none"
-              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
-              <option value="Immediate">Immediate</option>
-              <option value="Credit">Credit</option>
-              <option value="Partial">Partial</option>
-            </select>
-            <button onClick={handleAddOrder} disabled={addingOrder || !newOrderId.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
-              style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
-              {addingOrder ? "Adding…" : "+ Add"}
+            {/* SAP Sync button */}
+            <button
+              onClick={() => void syncFromSap()}
+              disabled={sapSyncing}
+              title="Refresh orders from SAP"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-50"
+              style={{ background: "var(--surface2)", borderColor: "#3b82f6", color: "#3b82f6" }}
+            >
+              {sapSyncing ? (
+                <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              {sapSyncing ? "Syncing…" : "Sync SAP"}
+            </button>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70 transition-opacity"
+              style={{ background: "var(--surface2)" }}>
+              <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
         </div>
+
+        {/* Workflow steps guide */}
+        <div className="px-6 py-3 border-b flex-shrink-0 flex items-center gap-3"
+          style={{ borderColor: "var(--border)", background: "#f8fafc" }}>
+          {[
+            { n: "1", text: "Click Sync SAP to load orders", done: orders.length > 0 },
+            { n: "2", text: "Move all paid orders → Fully Paid", done: orders.length > 0 && available.length === 0 },
+            { n: "3", text: available.length === 0 && orders.length > 0 ? "Done & Close — vehicle cleared" : "Partial? Proceed → Approver reviews", done: false },
+          ].map((step, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-xs">
+              <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
+                style={{ background: step.done ? "#dcfce7" : "#e0f2fe", color: step.done ? "#15803d" : "#0369a1" }}>
+                {step.done ? "✓" : step.n}
+              </span>
+              <span style={{ color: step.done ? "#15803d" : "var(--text-muted)" }}>{step.text}</span>
+              {i < 2 && <span className="text-gray-300 mx-1">→</span>}
+            </div>
+          ))}
+        </div>
+
+        {/* SAP sync status message */}
+        {sapSyncMsg && (
+          <div className="px-6 py-2 text-xs font-medium flex items-center gap-2"
+            style={{ background: sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "#fef2f2" : "#f0fdf4", color: sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "#991b1b" : "#15803d", borderBottom: "1px solid var(--border)" }}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" : "M5 13l4 4L19 7"} />
+            </svg>
+            {sapSyncMsg}
+          </div>
+        )}
 
         {/* Body: two columns */}
         <div className="flex-1 overflow-y-auto min-h-0">
@@ -241,21 +323,23 @@ function OrderModal({
             </div>
           ) : (
             <div className="grid grid-cols-[1fr_auto_1fr] gap-0 h-full">
-              {/* Left: Available Orders */}
+              {/* Left: Pending Payment */}
               <div className="p-4">
                 <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>
-                  Available Orders
+                  Pending Payment
                   {available.length > 0 && (
                     <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
                       style={{ background: "#fef2f2", color: "#991b1b" }}>
-                      {available.length}
+                      {available.length} unpaid
                     </span>
                   )}
                 </p>
                 {available.length === 0 ? (
-                  <p className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
-                    {orders.length === 0 ? "No orders added yet" : "All orders assigned"}
-                  </p>
+                  <div className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
+                    {orders.length === 0
+                      ? <><p className="font-semibold mb-1">No orders yet</p><p>Click "Sync SAP" to load orders from SAP</p></>
+                      : <p className="text-green-600 font-semibold">✓ All orders fully paid</p>}
+                  </div>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {available.map((o) => (
@@ -276,39 +360,42 @@ function OrderModal({
                 )}
               </div>
 
-              {/* Center: Switch button */}
+              {/* Center: Move buttons */}
               <div className="flex flex-col items-center justify-center gap-2 px-2 py-4"
                 style={{ borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>
                 <button
                   onClick={handleSwitchToAssigned}
                   disabled={saving || selectedLeft.size === 0}
-                  title="Move selected to Assigned"
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                  title="Mark selected orders as fully paid"
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
                   style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
                   </svg>
-                  Assign
+                  Mark Paid
                 </button>
+                <p className="text-[9px] text-center leading-tight" style={{ color: "var(--text-muted)" }}>
+                  Select &amp;<br/>move
+                </p>
                 <button
                   onClick={handleSwitchToAvailable}
                   disabled={saving || selectedRight.size === 0}
-                  title="Move selected back to Available"
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                  title="Move back to pending"
+                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
                   style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca" }}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
                   </svg>
-                  Return
+                  Unmark
                 </button>
               </div>
 
-              {/* Right: Assigned */}
+              {/* Right: Fully Paid */}
               <div className="p-4">
                 <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>
-                  Assigned (Fully Paid)
+                  Fully Paid ✓
                   {assigned.length > 0 && (
                     <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
                       style={{ background: "#f0fdf4", color: "#15803d" }}>
@@ -317,7 +404,9 @@ function OrderModal({
                   )}
                 </p>
                 {assigned.length === 0 ? (
-                  <p className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>No orders assigned</p>
+                  <p className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
+                    Select orders from left &amp; click Mark Paid
+                  </p>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {assigned.map((o) => (
@@ -372,22 +461,41 @@ function OrderModal({
               </div>
             )}
           </div>
-          <button
-            onClick={handleProceed}
-            disabled={saving || orders.length === 0}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:opacity-90"
-            style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", flexShrink: 0 }}
-          >
-            {saving ? (
-              <>
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Processing…
-              </>
-            ) : "Proceed"}
-          </button>
+          {(() => {
+            const allPaid = orders.length > 0 && available.length === 0;
+            const partial = orders.length > 0 && available.length > 0 && assigned.length > 0;
+            const noOrders = orders.length === 0;
+            const bg = noOrders ? "#94a3b8" : allPaid ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#d97706,#b45309)";
+            const label = noOrders ? "Sync SAP to load orders"
+              : allPaid ? "Done & Close — Release Vehicle"
+              : partial ? "Send to Approver (partial payment)"
+              : "Proceed";
+            return (
+              <button
+                onClick={handleProceed}
+                disabled={saving || noOrders}
+                title={noOrders ? "Add at least one order to proceed" : allPaid ? "All orders paid — release vehicle" : "Some unpaid — needs Approver approval"}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
+                style={{ background: bg, flexShrink: 0 }}
+              >
+                {saving ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                    Processing…
+                  </>
+                ) : (
+                  <>
+                    {allPaid && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                    {partial && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
+                    {label}
+                  </>
+                )}
+              </button>
+            );
+          })()}
         </div>
       </motion.div>
     </div>
@@ -455,12 +563,7 @@ export default function CashierReviewPage() {
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "success" | "info" } | null>(null);
 
-  if (status === "loading") return null;
-  if (!session || session.user?.role !== "CASHIER") {
-    router.replace("/");
-    return null;
-  }
-
+  // All hooks must be declared before any conditional returns
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
@@ -476,15 +579,24 @@ export default function CashierReviewPage() {
 
   useEffect(() => { void fetchPasses(); }, [fetchPasses]);
 
+  useEffect(() => {
+    if (status !== "loading" && (!session || session.user?.role !== "CASHIER")) {
+      router.replace("/");
+    }
+  }, [status, session, router]);
+
+  if (status === "loading") return null;
+  if (!session || session.user?.role !== "CASHIER") return null;
+
   function showToast(text: string, type: "success" | "info" = "success") {
     setToastMsg({ text, type });
     setTimeout(() => setToastMsg(null), 3500);
   }
 
-  function handleProceedResult(result: "COMPLETED" | "PENDING_APPROVAL") {
+  function handleProceedResult(result: "APPROVED" | "PENDING_APPROVAL") {
     setModalPass(null);
-    if (result === "GATE_OUT" as string || result === "COMPLETED") {
-      showToast("All orders paid — vehicle cleared for Gate Out. Awaiting final confirmation.", "success");
+    if (result === "APPROVED") {
+      showToast("All orders paid — pass approved. Initiator can now Mark as Gate Out.", "success");
     } else {
       showToast("Partial payment — sent to Approver for review.", "info");
     }

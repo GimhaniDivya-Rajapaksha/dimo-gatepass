@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { fetchSapVehicles } from "@/lib/sap";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
 
@@ -99,6 +100,36 @@ export async function GET(req: NextRequest) {
     }
 
     if (field === "vehicle") {
+      // ── 1. Try SAP first ────────────────────────────────────────────────
+      const passType = (searchParams.get("passType") ?? "both") as
+        "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both";
+
+      try {
+        const sapVehicles = await fetchSapVehicles(q, passType);
+        if (sapVehicles.length > 0) {
+          return NextResponse.json({
+            options: sapVehicles.slice(0, take).map((v, i) => ({
+              id:           `${v.internalNo || v.chassisNo || v.vehicleNo || i}-${i}`,
+              value:        v.vehicleNo || v.chassisNo,   // license plate preferred, fall back to VIN
+              label:        v.vehicleNo && v.chassisNo
+                              ? `${v.vehicleNo} / ${v.chassisNo}`
+                              : (v.vehicleNo || v.chassisNo),
+              chassisNo:    v.chassisNo,
+              description:  v.model,
+              model:        v.model,
+              make:         v.make,
+              colourFamily: "",
+              colour:       v.colour,
+            })),
+            source: "sap",
+          });
+        }
+      } catch (sapErr) {
+        // SAP unavailable — fall through to local DB
+        console.warn("[lookups/vehicle] SAP error, falling back to local DB:", sapErr instanceof Error ? sapErr.message : sapErr);
+      }
+
+      // ── 2. Fallback: local VehicleOption DB ─────────────────────────────
       const options = await prisma.vehicleOption.findMany({
         where: q
           ? {
@@ -116,16 +147,19 @@ export async function GET(req: NextRequest) {
       });
       return NextResponse.json({
         options: options.map((row) => ({
-          id: row.id,
-          value: row.vehicleNo,
+          id:           row.id,
+          value:        row.vehicleNo,
           chassisNo:    row.chassisNo    ?? "",
           description:  row.description  ?? "",
           model:        row.model        ?? "",
           make:         row.make         ?? "",
           colourFamily: row.colourFamily ?? "",
           colour:       row.colour       ?? "",
-          label: row.chassisNo ? `${row.vehicleNo} / ${row.chassisNo}` : row.vehicleNo,
+          label:        row.chassisNo
+                          ? `${row.vehicleNo} / ${row.chassisNo}`
+                          : row.vehicleNo,
         })),
+        source: "local",
       });
     }
 

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 
 type GatePass = {
-  id: string; gatePassNumber: string; passType: string; status: string;
+  id: string; gatePassNumber: string; passType: string; passSubType: string | null; status: string;
   vehicle: string; vehicleColor: string | null; chassis: string | null; make: string | null;
   toLocation: string | null; requestedBy: string | null;
   transportMode: string | null; companyName: string | null; carrierName: string | null;
@@ -113,6 +113,7 @@ function SlideToConfirm({ onConfirm, label = "Slide to Confirm Gate IN" }: { onC
 function GatePassCard({ pass, onClick }: { pass: GatePass; onClick: () => void }) {
   const dot = resolveColor(pass.vehicleColor);
   const isGateOut = pass.status === "GATE_OUT";
+  const isArriving = pass.passSubType === "MAIN_IN" || pass.passType !== "AFTER_SALES";
   return (
     <motion.button
       initial={{ opacity: 0, y: 8 }}
@@ -155,7 +156,7 @@ function GatePassCard({ pass, onClick }: { pass: GatePass; onClick: () => void }
       {isGateOut && (
         <div className="mt-3 pt-3 border-t flex items-center gap-1.5 text-xs font-medium" style={{ borderColor: "var(--border)", color: "#10b981" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-          Tap to confirm receipt
+          {isArriving ? "Tap to confirm vehicle arrived" : "Tap to confirm vehicle departed"}
         </div>
       )}
     </motion.button>
@@ -168,6 +169,9 @@ function DetailDrawer({ pass, onClose, onConfirm }: { pass: GatePass; onClose: (
   const [done, setDone] = useState(false);
   const dot = resolveColor(pass.vehicleColor);
   const isGateOut = pass.status === "GATE_OUT";
+  // MAIN_IN = vehicle arriving at DIMO HQ; MAIN_OUT/SUB_OUT = vehicle departing
+  const isArriving = pass.passSubType === "MAIN_IN" || pass.passType !== "AFTER_SALES";
+  const slideLabel = isArriving ? "Slide to Confirm Gate IN" : "Slide to Confirm Gate OUT";
 
   async function handleConfirm() {
     try {
@@ -343,7 +347,7 @@ function DetailDrawer({ pass, onClose, onConfirm }: { pass: GatePass; onClose: (
             {/* Slide to confirm */}
             <div className="px-5 pt-4 pb-6 flex justify-center">
               {isGateOut ? (
-                <SlideToConfirm onConfirm={handleConfirm} />
+                <SlideToConfirm onConfirm={handleConfirm} label={slideLabel} />
               ) : (
                 <div className="flex items-center gap-2 px-6 py-3 rounded-full text-sm font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -370,7 +374,8 @@ const TABS: { key: TabKey; label: string; passType: string; status: string | nul
   { key: "lt_in",  label: "Location Transfer IN",  passType: "LOCATION_TRANSFER", status: "GATE_OUT"   },
   { key: "lt_out", label: "Location Transfer OUT",  passType: "LOCATION_TRANSFER", status: "COMPLETED"  },
   { key: "cd_out", label: "Customer Delivery",      passType: "CUSTOMER_DELIVERY", status: null         },
-  { key: "sr_out", label: "Service/Repair",         passType: "AFTER_SALES",       status: null         },
+  // sr_out: RECIPIENT acts on MAIN_IN (arriving), MAIN_OUT (customer release), SUB_OUT (to sub-location) at GATE_OUT
+  { key: "sr_out", label: "Service/Repair",         passType: "AFTER_SALES",       status: "GATE_OUT"   },
 ];
 
 const TAB_COLORS: Record<TabKey, { gradient: string; shadow: string; badge: string }> = {
@@ -409,13 +414,22 @@ export default function RecipientDashboardClient({ user }: Props) {
   const displayed = passes.filter(p => {
     const t = TABS.find(x => x.key === tab)!;
     if (p.passType !== t.passType) return false;
-    if (t.status) return p.status === t.status;
-    return true; // CD_OUT: show all statuses
+    if (t.status && p.status !== t.status) return false;
+    // Service/Repair: RECIPIENT only acts on MAIN_IN (arriving), MAIN_OUT/SUB_OUT (departing)
+    if (tab === "sr_out") {
+      return ["MAIN_IN", "MAIN_OUT", "SUB_OUT"].includes(p.passSubType ?? "");
+    }
+    return true;
   });
 
   const countFor = (key: TabKey) => {
     const t = TABS.find(x => x.key === key)!;
-    return passes.filter(p => p.passType === t.passType && (t.status ? p.status === t.status : true)).length;
+    return passes.filter(p => {
+      if (p.passType !== t.passType) return false;
+      if (t.status && p.status !== t.status) return false;
+      if (key === "sr_out") return ["MAIN_IN", "MAIN_OUT", "SUB_OUT"].includes(p.passSubType ?? "");
+      return true;
+    }).length;
   };
 
   const colors = TAB_COLORS[tab];

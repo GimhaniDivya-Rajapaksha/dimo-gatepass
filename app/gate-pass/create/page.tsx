@@ -572,6 +572,8 @@ export default function CreateGatePassPage() {
     approver: [], companyName: [], carrierRegNo: [],
   });
 
+  const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD" for min date constraint
+
   // Location Transfer / After Sales fields (shared structure)
   const [lt, setLt] = useState({
     toLocation: "", fromLocation: "", outReason: "", vehicle: "",
@@ -616,7 +618,7 @@ export default function CreateGatePassPage() {
   const [asGateInSearch, setAsGateInSearch] = useState("");
   const [asFoundPass, setAsFoundPass] = useState<any | null>(null);
   const [asGateInLoading, setAsGateInLoading] = useState(false);
-  const [asSubType, setAsSubType] = useState<"SUB_OUT" | "SUB_IN" | "MAIN_OUT">("SUB_OUT");
+  const [asSubType, setAsSubType] = useState<"SUB_OUT" | "SUB_IN" | "MAIN_OUT" | "SUB_OUT_IN">("SUB_OUT");
   const [asToLocation, setAsToLocation] = useState("");
   const [asFromLocation, setAsFromLocation] = useState("");
   const [dimoLocations, setDimoLocations] = useState<LookupOption[]>([]);
@@ -626,9 +628,18 @@ export default function CreateGatePassPage() {
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
 
+  // For ASO: auto-select After Sales tab and force srMode to "out"
+  useEffect(() => {
+    if (session?.user?.role === "AREA_SALES_OFFICER") {
+      setPassType("AFTER_SALES");
+      setSrMode("out");
+    }
+  }, [session?.user?.role]);
+
+  // Keep srMode="out" for ASO even if passType gets reset
   useEffect(() => {
     if (session?.user?.role === "AREA_SALES_OFFICER") setSrMode("out");
-  }, [session?.user?.role]);
+  }, [session?.user?.role, passType]);
 
 
   // Auto-fetch the initiator's assigned approver
@@ -652,6 +663,10 @@ export default function CreateGatePassPage() {
     try {
       const params = new URLSearchParams({ field, q, limit: "40" });
       if (field === "location" && lt_type) params.set("locationType", lt_type);
+      // Tell the vehicle lookup which SAP API to query based on current pass type
+      if (field === "vehicle" && passType && passType !== "AFTER_SALES") {
+        params.set("passType", passType);
+      }
       const res = await fetch(`/api/lookups?${params.toString()}`);
       if (!res.ok) return;
       const data = (await res.json()) as { options?: LookupOption[] };
@@ -731,24 +746,40 @@ export default function CreateGatePassPage() {
     if (!gpNumber.trim()) { setAsFoundPass(null); return; }
     setAsGateInLoading(true);
     try {
-      const res = await fetch(`/api/gate-pass?search=${encodeURIComponent(gpNumber)}&limit=5&passType=AFTER_SALES&parentOnly=true`);
-      if (res.ok) {
-        const d = await res.json();
-        const normalizedInput = gpNumber.trim().toUpperCase().replace(/^GP-(\d+)$/, (_, n) => `GP-${n.padStart(4, "0")}`);
-        const found = d.passes?.find((p: any) => p.gatePassNumber === normalizedInput && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_IN"));
-        setAsFoundPass(found || null);
-        setAsToLocation("");
-        if (found?.toLocation) setAsFromLocation(found.toLocation);
-        else setAsFromLocation("");
-        if (found) {
-          // Auto-select the right pass type based on current state
-          const subs = found.subPasses ?? [];
-          const sorted = [...subs].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          const lastAnySub = sorted[0]; // most recent sub regardless of status
-          // SUB IN only available when last sub was SUB_OUT confirmed COMPLETED by recipient
-          if (lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED") setAsSubType("SUB_IN");
-          else setAsSubType("SUB_OUT");
+      const normalize = (s: string) => s.trim().toUpperCase().replace(/^GP-0*(\d+)$/, (_, n) => `GP-${n.padStart(4, "0")}`);
+      const normalizedInput = normalize(gpNumber);
+
+      // Step 1: search any AFTER_SALES pass (no parentOnly restriction)
+      const res = await fetch(`/api/gate-pass?search=${encodeURIComponent(normalizedInput)}&limit=10&passType=AFTER_SALES`);
+      if (!res.ok) return;
+      const d = await res.json();
+      let candidate = (d.passes ?? []).find((p: any) => p.gatePassNumber === normalizedInput);
+
+      // Step 2: if it's a sub-pass, resolve to its MAIN_IN parent
+      if (candidate?.parentPass?.gatePassNumber) {
+        const parentNo = candidate.parentPass.gatePassNumber;
+        const parentRes = await fetch(`/api/gate-pass?search=${encodeURIComponent(parentNo)}&limit=5&passType=AFTER_SALES&parentOnly=true`);
+        if (parentRes.ok) {
+          const pd = await parentRes.json();
+          const parent = pd.passes?.find((p: any) => p.gatePassNumber === parentNo);
+          if (parent) candidate = parent;
         }
+      }
+
+      // Step 3: only accept MAIN_IN or SUB_IN as the "root" gate-in pass
+      const found = candidate && (candidate.passSubType === "MAIN_IN" || candidate.passSubType === "SUB_IN") ? candidate : null;
+
+      setAsFoundPass(found || null);
+      setAsToLocation("");
+      if (found?.toLocation) setAsFromLocation(found.toLocation);
+      else setAsFromLocation("");
+
+      if (found) {
+        const subs = found.subPasses ?? [];
+        const sorted = [...subs].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const lastAnySub = sorted[0];
+        if (lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED") setAsSubType("SUB_IN");
+        else setAsSubType("SUB_OUT");
       }
     } finally { setAsGateInLoading(false); }
   };
@@ -776,8 +807,8 @@ export default function CreateGatePassPage() {
       if (!lt.departureTime) e.departureTime = "Required";
     } else if (isSr && srMode === "out") {
       if (!asFoundPass) e.asGateIn = "Please find a valid Gate IN pass first";
-      if (!asToLocation && asSubType !== "MAIN_OUT") e.asToLocation = "Required";
-      if (!asFromLocation && asSubType !== "MAIN_OUT") e.asFromLocation = "Required";
+      if (!asToLocation && !["MAIN_OUT"].includes(asSubType)) e.asToLocation = "Required";
+      if (!asFromLocation && !["MAIN_OUT"].includes(asSubType)) e.asFromLocation = "Required";
       if (!cd.departureDate) e.departureDate = "Required";
       if (!cd.departureTime) e.departureTime = "Required";
     } else if (isSr) {
@@ -837,12 +868,12 @@ export default function CreateGatePassPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(asPayload),
         });
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
         setSubmitted(true);
         setTimeout(() => router.push("/gate-pass"), 2500);
-      } catch {
+      } catch (err) {
         setLoading(false);
-        setErrors({ form: "Failed to submit. Please try again." });
+        setErrors({ form: String(err) });
       }
       return;
     }
@@ -905,12 +936,12 @@ export default function CreateGatePassPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
       setSubmitted(true);
       setTimeout(() => router.push("/gate-pass"), 2500);
-    } catch {
+    } catch (err) {
       setLoading(false);
-      setErrors({ form: "Failed to submit. Please try again." });
+      setErrors({ form: String(err) });
     }
   };
 
@@ -993,8 +1024,8 @@ export default function CreateGatePassPage() {
         </h1>
       </div>
 
-      {/* Type Toggle */}
-      <div className="flex flex-wrap gap-3 mb-6">
+      {/* Type Toggle — hidden for ASO (always After Sales) */}
+      <div className={`flex flex-wrap gap-3 mb-6 ${session?.user?.role === "AREA_SALES_OFFICER" ? "hidden" : ""}`}>
         {([
           { type: "LOCATION_TRANSFER", label: "Location Transfer", icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1144,7 +1175,8 @@ export default function CreateGatePassPage() {
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Vehicle Details</SectionTitle>
 
-                {/* Row 1: 2 Approver fields */}
+                {/* Row 1: Approver fields — hidden for ASO on auto-approved pass types */}
+                {!(session?.user?.role === "AREA_SALES_OFFICER" && asSubType !== "MAIN_OUT") && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
                   <Field label="Approver Id" required error={errors.approver}>
                     {assignedApprover ? (
@@ -1164,6 +1196,7 @@ export default function CreateGatePassPage() {
                     <SearchInput value={sr.approver2} onChange={(v) => { setS("approver2", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver2)} placeholder="Search approver" options={lookupOptions.approver} />
                   </Field>
                 </div>
+                )}
 
                 {/* Add Vehicle / General sub-tabs */}
                 <div className="flex gap-0 mb-4 border-b" style={{ borderColor: "var(--border)" }}>
@@ -1259,12 +1292,6 @@ export default function CreateGatePassPage() {
 
                     {/* Action buttons row */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" onClick={() => { setAddVehicleTarget("sr"); setShowAddVehicle(true); }}
-                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
-                        style={{ background: "#5a9216" }}>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                        Add New Vehicle
-                      </button>
                       <button type="button" onClick={() => setShowSrBulkUpload(true)}
                         className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
                         style={{ background: "#5a9216" }}>
@@ -1459,6 +1486,76 @@ export default function CreateGatePassPage() {
 
               {srMode === "out" && (
                 <>
+                  {/* ASO: Prominent pass-type selector shown before all steps */}
+                  {session?.user?.role === "AREA_SALES_OFFICER" && (
+                    <div className="rounded-2xl border p-5 mb-5" style={{ background: "var(--surface)", borderColor: "#3b82f644", boxShadow: "var(--card-shadow)" }}>
+                      <div className="flex items-center gap-2.5 mb-4">
+                        <div className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>
+                          <svg className="w-3.5 h-3.5" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          </svg>
+                        </div>
+                        <p className="font-bold text-sm" style={{ color: "var(--text)" }}>What would you like to create?</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {([
+                          {
+                            value: "SUB_OUT" as const,
+                            label: "Sub Gate OUT",
+                            desc: "Vehicle leaving your location",
+                            dot: "#3b82f6", bg: "#eff6ff", color: "#1d4ed8",
+                            icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>,
+                          },
+                          {
+                            value: "SUB_IN" as const,
+                            label: "Sub Gate IN",
+                            desc: "Vehicle arriving to your location",
+                            dot: "#22c55e", bg: "#f0fdf4", color: "#15803d",
+                            icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" /></svg>,
+                          },
+                          {
+                            value: "SUB_OUT_IN" as const,
+                            label: "Sub OUT / IN",
+                            desc: "OUT from here → IN at another plant",
+                            dot: "#f97316", bg: "#fff7ed", color: "#c2410c",
+                            icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>,
+                          },
+                          {
+                            value: "MAIN_OUT" as const,
+                            label: "Main Gate OUT",
+                            desc: "Vehicle handover to customer",
+                            dot: "#a855f7", bg: "#faf5ff", color: "#7c3aed",
+                            icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>,
+                          },
+                        ] as const).map(({ value, label, desc, dot, bg, color, icon }) => {
+                          const selected = asSubType === value;
+                          return (
+                            <button key={value} type="button"
+                              onClick={() => { setAsSubType(value); setErrors({}); }}
+                              className="rounded-xl border-2 p-4 text-left transition-all hover:shadow-sm"
+                              style={{ borderColor: selected ? dot : "var(--border)", background: selected ? bg : "var(--surface2)" }}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                                  style={{ background: selected ? dot : "var(--surface)", color: selected ? "#fff" : "var(--text-muted)" }}>
+                                  {icon}
+                                </div>
+                                {selected && (
+                                  <div className="ml-auto w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: dot }}>
+                                    <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
+                                )}
+                              </div>
+                              <p className="font-bold text-xs leading-tight" style={{ color: selected ? color : "var(--text)" }}>{label}</p>
+                              <p className="text-[11px] mt-0.5 leading-tight" style={{ color: "var(--text-muted)" }}>{desc}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Step 1 — Vehicle History Lookup */}
                   <div className="rounded-2xl border mb-5 overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                     <div className="px-5 py-3 border-b flex items-center gap-3" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
@@ -1504,10 +1601,11 @@ export default function CreateGatePassPage() {
 
                       {asVehiclePasses.length > 0 && (() => {
                         const subTypeCfg: Record<string, { label: string; bg: string; color: string; dot: string; dir: string }> = {
-                          MAIN_IN:  { label: "Main IN",  bg: "#f0fdf4", color: "#15803d", dot: "#22c55e", dir: "IN" },
-                          SUB_OUT:  { label: "Sub OUT",  bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6", dir: "OUT" },
-                          SUB_IN:   { label: "Sub IN",   bg: "#fffbeb", color: "#92400e", dot: "#f59e0b", dir: "IN" },
-                          MAIN_OUT: { label: "Main OUT", bg: "#fdf4ff", color: "#6b21a8", dot: "#a855f7", dir: "OUT" },
+                          MAIN_IN:    { label: "Main IN",    bg: "#f0fdf4", color: "#15803d", dot: "#22c55e", dir: "IN" },
+                          SUB_OUT:    { label: "Sub OUT",    bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6", dir: "OUT" },
+                          SUB_IN:     { label: "Sub IN",     bg: "#fffbeb", color: "#92400e", dot: "#f59e0b", dir: "IN" },
+                          SUB_OUT_IN: { label: "Sub OUT/IN", bg: "#fff7ed", color: "#c2410c", dot: "#f97316", dir: "OUT→IN" },
+                          MAIN_OUT:   { label: "Main OUT",   bg: "#fdf4ff", color: "#6b21a8", dot: "#a855f7", dir: "OUT" },
                         };
                         return (
                           <div className="mt-4">
@@ -1703,7 +1801,8 @@ export default function CreateGatePassPage() {
                                 {notApprovedReason}
                               </div>
                             )}
-                            {/* Pass sub-type selector */}
+                            {/* Pass sub-type selector — hidden for ASO (they use the top selector) */}
+                            {session?.user?.role !== "AREA_SALES_OFFICER" && (
                             <div className="mb-5">
                               <label className="block text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--text-muted)" }}>Select Pass Type</label>
                               <div className="grid grid-cols-3 gap-3">
@@ -1793,6 +1892,7 @@ export default function CreateGatePassPage() {
                                 })}
                               </div>
                             </div>
+                            )}
 
                             {/* Location + Departure */}
                             {asSubType !== "MAIN_OUT" && (
@@ -1841,7 +1941,7 @@ export default function CreateGatePassPage() {
                             )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <Field label="Departure Date" required error={errors.departureDate}>
-                                <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} />
+                                <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} min={today} />
                               </Field>
                               <Field label="Departure Time" required error={errors.departureTime}>
                                 <TextInput type="time" value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} />
@@ -2042,17 +2142,6 @@ export default function CreateGatePassPage() {
                           </button>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => { setAddVehicleTarget("lt"); setShowAddVehicle(true); }}
-                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold whitespace-nowrap"
-                        style={{ background: "#5a9216" }}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                        </svg>
-                        Add New Vehicle
-                      </button>
                     </div>
                     {/* Vehicle detail card */}
                     {selectedVehicleDetail && (
@@ -2122,7 +2211,7 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Gate Out — Schedule Departure</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Estimated Departure Date" required error={errors.departureDate}>
-                    <TextInput type="date" value={lt.departureDate} onChange={(v) => setL("departureDate", v)} error={errors.departureDate} />
+                    <TextInput type="date" value={lt.departureDate} onChange={(v) => setL("departureDate", v)} error={errors.departureDate} min={today} />
                   </Field>
                   <Field label="Estimated Departure Time" required error={errors.departureTime}>
                     <TextInput type="time" value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} />
@@ -2138,7 +2227,7 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Gate In — Expected Arrival</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Expected Arrival Date">
-                    <TextInput type="date" value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || undefined} />
+                    <TextInput type="date" value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || today} />
                   </Field>
                   <Field label="Expected Arrival Time">
                     <TextInput type="time" value={lt.arrivalTime} onChange={(v) => setL("arrivalTime", v)} />
@@ -2222,17 +2311,6 @@ export default function CreateGatePassPage() {
                               </button>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => { setAddVehicleTarget("cd"); setShowAddVehicle(true); }}
-                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold whitespace-nowrap"
-                            style={{ background: "#5a9216" }}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                            </svg>
-                            Add Vehicle
-                          </button>
                         </div>
                         {selectedCdVehicleDetail && (
                           <div className="mt-3 rounded-xl border grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 px-4 py-3"
@@ -2260,7 +2338,7 @@ export default function CreateGatePassPage() {
                     <SectionTitle>Gate Out from Dimo 800</SectionTitle>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <Field label="Estimated Departure Date" required error={errors.departureDate}>
-                        <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} />
+                        <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} min={today} />
                       </Field>
                       <Field label="Estimated Departure Time" required error={errors.departureTime}>
                         <TextInput type="time" value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} />

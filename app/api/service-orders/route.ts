@@ -88,26 +88,39 @@ export async function PATCH(req: NextRequest) {
     }
 
     const allPaid = unassigned === 0;
-    // All paid → GATE_OUT (vehicle authorized to leave; INITIATOR/ASO must confirm receipt via gate_in → COMPLETED)
-    // Partial  → PENDING_APPROVAL (send to approver)
-    const newStatus = allPaid ? "GATE_OUT" : "PENDING_APPROVAL";
+    // All paid → APPROVED (initiator/ASO will then Mark as OUT → GATE_OUT → recipient confirms → COMPLETED)
+    // Partial  → PENDING_APPROVAL (send to approver for special approval)
+    const newStatus = allPaid ? "APPROVED" : "PENDING_APPROVAL";
 
-    await prisma.gatePass.update({
+    const gatePassRecord = await prisma.gatePass.update({
       where: { id: gatePassId },
       data: { status: newStatus },
+      select: { gatePassNumber: true, vehicle: true, createdById: true },
     });
+
+    // Notify the pass creator that payment is cleared and vehicle can be released
+    if (allPaid) {
+      await prisma.notification.create({
+        data: {
+          userId: gatePassRecord.createdById,
+          type: "GATE_PASS_APPROVED",
+          title: "Payment Cleared — Ready to Release",
+          message: `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) — all orders settled. Please mark as Gate Out to release the vehicle.`,
+          gatePassId,
+        },
+      });
+    }
 
     // If sending to approver, notify all APPROVERs
     if (!allPaid) {
       const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-      const pass = await prisma.gatePass.findUnique({ where: { id: gatePassId }, select: { gatePassNumber: true, vehicle: true } });
-      if (approvers.length > 0 && pass) {
+      if (approvers.length > 0 && gatePassRecord) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
             userId: a.id,
             type: "GATE_PASS_SUBMITTED",
             title: "Partial Payment — Approval Required",
-            message: `${pass.gatePassNumber} (${pass.vehicle}) has unpaid orders and requires approval.`,
+            message: `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) has unpaid orders and requires approval.`,
             gatePassId,
           })),
         });

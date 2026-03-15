@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSession } from "next-auth/react";
 
 type SubPass = {
   id: string; gatePassNumber: string; passSubType: string | null;
@@ -61,7 +62,12 @@ export default function GatePassListPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [gatingOutId, setGatingOutId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { data: session } = useSession();
+  const isInitiator = session?.user?.role === "INITIATOR";
+  const isASO = session?.user?.role === "AREA_SALES_OFFICER";
+  const [gatingInId, setGatingInId] = useState<string | null>(null);
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
@@ -84,6 +90,24 @@ export default function GatePassListPage() {
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
   useEffect(() => { setPage(1); }, [search, statusFilter, passTypeFilter]);
   useEffect(() => { setStatusFilter(searchParams.get("status") ?? "ALL"); setPage(1); }, [searchParams]);
+
+  async function handleGateOut(id: string) {
+    if (!confirm("Mark this gate pass as Gate Out? This will notify the recipient.")) return;
+    setGatingOutId(id);
+    try {
+      await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_out" }) });
+      fetchPasses();
+    } finally { setGatingOutId(null); }
+  }
+
+  async function handleGateIn(id: string, label: string) {
+    if (!confirm(`${label} — mark vehicle as received?`)) return;
+    setGatingInId(id);
+    try {
+      await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_in" }) });
+      fetchPasses();
+    } finally { setGatingInId(null); }
+  }
 
   async function handleCancel(id: string) {
     if (!confirm("Cancel this gate pass request?")) return;
@@ -399,8 +423,32 @@ export default function GatePassListPage() {
                 ) : (
                   passes.map((p, i) => {
                     const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
-                    const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
-                    const canCancel = p.status === "PENDING_APPROVAL";
+                    const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
+                    const canCancel  = p.status === "PENDING_APPROVAL";
+                    // For non-AFTER_SALES: standard gate_out when APPROVED
+                    // For AFTER_SALES: INITIATOR can gate_out their own MAIN_IN and SUB_OUT; ASO can gate_out SUB_OUT_IN
+                    const canGateOut = p.status === "APPROVED" && (
+                      p.passType !== "AFTER_SALES"
+                        ? true
+                        : (isInitiator && ["MAIN_IN", "SUB_OUT"].includes(p.passSubType ?? ""))
+                          || (isASO && p.passSubType === "SUB_OUT_IN")
+                    );
+
+                    // For AFTER_SALES GATE_OUT: INITIATOR/ASO can confirm arrived (gate_in → COMPLETED)
+                    const canGateIn = p.passType === "AFTER_SALES" && p.status === "GATE_OUT"
+                      && (isInitiator || isASO);
+
+                    const gateOutLabel = p.passType !== "AFTER_SALES" ? "Gate Out"
+                      : p.passSubType === "MAIN_IN" ? "Mark IN"
+                      : p.passSubType === "SUB_OUT" ? "Gate Out"
+                      : "Gate Out";
+
+                    const gateInLabel = p.passSubType === "MAIN_IN" ? "Confirm IN"
+                      : p.passSubType === "SUB_IN" ? "Mark Arrived"
+                      : p.passSubType === "SUB_OUT_IN" ? "Mark Arrived"
+                      : p.passSubType === "MAIN_OUT" ? "Mark Delivered"
+                      : "Confirm";
+
                     return (
                       <motion.tr key={p.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                         className="transition-colors" style={{ borderBottom: "1px solid var(--border)" }}
@@ -424,6 +472,28 @@ export default function GatePassListPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                               </svg>
                             </button>
+                            {canGateOut && (
+                              <button onClick={() => handleGateOut(p.id)} disabled={gatingOutId === p.id}
+                                className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"
+                                style={{ background: "#eff6ff", borderColor: "#3b82f6", color: "#1d4ed8", opacity: gatingOutId === p.id ? 0.5 : 1 }}
+                                title="Mark Gate Out — notify recipient">
+                                {gatingOutId === p.id
+                                  ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
+                                {gateOutLabel}
+                              </button>
+                            )}
+                            {canGateIn && (
+                              <button onClick={() => handleGateIn(p.id, gateInLabel)} disabled={gatingInId === p.id}
+                                className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"
+                                style={{ background: "#f0fdf4", borderColor: "#22c55e", color: "#15803d", opacity: gatingInId === p.id ? 0.5 : 1 }}
+                                title={`${gateInLabel} — mark vehicle as received`}>
+                                {gatingInId === p.id
+                                  ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                                {gateInLabel}
+                              </button>
+                            )}
                             {canCancel && (
                               <button onClick={() => handleCancel(p.id)} disabled={cancellingId === p.id}
                                 className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"

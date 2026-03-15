@@ -63,7 +63,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "User Management", href: "/admin", icon: <UsersIcon /> },
   ],
   AREA_SALES_OFFICER: [
-    { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
+    { label: "Dashboard", href: "/aso", icon: <DashboardIcon /> },
     { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Create Sub-Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
@@ -71,7 +71,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
   CASHIER: [
-    { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
+    { label: "Dashboard", href: "/cashier", icon: <DashboardIcon /> },
     { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
