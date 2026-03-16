@@ -583,7 +583,12 @@ export default function InitiatorDashboardClient({ user }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "gate_out" }),
       });
-      if (res.ok) await fetchPasses();
+      if (res.ok) {
+        await fetchPasses();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to mark as Gate Out: ${err.error || res.statusText}. Please try refreshing the page and logging in again.`);
+      }
     } finally {
       setMarkingOutId(null);
     }

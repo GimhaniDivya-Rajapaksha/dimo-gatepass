@@ -158,7 +158,8 @@ export default function InitiatorGatePassDetailPage() {
       });
       if (!res.ok) throw new Error("Failed");
       setDone(true);
-      setTimeout(() => router.push("/initiator"), 2000);
+      const dest = role === "RECIPIENT" ? "/recipient" : role === "AREA_SALES_OFFICER" ? "/aso" : "/initiator";
+      setTimeout(() => router.push(dest), 2000);
     } catch {
       setActionLoading(false);
       setError("Action failed. Please try again.");
@@ -175,7 +176,8 @@ export default function InitiatorGatePassDetailPage() {
       });
       if (!res.ok) throw new Error("Failed");
       setDone(true);
-      setTimeout(() => router.push("/initiator"), 2000);
+      const dest = role === "AREA_SALES_OFFICER" ? "/aso" : "/initiator";
+      setTimeout(() => router.push(dest), 2000);
     } catch {
       setActionLoading(false);
       setError("Action failed. Please try again.");
@@ -351,9 +353,14 @@ export default function InitiatorGatePassDetailPage() {
   // MAIN_IN (Service/Repair) — vehicle arriving at DIMO, button label differs from outbound passes
   const isMainIn = data.passType === "AFTER_SALES" && data.passSubType === "MAIN_IN";
   const isRecipientView = role === "RECIPIENT";
-  // RECIPIENT confirms at HQ gate: MAIN_IN (vehicle arriving), MAIN_OUT/SUB_OUT (vehicle departing)
+  // RECIPIENT confirms at HQ gate:
+  //   - Non-AFTER_SALES (LOCATION_TRANSFER, CUSTOMER_DELIVERY): any GATE_OUT pass
+  //   - AFTER_SALES: only MAIN_IN (arriving), MAIN_OUT, SUB_OUT (departing HQ)
   const isRecipientHQGate = isRecipientView && data.status === "GATE_OUT"
-    && (isMainIn || data.passSubType === "MAIN_OUT" || data.passSubType === "SUB_OUT");
+    && (data.passType !== "AFTER_SALES"
+        || isMainIn
+        || data.passSubType === "MAIN_OUT"
+        || data.passSubType === "SUB_OUT");
   const canRecipientGateIn = isRecipientHQGate;
 
   return (
@@ -1116,18 +1123,22 @@ export default function InitiatorGatePassDetailPage() {
               </>
             )}
 
-            {/* ── RECIPIENT buttons — HQ gate confirmation (MAIN_IN arriving, MAIN_OUT/SUB_OUT departing) ── */}
-            {canRecipientGateIn && (
+            {/* ── RECIPIENT buttons — HQ gate confirmation (arriving → green, departing → blue) ── */}
+            {canRecipientGateIn && (() => {
+              // arriving: non-AFTER_SALES (LT/CD) OR AFTER_SALES MAIN_IN
+              const isArriving = data.passType !== "AFTER_SALES" || isMainIn;
+              return (
               <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                 onClick={handleMarkAsIn} disabled={actionLoading}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
-                style={{ background: isMainIn ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                style={{ background: isArriving ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
                 {actionLoading
                   ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                  : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isMainIn ? "M5 13l4 4L19 7" : "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"} /></svg>}
-                {actionLoading ? "Confirming..." : isMainIn ? "Confirm Vehicle IN" : "Confirm Gate OUT"}
+                  : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isArriving ? "M5 13l4 4L19 7" : "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"} /></svg>}
+                {actionLoading ? "Confirming..." : isArriving ? "Confirm Gate IN" : "Confirm Gate OUT"}
               </motion.button>
-            )}
+              );
+            })()}
           </div>{/* end flex gap-3 remaining buttons */}
         </div>{/* end mt-2 no-print */}
 

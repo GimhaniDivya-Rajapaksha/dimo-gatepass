@@ -43,14 +43,35 @@ export const authOptions: NextAuthOptions = {
         // First sign-in: store from credentials
         token.id = user.id;
         token.role = (user as { role: string | null }).role ?? null;
-      } else if (token.id) {
-        // Every session read: re-fetch role from DB so admin role changes take effect on refresh
-        const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null }[]>`
-          SELECT role::text, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
-        `;
-        if (rows[0]) {
-          token.role = rows[0].role ?? null;
-          token.defaultLocation = rows[0].defaultLocation ?? null;
+      } else {
+        // Subsequent requests: ensure id is always populated (handles old sessions missing id)
+        if (!token.id && token.email) {
+          try {
+            const rows = await prisma.$queryRaw<{ id: string; role: string | null; defaultLocation: string | null }[]>`
+              SELECT id, role::text, "defaultLocation" FROM "User" WHERE email = ${token.email as string} LIMIT 1
+            `;
+            if (rows[0]) {
+              token.id = rows[0].id;
+              token.role = rows[0].role ?? null;
+              token.defaultLocation = rows[0].defaultLocation ?? null;
+            }
+          } catch {
+            // DB temporarily unreachable
+          }
+        } else if (token.id) {
+          // Re-fetch role from DB so role changes take effect on next request.
+          // Fallback to cached token values if DB is temporarily unreachable.
+          try {
+            const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null }[]>`
+              SELECT role::text, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
+            `;
+            if (rows[0]) {
+              token.role = rows[0].role ?? null;
+              token.defaultLocation = rows[0].defaultLocation ?? null;
+            }
+          } catch {
+            // DB temporarily unreachable — keep using cached role from token
+          }
         }
       }
       return token;
