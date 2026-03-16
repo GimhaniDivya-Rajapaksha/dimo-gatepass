@@ -210,7 +210,6 @@ function OrderModal({
   }
 
   async function handleProceed() {
-    if (orders.length === 0) { setError("Please add at least one order before proceeding."); return; }
     setSaving(true);
     setError(null);
     try {
@@ -288,7 +287,7 @@ function OrderModal({
           {[
             { n: "1", text: "Click Sync SAP to load orders", done: orders.length > 0 },
             { n: "2", text: "Move all paid orders → Fully Paid", done: orders.length > 0 && available.length === 0 },
-            { n: "3", text: available.length === 0 && orders.length > 0 ? "Done & Close — vehicle cleared" : "Partial? Proceed → Approver reviews", done: false },
+            { n: "3", text: orders.length === 0 ? "No orders found? Send to Approver" : available.length === 0 ? "Done & Close — vehicle cleared" : "Partial? Proceed → Approver reviews", done: false },
           ].map((step, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs">
               <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
@@ -465,16 +464,16 @@ function OrderModal({
             const allPaid = orders.length > 0 && available.length === 0;
             const partial = orders.length > 0 && available.length > 0 && assigned.length > 0;
             const noOrders = orders.length === 0;
-            const bg = noOrders ? "#94a3b8" : allPaid ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "Sync SAP to load orders"
+            const bg = noOrders ? "linear-gradient(135deg,#d97706,#b45309)" : allPaid ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#d97706,#b45309)";
+            const label = noOrders ? "No Orders — Send to Approver"
               : allPaid ? "Done & Close — Release Vehicle"
               : partial ? "Send to Approver (partial payment)"
               : "Proceed";
             return (
               <button
                 onClick={handleProceed}
-                disabled={saving || noOrders}
-                title={noOrders ? "Add at least one order to proceed" : allPaid ? "All orders paid — release vehicle" : "Some unpaid — needs Approver approval"}
+                disabled={saving}
+                title={noOrders ? "No SAP orders found — escalate to Approver" : allPaid ? "All orders paid — release vehicle" : "Some unpaid — needs Approver approval"}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
                 style={{ background: bg, flexShrink: 0 }}
               >

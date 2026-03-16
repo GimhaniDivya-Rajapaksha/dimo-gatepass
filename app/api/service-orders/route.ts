@@ -83,13 +83,9 @@ export async function PATCH(req: NextRequest) {
       prisma.serviceOrder.count({ where: { gatePassId, isAssigned: false } }),
     ]);
 
-    if (total === 0) {
-      return NextResponse.json({ error: "No orders added yet. Please add orders first." }, { status: 400 });
-    }
-
-    const allPaid = unassigned === 0;
-    // All paid → APPROVED (initiator/ASO will then Mark as OUT → GATE_OUT → recipient confirms → COMPLETED)
-    // Partial  → PENDING_APPROVAL (send to approver for special approval)
+    // No orders in SAP → send to PENDING_APPROVAL so Approver can decide
+    const allPaid = total > 0 && unassigned === 0;
+    // All paid → APPROVED; No orders or partial → PENDING_APPROVAL (send to approver)
     const newStatus = allPaid ? "APPROVED" : "PENDING_APPROVAL";
 
     const gatePassRecord = await prisma.gatePass.update({
@@ -115,12 +111,15 @@ export async function PATCH(req: NextRequest) {
     if (!allPaid) {
       const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
       if (approvers.length > 0 && gatePassRecord) {
+        const approverMsg = total === 0
+          ? `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) — no SAP orders found. Cashier has escalated for approval.`
+          : `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) has unpaid orders and requires approval.`;
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
             userId: a.id,
             type: "GATE_PASS_SUBMITTED",
-            title: "Partial Payment — Approval Required",
-            message: `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) has unpaid orders and requires approval.`,
+            title: total === 0 ? "No SAP Orders — Approval Required" : "Partial Payment — Approval Required",
+            message: approverMsg,
             gatePassId,
           })),
         });
