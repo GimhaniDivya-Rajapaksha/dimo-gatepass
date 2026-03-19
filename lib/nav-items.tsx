@@ -51,6 +51,11 @@ const VehicleReportIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 8h4l3 3v5h-7V8z" />
   </svg>
 );
+const OrdersReportIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+  </svg>
+);
 
 const UsersIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,6 +66,7 @@ const UsersIcon = () => (
 export const navItemsByRole: Record<string, NavItem[]> = {
   ADMIN: [
     { label: "User Management", href: "/admin", icon: <UsersIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   AREA_SALES_OFFICER: [
     { label: "Dashboard", href: "/aso", icon: <DashboardIcon /> },
@@ -76,6 +82,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   INITIATOR: [
     { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
@@ -93,10 +100,16 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   RECIPIENT: [
     { label: "Dashboard", href: "/recipient", icon: <DashboardIcon /> },
     { label: "Awaiting Acknowledgement", href: "/gate-pass/receive", icon: <BoxIcon /> },
+    { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+  ],
+  SECURITY_OFFICER: [
+    { label: "Dashboard", href: "/security", icon: <DashboardIcon /> },
+    { label: "Gate IN / OUT", href: "/gate-pass/security-gate-out", icon: <BoxIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
   ],
 };

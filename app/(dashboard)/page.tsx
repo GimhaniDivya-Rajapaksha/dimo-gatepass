@@ -13,5 +13,6 @@ export default async function DashboardIndexPage() {
   if (role === "CASHIER") redirect("/cashier");
   if (role === "AREA_SALES_OFFICER") redirect("/aso");
   if (role === "ADMIN") redirect("/admin");
+  if (role === "SECURITY_OFFICER") redirect("/security");
   redirect("/login");
 }

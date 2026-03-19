@@ -1119,6 +1119,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
+                <th className="w-1 p-0" />
                 {["Action", "Gate Pass No", "Vehicle / Chassis", "Departure From", "Requested By", "Departure Date", "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{h}</th>
                 ))}
@@ -1158,17 +1159,26 @@ export default function InitiatorDashboardClient({ user }: Props) {
                   const isInbound = ["MAIN_IN", "SUB_IN"].includes(p.passSubType ?? "");
                   const sc = (p.status === "GATE_OUT" && isInbound) ? { ...rawSc, label: "Gate In" } : rawSc;
                   const canPrint = p.status === "APPROVED" || p.status === "GATE_OUT" || p.status === "COMPLETED";
+                  const needsAttention = ["PENDING_APPROVAL", "CASHIER_REVIEW", "REJECTED"].includes(p.status);
+                  const attentionColor = p.status === "REJECTED" ? "#ef4444" : p.status === "CASHIER_REVIEW" ? "#d97706" : "#f59e0b";
+                  const attentionRowBg = p.status === "REJECTED" ? "rgba(239,68,68,0.04)" : p.status === "CASHIER_REVIEW" ? "rgba(245,158,11,0.05)" : "rgba(245,158,11,0.06)";
                   return (
                     <motion.tr
                       key={p.id}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04 }}
-                      className="group transition-colors"
-                      style={{ borderBottom: "1px solid var(--border)" }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface2)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      className="group transition-colors relative"
+                      style={{ borderBottom: `1px solid var(--border)`, background: needsAttention ? attentionRowBg : "transparent" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = needsAttention ? attentionRowBg : "var(--surface2)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = needsAttention ? attentionRowBg : "transparent")}
                     >
+                      {/* Attention accent — left border stripe */}
+                      <td className="py-3 pl-0 pr-0 w-1" style={{ padding: 0 }}>
+                        {needsAttention && (
+                          <div className="w-1 h-full min-h-[44px] rounded-r-full" style={{ background: attentionColor }} />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
                           <button
@@ -1221,10 +1231,21 @@ export default function InitiatorDashboardClient({ user }: Props) {
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.color }} />
-                            {sc.label}
-                          </span>
+                          {needsAttention ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border"
+                              style={{ background: sc.bg, color: sc.color, borderColor: attentionColor + "55" }}>
+                              <span className="relative flex h-2 w-2 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: attentionColor }} />
+                                <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: attentionColor }} />
+                              </span>
+                              {sc.label}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.color }} />
+                              {sc.label}
+                            </span>
+                          )}
                           {/* Mark as OUT — only for APPROVED non-AFTER_SALES (LT/CD) */}
                           {p.status === "APPROVED" && p.passType !== "AFTER_SALES" && (
                             <button

@@ -28,17 +28,22 @@ export async function GET(req: NextRequest) {
       ]
     }];
   } else if (role === "AREA_SALES_OFFICER") {
-    // ASO sees only their own passes — UNLESS locationView=true (Vehicles Incoming)
-    // OR searching AFTER_SALES by GP number (to link passes created by other roles)
+    // ASO sees their own passes + AFTER_SALES passes destined for their location
+    // UNLESS locationView=true (Vehicles Incoming dashboard) or searching by GP number
     const locationView = searchParams.get("locationView") === "true";
     const isAfterSalesSearch = searchParams.get("passType") === "AFTER_SALES" && searchParams.get("search");
     if (!locationView && !isAfterSalesSearch) {
-      where.AND = [{
-        OR: [
-          { createdById: session.user.id },
-          { parentPass: { createdById: session.user.id } },
-        ]
-      }];
+      const asoLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+      const orClauses: unknown[] = [
+        { createdById: session.user.id },
+        { parentPass: { createdById: session.user.id } },
+      ];
+      // Also show AFTER_SALES passes heading to / from this ASO's location (e.g. SUB_OUT from Initiator)
+      if (asoLocation) {
+        orClauses.push({ passType: "AFTER_SALES", toLocation: asoLocation });
+        orClauses.push({ passType: "AFTER_SALES", fromLocation: asoLocation });
+      }
+      where.AND = [{ OR: orClauses }];
     }
   }
   // APPROVER and ADMIN see all
@@ -67,6 +72,26 @@ export async function GET(req: NextRequest) {
   } else if (status) {
     where.status = status;
   }
+
+  // For approver AFTER_SALES queue: include CASHIER_REVIEW passes with credit pending
+  if (passType === "AFTER_SALES" && status === "PENDING_APPROVAL") {
+    delete (where as any).status;
+    const andArr: unknown[] = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    andArr.push({
+      OR: [
+        { status: "PENDING_APPROVAL" },
+        { AND: [{ status: "CASHIER_REVIEW" }, { hasCredit: true }, { creditApproved: false }] },
+      ],
+    });
+    (where as any).AND = andArr;
+  }
+
+  // Cashier pending filter: only passes where cashier still has work (cashierCleared = false)
+  const cashierPending = searchParams.get("cashierPending") === "true";
+  if (cashierPending) {
+    (where as any).cashierCleared = false;
+  }
+
   if (search) {
     where.OR = [
       { gatePassNumber: { contains: search, mode: "insensitive" } },
@@ -79,25 +104,29 @@ export async function GET(req: NextRequest) {
   const passSubType = searchParams.get("passSubType");
   if (passSubType) where.passSubType = passSubType;
 
-  const [total, passes] = await Promise.all([
-    prisma.gatePass.count({ where }),
-    prisma.gatePass.findMany({
-      where,
-      include: {
-        createdBy: { select: { id: true, name: true, email: true } },
-        approvedBy: { select: { id: true, name: true } },
-        parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
-        ...(passType === "AFTER_SALES" && parentOnly ? {
-        subPasses: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
-      } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
-    }),
-  ]);
-
-  return NextResponse.json({ passes, total, page, totalPages: Math.ceil(total / limit) });
+  try {
+    const [total, passes] = await Promise.all([
+      prisma.gatePass.count({ where }),
+      prisma.gatePass.findMany({
+        where,
+        include: {
+          createdBy: { select: { id: true, name: true, email: true } },
+          approvedBy: { select: { id: true, name: true } },
+          parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
+          ...(passType === "AFTER_SALES" && parentOnly ? {
+          subPasses: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
+        } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+    ]);
+    return NextResponse.json({ passes, total, page, totalPages: Math.ceil(total / limit) });
+  } catch (err) {
+    console.error("[GET /api/gate-pass] Error:", err);
+    return NextResponse.json({ error: String(err), passes: [], total: 0, page: 1, totalPages: 1 }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -160,6 +189,7 @@ export async function POST(req: NextRequest) {
     garagePlate: body.garagePlate || null,
     comments: body.comments || null,
     passSubType: body.passSubType || null,
+    paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
     fromLocation: body.fromLocation || null,
     createdById: session.user.id,
@@ -171,31 +201,127 @@ export async function POST(req: NextRequest) {
   if (body.passType === "AFTER_SALES" && body.serviceJobNo) {
     createData.serviceJobNo = body.serviceJobNo;
   }
+  // Store invoice flag hint from frontend (server-side will confirm below)
+  if (body.passType === "CUSTOMER_DELIVERY" && typeof body.isInvoiced === "boolean") {
+    createData.paymentType = body.isInvoiced ? "INVOICED" : "NOT_INVOICED";
+  }
 
   const gatePass = await (prisma.gatePass.create as any)({
     data: createData,
   });
 
-  // If After Sales MAIN_OUT: update status to CASHIER_REVIEW via raw SQL (stale Prisma client doesn't know this enum value)
+  // CUSTOMER_DELIVERY: auto-fetch SAP orders at creation, store invoice data, set paymentType authoritatively
+  if (body.passType === "CUSTOMER_DELIVERY") {
+    try {
+      const { fetchSapOrders } = await import("@/lib/sap");
+      const chassisNo = (createData.chassis as string | null) ?? "";
+      const plateNo   = (createData.vehicle as string) ?? "";
+      const sapOrders = await fetchSapOrders(chassisNo, plateNo);
+      const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
+
+      if (active.length > 0) {
+        // Store each order — use payTerm field to store "HSTAT:<code>|<billingType>" for approver display
+        await prisma.serviceOrder.createMany({
+          data: active.map((o) => ({
+            gatePassId: gatePass.id,
+            orderId:     o.orderId,
+            orderStatus: o.orderStatus || o.orderStatusCode || "—",
+            payTerm:     `HSTAT:${o.orderStatusCode}|${o.billingType}|${o.billingDate}`,
+            isAssigned:  o.orderStatusCode === "H070",
+          })),
+        });
+        const isInvoiced = active.some((o) => o.orderStatusCode === "H070");
+        await prisma.$executeRaw`UPDATE "GatePass" SET "paymentType" = ${isInvoiced ? "INVOICED" : "NOT_INVOICED"} WHERE id = ${gatePass.id}`;
+        gatePass.paymentType = isInvoiced ? "INVOICED" : "NOT_INVOICED";
+      }
+    } catch (err) {
+      console.error("[CD] SAP invoice fetch error:", err);
+      // Non-fatal — pass is still created; paymentType stays as frontend-provided hint
+    }
+  }
+
+  // MAIN_OUT: auto-fetch SAP orders at creation, detect payment types, notify CASHIER + APPROVER in parallel
   if (isAfterSalesMainOut) {
     await prisma.$executeRaw`UPDATE "GatePass" SET status = 'CASHIER_REVIEW'::"GatePassStatus" WHERE id = ${gatePass.id}`;
     gatePass.status = "CASHIER_REVIEW";
-  }
 
-  // For CASHIER_REVIEW: notify all CASHIERs
-  if (isAfterSalesMainOut) {
-    const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
-    if (cashiers.length > 0) {
-      await prisma.notification.createMany({
-        data: cashiers.map((c) => ({
-          userId: c.id,
-          type: "CASHIER_REVIEW_REQUIRED",
-          title: "Order Review Required",
-          message: `${gatePassNumber} — ${gatePass.vehicle} is ready for order review.`,
-          gatePassId: gatePass.id,
-        })),
-      });
+    // Auto-fetch SAP orders at creation time
+    let hasImmediate = false;
+    let hasCredit = false;
+    try {
+      const { fetchSapOrders } = await import("@/lib/sap");
+      const chassisNo = (createData.chassis as string | null) ?? "";
+      const plateNo = (createData.vehicle as string) ?? "";
+      const sapOrders = await fetchSapOrders(chassisNo, plateNo);
+      const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
+      const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+
+      if (active.length > 0) {
+        await prisma.serviceOrder.createMany({
+          data: active.map((o) => ({
+            gatePassId: gatePass.id,
+            orderId: o.orderId,
+            orderStatus: o.orderStatus || "Open",
+            payTerm: o.payTerm || o.payTermCode || "",
+            isAssigned: false,
+          })),
+        });
+        hasImmediate = active.some((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()));
+        hasCredit = active.some((o) => {
+          const t = (o.payTerm || "").toLowerCase().trim();
+          return t !== "" && !immediateTerms.includes(t);
+        });
+      }
+    } catch (sapErr) {
+      console.error("[MAIN_OUT creation] SAP fetch failed:", sapErr);
+      // Continue without orders — cashier can sync manually
     }
+
+    // Set flags. If one track has nothing to do, pre-mark it as done.
+    const cashierCleared = !hasImmediate; // no immediate orders = cashier has nothing to do
+    const creditApproved = !hasCredit;   // no credit orders = approver has nothing to do
+    const detectedPaymentType = hasCredit && hasImmediate ? "MIXED" : hasCredit ? "CREDIT" : "CASH";
+
+    await prisma.$executeRaw`UPDATE "GatePass" SET
+      "hasImmediate" = ${hasImmediate},
+      "hasCredit" = ${hasCredit},
+      "cashierCleared" = ${cashierCleared},
+      "creditApproved" = ${creditApproved},
+      "paymentType" = ${detectedPaymentType}
+      WHERE id = ${gatePass.id}`;
+
+    // Notify Cashier if has immediate orders (or no orders at all — cashier to verify)
+    if (hasImmediate || (!hasImmediate && !hasCredit)) {
+      const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+      if (cashiers.length > 0) {
+        await prisma.notification.createMany({
+          data: cashiers.map((c) => ({
+            userId: c.id,
+            type: "CASHIER_REVIEW_REQUIRED",
+            title: "Order Review Required",
+            message: `${gatePassNumber} — ${gatePass.vehicle} has immediate payment orders to clear.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
+    // Notify Approver if has credit orders (IN PARALLEL with cashier)
+    if (hasCredit) {
+      const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+      if (approvers.length > 0) {
+        await prisma.notification.createMany({
+          data: approvers.map((a) => ({
+            userId: a.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "Credit Payment — Approval Required",
+            message: `${gatePassNumber} (${gatePass.vehicle}) — credit payment orders detected. Your approval is needed in parallel with cashier review.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
     return NextResponse.json({ gatePass }, { status: 201 });
   }
 

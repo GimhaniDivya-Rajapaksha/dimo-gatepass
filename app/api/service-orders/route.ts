@@ -73,60 +73,85 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Proceed: { gatePassId, action: "proceed" }
-  // If ALL orders assigned → COMPLETED
-  // If some unassigned → PENDING_APPROVAL (send to approver)
+  // Cashier clears their immediate-payment orders and signals their part is done.
+  // If creditApproved is also true (or hasCredit = false), move to APPROVED for Security Officer.
   if (body.action === "proceed") {
     const { gatePassId } = body as { gatePassId: string };
 
-    const [total, unassigned] = await Promise.all([
-      prisma.serviceOrder.count({ where: { gatePassId } }),
-      prisma.serviceOrder.count({ where: { gatePassId, isAssigned: false } }),
-    ]);
-
-    // No orders in SAP → send to PENDING_APPROVAL so Approver can decide
-    const allPaid = total > 0 && unassigned === 0;
-    // All paid → APPROVED; No orders or partial → PENDING_APPROVAL (send to approver)
-    const newStatus = allPaid ? "APPROVED" : "PENDING_APPROVAL";
-
-    const gatePassRecord = await prisma.gatePass.update({
-      where: { id: gatePassId },
-      data: { status: newStatus },
-      select: { gatePassNumber: true, vehicle: true, createdById: true },
+    const allOrders = await prisma.serviceOrder.findMany({ where: { gatePassId } });
+    const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+    const hasCredit = allOrders.some((o) => {
+      const t = (o.payTerm || "").toLowerCase().trim();
+      return t !== "" && !immediateTerms.includes(t);
     });
+    const detectedPaymentType = hasCredit ? "CREDIT" : "CASH";
 
-    // Notify the pass creator that payment is cleared and vehicle can be released
-    if (allPaid) {
+    // Mark cashier's part as done
+    await prisma.$executeRaw`UPDATE "GatePass" SET "cashierCleared" = true WHERE id = ${gatePassId}`;
+
+    // Fetch the updated pass to check creditApproved
+    const updatedPass = await (prisma.gatePass as any).findUnique({ where: { id: gatePassId } });
+    const creditApprovedDone = updatedPass?.creditApproved === true || updatedPass?.hasCredit === false;
+
+    let newStatus: string;
+    let gatePassRecord: { gatePassNumber: string; vehicle: string; createdById: string } | null = null;
+
+    if (creditApprovedDone) {
+      // Both done → APPROVED → Security Officer
+      gatePassRecord = await prisma.gatePass.update({
+        where: { id: gatePassId },
+        data: { status: "APPROVED", paymentType: detectedPaymentType } as any,
+        select: { gatePassNumber: true, vehicle: true, createdById: true },
+      });
+      newStatus = "APPROVED";
+
+      // Notify pass creator
       await prisma.notification.create({
         data: {
-          userId: gatePassRecord.createdById,
+          userId: (gatePassRecord as any).createdById,
           type: "GATE_PASS_APPROVED",
-          title: "Payment Cleared — Ready to Release",
-          message: `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) — all orders settled. Please mark as Gate Out to release the vehicle.`,
+          title: "Payment Cleared — Awaiting Security Gate Release",
+          message: `${(gatePassRecord as any).gatePassNumber} (${(gatePassRecord as any).vehicle}) — all checks complete. Security Officer will confirm Gate OUT.`,
           gatePassId,
         },
       });
-    }
 
-    // If sending to approver, notify all APPROVERs
-    if (!allPaid) {
-      const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-      if (approvers.length > 0 && gatePassRecord) {
-        const approverMsg = total === 0
-          ? `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) — no SAP orders found. Cashier has escalated for approval.`
-          : `${gatePassRecord.gatePassNumber} (${gatePassRecord.vehicle}) has unpaid orders and requires approval.`;
+      // Notify Security Officers
+      const securityOfficers = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+      if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
-          data: approvers.map((a) => ({
-            userId: a.id,
-            type: "GATE_PASS_SUBMITTED",
-            title: total === 0 ? "No SAP Orders — Approval Required" : "Partial Payment — Approval Required",
-            message: approverMsg,
+          data: securityOfficers.map((s: { id: string }) => ({
+            userId: s.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Vehicle Cleared — Ready for Gate OUT",
+            message: `${(gatePassRecord as any).gatePassNumber} (${(gatePassRecord as any).vehicle}) — payment cleared. Please confirm gate release.`,
             gatePassId,
           })),
         });
       }
+    } else {
+      // Cashier done but credit approval still pending
+      gatePassRecord = await (prisma.gatePass as any).findUnique({
+        where: { id: gatePassId },
+        select: { gatePassNumber: true, vehicle: true, createdById: true },
+      });
+      newStatus = "CASHIER_REVIEW"; // stays, waiting for approver
+
+      // Notify initiator that cashier is done, waiting for approver
+      if (gatePassRecord) {
+        await prisma.notification.create({
+          data: {
+            userId: (gatePassRecord as any).createdById,
+            type: "GATE_PASS_SUBMITTED",
+            title: "Cashier Done — Awaiting Credit Approval",
+            message: `${(gatePassRecord as any).gatePassNumber} — cashier has cleared immediate orders. Waiting for approver to review credit orders.`,
+            gatePassId,
+          },
+        });
+      }
     }
 
-    return NextResponse.json({ ok: true, status: newStatus, allPaid });
+    return NextResponse.json({ ok: true, status: newStatus, creditPending: !creditApprovedDone });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

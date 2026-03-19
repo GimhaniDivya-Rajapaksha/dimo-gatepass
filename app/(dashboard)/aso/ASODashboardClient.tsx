@@ -111,75 +111,39 @@ export default function ASODashboardClient({ user }: Props) {
 
   // ── Stats derived from incoming + myPasses ─────────────────────────────────
   const incomingCount = incoming.length;
-  // Vehicles awaiting SUB IN creation (confirmed left HQ but not yet formally received at sub-location)
-  const inTransit = incoming.filter(v => !v.hasActiveSubIn).length;
+  // All vehicles in GATE_OUT are physically en route
+  const inTransit = incoming.length;
 
   // ── Fetch incoming vehicles ─────────────────────────────────────────────────
   const fetchIncoming = useCallback(async () => {
     setIncomingLoading(true);
     try {
+      // Show GATE_OUT SUB_OUT passes — Security A confirmed Gate OUT, vehicle is en route to ASO
       const outParams = new URLSearchParams({
         passType: "AFTER_SALES", passSubType: "SUB_OUT",
-        locationView: "true", limit: "50",
+        status: "GATE_OUT", limit: "50", locationView: "true",
       });
       if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
 
-      const inParams = new URLSearchParams({
-        passType: "AFTER_SALES", passSubType: "SUB_IN",
-        locationView: "true", limit: "100",
-      });
-
-      const [outRes, inRes] = await Promise.all([
+      // Also fetch APPROVED SUB_IN passes to detect which vehicles already have a sub-in created
+      const [outRes, subInRes] = await Promise.all([
         fetch(`/api/gate-pass?${outParams}`),
-        fetch(`/api/gate-pass?${inParams}`),
+        fetch("/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
       ]);
-      if (!outRes.ok) {
-        setIncoming([]);
-        return;
-      }
+      if (!outRes.ok) { setIncoming([]); return; }
 
-      const outData = await outRes.json();
-      // Only show COMPLETED SUB_OUT passes — RECIPIENT has confirmed vehicle left DIMO HQ
-      const subOutPasses: IncomingVehicle[] = (outData.passes || []).filter(
-        (p: IncomingVehicle) => p.status === "COMPLETED"
+      const [outData, subInData] = await Promise.all([outRes.json(), subInRes.ok ? subInRes.json() : { passes: [] }]);
+
+      // Build a set of parent pass IDs that already have an APPROVED SUB_IN
+      const existingSubInParents = new Set<string>(
+        (subInData.passes ?? []).map((p: any) => p.parentPassId).filter(Boolean)
       );
 
-      // Track SUB_IN status per SUB_OUT:
-      // - active (non-COMPLETED) SUB_IN  → show "SUB IN Created" badge on the SUB_OUT row
-      // - COMPLETED SUB_IN               → hide the SUB_OUT row entirely (vehicle already received)
-      const subInBySubOut = new Map<string, string>();    // SUB_OUT id → active SUB_IN status
-      const subInDoneForSubOut = new Set<string>();       // SUB_OUT id whose SUB_IN is COMPLETED
-      if (inRes.ok) {
-        const inData = await inRes.json();
-        // Build a map: MAIN_IN id → list of SUB_OUT ids (from the subOutPasses we already have)
-        const mainInToSubOuts = new Map<string, string[]>();
-        subOutPasses.forEach(p => {
-          if (p.parentPass?.id) {
-            const list = mainInToSubOuts.get(p.parentPass.id) ?? [];
-            list.push(p.id);
-            mainInToSubOuts.set(p.parentPass.id, list);
-          }
-        });
-        (inData.passes || []).forEach((p: { parentPass: { id: string } | null; status: string; id: string }) => {
-          if (!p.parentPass?.id) return;
-          const subOutIds = mainInToSubOuts.get(p.parentPass.id) ?? [];
-          if (p.status === "COMPLETED") {
-            subOutIds.forEach(soId => subInDoneForSubOut.add(soId));
-          } else {
-            subOutIds.forEach(soId => subInBySubOut.set(soId, p.status));
-          }
-        });
-      }
-
-      // Hide SUB_OUTs whose SUB_IN is COMPLETED (vehicle fully received — nothing left to do)
-      setIncoming(
-        subOutPasses
-          .filter(p => !subInDoneForSubOut.has(p.id))
-          .map(p => ({
-            ...p,
-            hasActiveSubIn: subInBySubOut.has(p.id),
-          }))
-      );
+      setIncoming((outData.passes || []).map((p: IncomingVehicle) => ({
+        ...p,
+        // Mark if a SUB_IN pass already exists for this vehicle's parent MAIN_IN
+        hasActiveSubIn: existingSubInParents.has(p.parentPass?.id ?? "") || existingSubInParents.has(p.id),
+      })));
     } catch {
       setIncoming([]);
     } finally {
@@ -236,6 +200,42 @@ export default function ASODashboardClient({ user }: Props) {
       setActioningId(null);
     }
   }, [fetchMyPasses, fetchIncoming]);
+
+  // Create a SUB_IN pass for the incoming vehicle — Security B will then confirm Gate IN
+  const handleCreateSubIn = useCallback(async (v: IncomingVehicle) => {
+    if (!confirm("Create Sub IN pass for this vehicle? Security Officer will confirm Gate IN when the vehicle arrives.")) return;
+    setActioningId(v.id);
+    try {
+      const res = await fetch("/api/gate-pass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passType: "AFTER_SALES",
+          passSubType: "SUB_IN",
+          parentPassId: v.parentPass?.id ?? v.id,
+          vehicle: v.vehicle,
+          chassis: v.chassis,
+          make: v.make,
+          vehicleColor: v.vehicleColor,
+          fromLocation: v.toLocation,   // vehicle is coming from ASO (= the SUB_OUT's toLocation)
+          toLocation: v.fromLocation,   // heading back toward DIMO (= the SUB_OUT's fromLocation)
+          serviceJobNo: v.serviceJobNo ?? v.parentPass?.serviceJobNo,
+          requestedBy: v.requestedBy,
+        }),
+      });
+      if (res.ok) {
+        await fetchIncoming();
+        await fetchMyPasses();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to create Sub IN pass: ${err.error || res.statusText}`);
+      }
+    } catch {
+      alert("Network error — please try again.");
+    } finally {
+      setActioningId(null);
+    }
+  }, [fetchIncoming, fetchMyPasses]);
 
   useEffect(() => { void fetchIncoming(); }, [fetchIncoming]);
   useEffect(() => { void fetchMyPasses(); }, [fetchMyPasses]);
@@ -521,27 +521,32 @@ export default function ASODashboardClient({ user }: Props) {
                         </div>
 
                         {/* Action */}
-                        <div className="flex-shrink-0 ml-2">
+                        <div className="flex-shrink-0 ml-2 flex flex-col gap-1.5">
                           {v.hasActiveSubIn ? (
-                            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
-                              style={{ background: "#dcfce7", color: "#15803d" }}>
+                            <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
+                              style={{ background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" }}>
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                                  d="M5 13l4 4L19 7" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                               </svg>
-                              SUB IN Created
-                            </div>
+                              Awaiting Security Gate IN
+                            </span>
                           ) : (
-                            <Link href={`/gate-pass/create-sub-in/${v.id}`}
-                              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
-                              style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}>
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                  d="M7 8l-4 4m0 0l4 4m-4-4h18" />
-                              </svg>
-                              Create SUB IN
-                            </Link>
+                            <button
+                              onClick={() => void handleCreateSubIn(v)}
+                              disabled={actioningId === v.id}
+                              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap disabled:opacity-50"
+                              style={{ background: "linear-gradient(135deg,#1d4ed8,#2563eb)" }}>
+                              {actioningId === v.id
+                                ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
+                              Create Sub IN Pass
+                            </button>
                           )}
+                          <Link href={`/gate-pass/${v.id}`}
+                            className="text-center text-[11px] font-semibold px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                            style={{ background: "var(--surface2)", color: "var(--text-muted)", border: "1px solid var(--border)" }}>
+                            View
+                          </Link>
                         </div>
                       </div>
                     </div>
@@ -682,18 +687,15 @@ export default function ASODashboardClient({ user }: Props) {
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
                           {p.passSubType === "SUB_IN" && p.status === "APPROVED" && (
-                            <button
-                              onClick={() => void handlePassAction(p.id, "gate_in", "Mark as Arrived — confirm vehicle received")}
-                              disabled={actioningId === p.id}
-                              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                              style={{ background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7", opacity: actioningId === p.id ? 0.5 : 1 }}>
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            <span className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold"
+                              style={{ background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" }}>
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                               </svg>
-                              Mark as Arrived
-                            </button>
+                              Awaiting Security Gate IN
+                            </span>
                           )}
-                          {p.passSubType === "SUB_IN" && p.status === "GATE_OUT" && (
+                          {p.passSubType === "SUB_IN" && p.status === "COMPLETED" && (
                             <>
                               <Link href={`/gate-pass/create-sub-out-in/${p.id}`}
                                 className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap"

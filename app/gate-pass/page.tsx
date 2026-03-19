@@ -69,6 +69,18 @@ export default function GatePassListPage() {
   const isASO = session?.user?.role === "AREA_SALES_OFFICER";
   const [gatingInId, setGatingInId] = useState<string | null>(null);
 
+  // Styled confirm modal (replaces browser confirm())
+  type ConfirmModal = {
+    id: string;
+    action: "gate_out" | "gate_in" | "cancel";
+    icon: "out" | "in" | "cancel";
+    title: string;
+    message: string;
+    confirmLabel: string;
+    confirmColor: string;
+  };
+  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
+
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: "15" });
@@ -91,31 +103,69 @@ export default function GatePassListPage() {
   useEffect(() => { setPage(1); }, [search, statusFilter, passTypeFilter]);
   useEffect(() => { setStatusFilter(searchParams.get("status") ?? "ALL"); setPage(1); }, [searchParams]);
 
-  async function handleGateOut(id: string) {
-    if (!confirm("Mark this gate pass as Gate Out? This will notify the recipient.")) return;
-    setGatingOutId(id);
-    try {
-      await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_out" }) });
-      fetchPasses();
-    } finally { setGatingOutId(null); }
+  function askGateOut(p: GatePass) {
+    const isAfterSales = p.passType === "AFTER_SALES";
+    const label = p.passType !== "AFTER_SALES" ? "Gate Out"
+      : p.passSubType === "MAIN_IN" ? "Mark IN (Send to Security)"
+      : p.passSubType === "SUB_OUT" ? "Gate Out (Send to Security)"
+      : "Gate Out";
+    setConfirmModal({
+      id: p.id, action: "gate_out", icon: "out",
+      title: isAfterSales ? "Confirm Gate Action" : "Confirm Gate Out",
+      message: isAfterSales
+        ? `Vehicle ${p.vehicle} will be marked for ${label}. This will notify the Security Officer at ${p.fromLocation || "the departure location"} to confirm.`
+        : `Gate pass ${p.gatePassNumber} will be marked as Gate Out. This will notify the recipient.`,
+      confirmLabel: label,
+      confirmColor: "#1d4ed8",
+    });
   }
 
-  async function handleGateIn(id: string, label: string) {
-    if (!confirm(`${label} — mark vehicle as received?`)) return;
-    setGatingInId(id);
-    try {
-      await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_in" }) });
-      fetchPasses();
-    } finally { setGatingInId(null); }
+  function askGateIn(p: GatePass, label: string) {
+    const isAfterSales = p.passType === "AFTER_SALES";
+    setConfirmModal({
+      id: p.id, action: "gate_in", icon: "in",
+      title: "Confirm Vehicle Arrived",
+      message: isAfterSales
+        ? `Confirm that vehicle ${p.vehicle} has arrived. This will notify the Security Officer at ${p.toLocation || "the arrival location"} to confirm gate entry.`
+        : `Mark vehicle ${p.vehicle} as received / arrived?`,
+      confirmLabel: label,
+      confirmColor: "#15803d",
+    });
   }
 
-  async function handleCancel(id: string) {
-    if (!confirm("Cancel this gate pass request?")) return;
-    setCancellingId(id);
-    try {
-      await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
-      fetchPasses();
-    } finally { setCancellingId(null); }
+  function askCancel(id: string) {
+    setConfirmModal({
+      id, action: "cancel", icon: "cancel",
+      title: "Cancel Gate Pass",
+      message: "This gate pass request will be cancelled. This action cannot be undone.",
+      confirmLabel: "Cancel Gate Pass",
+      confirmColor: "#dc2626",
+    });
+  }
+
+  async function executeConfirm() {
+    if (!confirmModal) return;
+    const { id, action } = confirmModal;
+    setConfirmModal(null);
+    if (action === "gate_out") {
+      setGatingOutId(id);
+      try {
+        await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_out" }) });
+        fetchPasses();
+      } finally { setGatingOutId(null); }
+    } else if (action === "gate_in") {
+      setGatingInId(id);
+      try {
+        await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_in" }) });
+        fetchPasses();
+      } finally { setGatingInId(null); }
+    } else if (action === "cancel") {
+      setCancellingId(id);
+      try {
+        await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
+        fetchPasses();
+      } finally { setCancellingId(null); }
+    }
   }
 
   const isSrTab = passTypeFilter === "AFTER_SALES";
@@ -473,7 +523,7 @@ export default function GatePassListPage() {
                               </svg>
                             </button>
                             {canGateOut && (
-                              <button onClick={() => handleGateOut(p.id)} disabled={gatingOutId === p.id}
+                              <button onClick={() => askGateOut(p)} disabled={gatingOutId === p.id}
                                 className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"
                                 style={{ background: "#eff6ff", borderColor: "#3b82f6", color: "#1d4ed8", opacity: gatingOutId === p.id ? 0.5 : 1 }}
                                 title="Mark Gate Out — notify recipient">
@@ -484,7 +534,7 @@ export default function GatePassListPage() {
                               </button>
                             )}
                             {canGateIn && (
-                              <button onClick={() => handleGateIn(p.id, gateInLabel)} disabled={gatingInId === p.id}
+                              <button onClick={() => askGateIn(p, gateInLabel)} disabled={gatingInId === p.id}
                                 className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"
                                 style={{ background: "#f0fdf4", borderColor: "#22c55e", color: "#15803d", opacity: gatingInId === p.id ? 0.5 : 1 }}
                                 title={`${gateInLabel} — mark vehicle as received`}>
@@ -495,7 +545,7 @@ export default function GatePassListPage() {
                               </button>
                             )}
                             {canCancel && (
-                              <button onClick={() => handleCancel(p.id)} disabled={cancellingId === p.id}
+                              <button onClick={() => askCancel(p.id)} disabled={cancellingId === p.id}
                                 className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                                 style={{ background: "var(--surface)", borderColor: "#ef4444", color: "#ef4444", opacity: cancellingId === p.id ? 0.5 : 1 }}
                                 title="Cancel">
@@ -543,6 +593,66 @@ export default function GatePassListPage() {
           </div>
         )}
       </div>
+
+      {/* Styled Confirm Modal */}
+      <AnimatePresence>
+        {confirmModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(2px)" }}
+            onClick={() => setConfirmModal(null)}>
+            <motion.div initial={{ scale: 0.93, opacity: 0, y: 12 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.93, opacity: 0, y: 12 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm rounded-2xl shadow-2xl p-6 flex flex-col gap-4"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={(e) => e.stopPropagation()}>
+
+              {/* Icon */}
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: confirmModal.icon === "cancel" ? "#fef2f2" : confirmModal.icon === "in" ? "#f0fdf4" : "#eff6ff" }}>
+                  {confirmModal.icon === "cancel" ? (
+                    <svg className="w-5 h-5" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  ) : confirmModal.icon === "in" ? (
+                    <svg className="w-5 h-5" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" style={{ color: "#1d4ed8" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                  )}
+                </div>
+                <div>
+                  <p className="font-bold text-base" style={{ color: "var(--text)" }}>{confirmModal.title}</p>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>Action required</p>
+                </div>
+              </div>
+
+              {/* Message */}
+              <p className="text-sm leading-relaxed rounded-xl px-4 py-3" style={{ color: "var(--text)", background: "var(--surface2)" }}>
+                {confirmModal.message}
+              </p>
+
+              {/* Buttons */}
+              <div className="flex gap-2 justify-end pt-1">
+                <button onClick={() => setConfirmModal(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold border transition-all"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                  Back
+                </button>
+                <button onClick={executeConfirm}
+                  className="px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all shadow-md"
+                  style={{ background: confirmModal.confirmColor }}>
+                  {confirmModal.confirmLabel}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

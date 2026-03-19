@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type TabKey = "LT_OUT" | "LT_IN" | "CD_OUT" | "SR_MAIN_IN" | "SR_SUB_OUT" | "SR_SUB_IN" | "SR_MAIN_OUT";
+type TabKey = "LT_OUT" | "LT_IN";
 
 type GatePass = {
   id: string;
@@ -31,23 +31,13 @@ type GatePass = {
 };
 
 const TABS: { key: TabKey; label: string; passType: string; passSubType?: string; direction: "OUT" | "IN" }[] = [
-  { key: "LT_OUT",      label: "Location Transfer OUT",  passType: "LOCATION_TRANSFER",  direction: "OUT" },
-  { key: "LT_IN",       label: "Location Transfer IN",   passType: "LOCATION_TRANSFER",  direction: "IN"  },
-  { key: "CD_OUT",      label: "Customer Delivery",       passType: "CUSTOMER_DELIVERY",  direction: "OUT" },
-  { key: "SR_MAIN_IN",  label: "SR — Gate Pass IN",       passType: "AFTER_SALES",        passSubType: "MAIN_IN",  direction: "IN"  },
-  { key: "SR_SUB_OUT",  label: "SR — Sub Gate OUT",       passType: "AFTER_SALES",        passSubType: "SUB_OUT",  direction: "OUT" },
-  { key: "SR_SUB_IN",   label: "SR — Sub Gate IN",        passType: "AFTER_SALES",        passSubType: "SUB_IN",   direction: "IN"  },
-  { key: "SR_MAIN_OUT", label: "SR — Main Gate OUT",      passType: "AFTER_SALES",        passSubType: "MAIN_OUT", direction: "OUT" },
+  { key: "LT_OUT", label: "Location Transfer OUT", passType: "LOCATION_TRANSFER", direction: "OUT" },
+  { key: "LT_IN",  label: "Location Transfer IN",  passType: "LOCATION_TRANSFER", direction: "IN"  },
 ];
 
 const tabColors: Record<TabKey, { active: string; badge: string; badgeTxt: string }> = {
-  LT_OUT:      { active: "linear-gradient(135deg,#1a4f9e,#2563eb)", badge: "#dbeafe", badgeTxt: "#1d4ed8" },
-  LT_IN:       { active: "linear-gradient(135deg,#065f46,#059669)",  badge: "#d1fae5", badgeTxt: "#065f46" },
-  CD_OUT:      { active: "linear-gradient(135deg,#7c3aed,#6d28d9)",  badge: "#ede9fe", badgeTxt: "#5b21b6" },
-  SR_MAIN_IN:  { active: "linear-gradient(135deg,#15803d,#22c55e)",  badge: "#dcfce7", badgeTxt: "#15803d" },
-  SR_SUB_OUT:  { active: "linear-gradient(135deg,#1d4ed8,#3b82f6)",  badge: "#dbeafe", badgeTxt: "#1d4ed8" },
-  SR_SUB_IN:   { active: "linear-gradient(135deg,#92400e,#f59e0b)",  badge: "#fef3c7", badgeTxt: "#92400e" },
-  SR_MAIN_OUT: { active: "linear-gradient(135deg,#6b21a8,#a855f7)",  badge: "#f3e8ff", badgeTxt: "#6b21a8" },
+  LT_OUT: { active: "linear-gradient(135deg,#1a4f9e,#2563eb)", badge: "#dbeafe", badgeTxt: "#1d4ed8" },
+  LT_IN:  { active: "linear-gradient(135deg,#065f46,#059669)",  badge: "#d1fae5", badgeTxt: "#065f46" },
 };
 
 export default function ReceivePage() {

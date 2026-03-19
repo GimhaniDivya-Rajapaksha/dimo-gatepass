@@ -14,6 +14,7 @@ enum Role {
   ADMIN
   AREA_SALES_OFFICER
   CASHIER
+  SECURITY_OFFICER
 }
 
 enum PassType {
@@ -26,6 +27,7 @@ enum GatePassStatus {
   PENDING_APPROVAL
   APPROVED
   REJECTED
+  INITIATOR_OUT
   GATE_OUT
   COMPLETED
   CANCELLED
@@ -92,6 +94,11 @@ model GatePass {
   resubmitNote    String? // initiator's correction note when resubmitting
 
   passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
+  paymentType    String?   // CASH | CREDIT | MIXED (used for MAIN_OUT)
+  cashierCleared  Boolean  @default(false)
+  creditApproved  Boolean  @default(false)
+  hasCredit       Boolean  @default(false)
+  hasImmediate    Boolean  @default(false)
   serviceJobNo   String?   // After Sales service job/work order number
   parentPassId   String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])

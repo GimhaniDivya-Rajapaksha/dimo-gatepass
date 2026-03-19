@@ -1,5 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useMemo } from "react";
+import DatePicker from "@/components/ui/DatePicker";
+import TimePicker from "@/components/ui/TimePicker";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -619,9 +621,19 @@ export default function CreateGatePassPage() {
   const [asFoundPass, setAsFoundPass] = useState<any | null>(null);
   const [asGateInLoading, setAsGateInLoading] = useState(false);
   const [asSubType, setAsSubType] = useState<"SUB_OUT" | "SUB_IN" | "MAIN_OUT" | "SUB_OUT_IN">("SUB_OUT");
+
   const [asToLocation, setAsToLocation] = useState("");
   const [asFromLocation, setAsFromLocation] = useState("");
   const [dimoLocations, setDimoLocations] = useState<LookupOption[]>([]);
+  const [mainOutApprover, setMainOutApprover] = useState("");
+  // SAP pre-fetch for MAIN_OUT — determines if approver selection is needed
+  type SapPreviewOrder = { orderId: string; orderStatus: string; payTerm: string; orderStatusCode?: string; billingType?: string; billingDate?: string };
+  const [sapPreviewOrders, setSapPreviewOrders] = useState<SapPreviewOrder[]>([]);
+  const [sapPreviewLoading, setSapPreviewLoading] = useState(false);
+  // SAP invoice check for Customer Delivery
+  const [cdSapOrders, setCdSapOrders] = useState<SapPreviewOrder[]>([]);
+  const [cdSapLoading, setCdSapLoading] = useState(false);
+  const [cdSapLoaded, setCdSapLoaded] = useState(false);
 
   useEffect(() => {
     const allowed = ["INITIATOR", "AREA_SALES_OFFICER"];
@@ -692,6 +704,42 @@ export default function CreateGatePassPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType]);
+
+  // Fetch SAP invoice data when a CD vehicle is selected
+  useEffect(() => {
+    if (passType !== "CUSTOMER_DELIVERY" || !selectedCdVehicleDetail) {
+      setCdSapOrders([]); setCdSapLoaded(false); return;
+    }
+    const chassis = selectedCdVehicleDetail.chassisNo ?? "";
+    const plate   = selectedCdVehicleDetail.vehicleNo ?? "";
+    if (!chassis && !plate) return;
+    setCdSapLoading(true); setCdSapLoaded(false);
+    fetch(`/api/sap/orders?vin=${encodeURIComponent(chassis)}&licplate=${encodeURIComponent(plate)}`)
+      .then(r => r.ok ? r.json() : { orders: [] })
+      .then((d: { orders?: SapPreviewOrder[] }) => { setCdSapOrders(d.orders ?? []); setCdSapLoaded(true); })
+      .catch(() => { setCdSapOrders([]); setCdSapLoaded(true); })
+      .finally(() => setCdSapLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [passType, selectedCdVehicleDetail]);
+
+  // Pre-fetch SAP orders when MAIN_OUT is selected and a vehicle is linked
+  useEffect(() => {
+    if (asSubType !== "MAIN_OUT" || !asFoundPass) {
+      setSapPreviewOrders([]);
+      setMainOutApprover("");
+      return;
+    }
+    const chassis = asFoundPass.chassis ?? "";
+    const plate   = asFoundPass.vehicle ?? "";
+    if (!chassis && !plate) return;
+    setSapPreviewLoading(true);
+    fetch(`/api/sap/orders?vin=${encodeURIComponent(chassis)}&licplate=${encodeURIComponent(plate)}`)
+      .then(r => r.ok ? r.json() : { orders: [] })
+      .then((d: { orders?: SapPreviewOrder[] }) => setSapPreviewOrders(d.orders ?? []))
+      .catch(() => setSapPreviewOrders([]))
+      .finally(() => setSapPreviewLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asSubType, asFoundPass]);
 
   if (status === "loading") return null;
 
@@ -798,38 +846,76 @@ export default function CreateGatePassPage() {
 
   const validate = () => {
     const e: Record<string, string> = {};
+
+    // Helpers
+    const validNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+    const validPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
+    const now = new Date();
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const parseDate = (d: string) => { const dt = new Date(d); dt.setHours(0, 0, 0, 0); return dt; };
+    // Returns true if date+time is in the past (both must be provided)
+    const isPastDateTime = (date: string, time: string) => {
+      if (!date || !time) return false;
+      const [h, m] = time.split(":").map(Number);
+      const dt = new Date(date);
+      dt.setHours(h, m, 0, 0);
+      return dt < now;
+    };
+
     if (isLtLike) {
-      if (!lt.toLocation) e.toLocation = "Required";
-      if (!lt.outReason) e.outReason = "Required";
-      if (!lt.vehicle) e.vehicle = "Required";
-      if (!lt.approver) e.approver = "Required";
-      if (!lt.departureDate) e.departureDate = "Required";
-      if (!lt.departureTime) e.departureTime = "Required";
+      if (!lt.toLocation) e.toLocation = "Destination location is required";
+      if (!lt.outReason) e.outReason = "Reason for going out is required";
+      if (!lt.vehicle) e.vehicle = "Vehicle is required";
+      if (!lt.approver) e.approver = "Approver is required";
+      if (!lt.departureDate) e.departureDate = "Departure date is required";
+      else if (parseDate(lt.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
+      if (!lt.departureTime) e.departureTime = "Departure time is required";
+      else if (!e.departureDate && isPastDateTime(lt.departureDate, lt.departureTime)) e.departureTime = "Departure time cannot be in the past";
     } else if (isSr && srMode === "out") {
       if (!asFoundPass) e.asGateIn = "Please find a valid Gate IN pass first";
-      if (!asToLocation && !["MAIN_OUT"].includes(asSubType)) e.asToLocation = "Required";
-      if (!asFromLocation && !["MAIN_OUT"].includes(asSubType)) e.asFromLocation = "Required";
-      if (!cd.departureDate) e.departureDate = "Required";
-      if (!cd.departureTime) e.departureTime = "Required";
+      if (!asToLocation && !["MAIN_OUT"].includes(asSubType)) e.asToLocation = "Destination location is required";
+      if (!asFromLocation && !["MAIN_OUT"].includes(asSubType)) e.asFromLocation = "Origin location is required";
+      if (asSubType === "MAIN_OUT" && !mainOutApprover && sapPreviewOrders.some(o => { const t = (o.payTerm || "").toLowerCase().trim(); return t !== "" && !["immediate","zc01","payment immediate","cash","pay immediately w/o deduction"].includes(t); })) e.mainOutApprover = "Select an approver for credit orders";
+      if (!cd.departureDate) e.departureDate = "Departure date is required";
+      else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
+      if (!cd.departureTime) e.departureTime = "Departure time is required";
+      else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
+      // Carrier validation for After Sales out
+      if (transportMode === "CARRIER") {
+        if (!sr.companyName) e.companyName = "Carrier company name is required";
+        if (!sr.driverNIC) e.driverNIC = "Driver NIC is required";
+        else if (!validNIC(sr.driverNIC)) e.driverNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
+        if (!sr.driverName) e.driverName = "Driver name is required";
+        if (sr.contactNo && !validPhone(sr.contactNo)) e.contactNo = "Invalid contact number format";
+      }
     } else if (isSr) {
-      if (!sr.vehicle) e.vehicle = "Required";
-      if (!sr.approver) e.approver = "Required";
-      if (!sr.jobType) e.jobType = "Required";
-      if (!sr.receivingLocation) e.receivingLocation = "Required";
-      if (!sr.arrivalDate) e.arrivalDate = "Required";
-      if (!sr.arrivalTime) e.arrivalTime = "Required";
+      if (!sr.vehicle) e.vehicle = "Vehicle is required";
+      if (!sr.approver) e.approver = "Approver is required";
+      if (!sr.jobType) e.jobType = "Job type is required";
+      if (!sr.receivingLocation) e.receivingLocation = "Receiving location is required";
+      if (!sr.arrivalDate) e.arrivalDate = "Arrival date is required";
+      else if (parseDate(sr.arrivalDate) < today) e.arrivalDate = "Arrival date cannot be in the past";
+      if (!sr.arrivalTime) e.arrivalTime = "Arrival time is required";
+      else if (!e.arrivalDate && isPastDateTime(sr.arrivalDate, sr.arrivalTime)) e.arrivalTime = "Arrival time cannot be in the past";
     } else {
-      if (!cd.approver) e.approver = "Required";
-      if (!cd.vehicle) e.vehicle = "Required";
-      if (!cd.departureDate) e.departureDate = "Required";
-      if (!cd.departureTime) e.departureTime = "Required";
+      if (!cd.approver) e.approver = "Approver is required";
+      if (!cd.vehicle) e.vehicle = "Vehicle is required";
+      if (!cd.departureDate) e.departureDate = "Departure date is required";
+      else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
+      if (!cd.departureTime) e.departureTime = "Departure time is required";
+      else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
     }
+
+    // Carrier validation (non-After-Sales-out)
     if (transportMode === "CARRIER" && !(isSr && srMode === "out")) {
       const src = isLtLike ? lt : isSr ? sr : cd;
-      if (!src.companyName) e.companyName = "Required";
-      if (!src.driverNIC) e.driverNIC = "Required";
-      if (!src.driverName) e.driverName = "Required";
+      if (!src.companyName) e.companyName = "Carrier company name is required";
+      if (!src.driverNIC) e.driverNIC = "Driver NIC is required";
+      else if (!validNIC(src.driverNIC)) e.driverNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
+      if (!src.driverName) e.driverName = "Driver name is required";
+      if (src.contactNo && !validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
     }
+
     return e;
   };
 
@@ -848,6 +934,7 @@ export default function CreateGatePassPage() {
       const asPayload = {
         passType: "AFTER_SALES",
         passSubType: asSubType,
+
         parentPassId: asFoundPass?.parentPassId || asFoundPass?.id || null,
         vehicle: asFoundPass?.vehicle,
         chassis: asFoundPass?.chassis,
@@ -856,7 +943,7 @@ export default function CreateGatePassPage() {
         serviceJobNo: asFoundPass?.serviceJobNo ?? null,
         toLocation: asToLocation,
         fromLocation: asFromLocation || null,
-        approver: asFoundPass?.approver || sr.approver || null,
+        approver: asSubType === "MAIN_OUT" ? mainOutApprover || null : (asFoundPass?.approver || sr.approver || null),
         departureDate: cd.departureDate,
         departureTime: cd.departureTime,
         transportMode,
@@ -927,6 +1014,7 @@ export default function CreateGatePassPage() {
           departureDate: cd.departureDate,
           departureTime: cd.departureTime,
           transportMode,
+          isInvoiced: cdSapOrders.some(o => (o as any).orderStatusCode === "H070"),
           ...cdCarrierMileage,
         };
 
@@ -1292,6 +1380,12 @@ export default function CreateGatePassPage() {
 
                     {/* Action buttons row */}
                     <div className="flex flex-wrap items-center gap-2">
+                      <button type="button" onClick={() => { setAddVehicleTarget("sr"); setShowAddVehicle(true); }}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
+                        style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                        ADD Vehicle
+                      </button>
                       <button type="button" onClick={() => setShowSrBulkUpload(true)}
                         className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
                         style={{ background: "#5a9216" }}>
@@ -1473,10 +1567,10 @@ export default function CreateGatePassPage() {
                     />
                   </Field>
                   <Field label="Estimated Arrival Date" required error={errors.arrivalDate}>
-                    <TextInput type="date" value={sr.arrivalDate} onChange={(v) => setS("arrivalDate", v)} error={errors.arrivalDate} />
+                    <DatePicker value={sr.arrivalDate} onChange={(v) => setS("arrivalDate", v)} min={today} error={errors.arrivalDate} placeholder="Pick arrival date" />
                   </Field>
                   <Field label="Estimated Arrival Time" required error={errors.arrivalTime}>
-                    <TextInput type="time" value={sr.arrivalTime} onChange={(v) => setS("arrivalTime", v)} error={errors.arrivalTime} />
+                    <TimePicker value={sr.arrivalTime} onChange={(v) => setS("arrivalTime", v)} error={errors.arrivalTime} date={sr.arrivalDate} />
                   </Field>
                 </div>
               </div>
@@ -1772,10 +1866,12 @@ export default function CreateGatePassPage() {
                         const mainInConfirmed = asFoundPass.status === "COMPLETED";
                         // For warning message: whether MAIN IN is at least approved (just not yet confirmed)
                         const mainInApprovedOrBetter = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(asFoundPass.status);
-                        // Vehicle confirmed out = last sub (any) was SUB_OUT and recipient marked COMPLETED
-                        const vehicleConfirmedOut = lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED";
-                        // Active sub blocks = there's still an unfinished sub-pass in progress
-                        const activeSubBlocks = !!lastActiveSub;
+                        // Vehicle confirmed out = SUB_OUT has reached GATE_OUT (security confirmed) or COMPLETED
+                        const vehicleConfirmedOut = lastAnySub?.passSubType === "SUB_OUT" &&
+                          ["GATE_OUT", "COMPLETED"].includes(lastAnySub?.status);
+                        // Active sub blocks = active sub that isn't a GATE_OUT SUB_OUT ("vehicle is outside" state)
+                        const activeSubBlocks = !!lastActiveSub &&
+                          !(lastActiveSub.passSubType === "SUB_OUT" && lastActiveSub.status === "GATE_OUT");
                         // SUB OUT: available when MAIN IN confirmed AND no active sub AND vehicle not already confirmed out
                         const subOutLocked = !mainInConfirmed || activeSubBlocks || vehicleConfirmedOut;
                         // SUB IN: only available when vehicle is confirmed out (SUB_OUT COMPLETED by recipient)
@@ -1930,21 +2026,148 @@ export default function CreateGatePassPage() {
                               </Field>
                             </div>
                             )}
-                            {asSubType === "MAIN_OUT" && (
-                              <div className="mb-4 flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
-                                style={{ background: "#f5f3ff", borderColor: "#c4b5fd", color: "#5b21b6" }}>
-                                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                Main Gate OUT — Customer Handover. No location transfer required.
+                            {asSubType === "MAIN_OUT" && (() => {
+                              const immTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+                              const active = sapPreviewOrders.filter(o => !("cancelled" in o && (o as any).cancelled) && o.orderId);
+                              const creditOrders   = active.filter(o => { const t = (o.payTerm || "").toLowerCase().trim(); return t !== "" && !immTerms.includes(t); });
+                              const immediateOrders = active.filter(o => immTerms.includes((o.payTerm || "").toLowerCase().trim()) || (o.payTerm || "").trim() === "");
+                              const hasCredit = creditOrders.length > 0;
+                              return (
+                              <div className="mb-4 space-y-3">
+                                {/* Info banner */}
+                                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm font-medium"
+                                  style={{ background: "#f5f3ff", borderColor: "#c4b5fd", color: "#5b21b6" }}>
+                                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  Main Gate OUT — Customer Handover. Payment orders auto-detected from SAP at creation.
+                                </div>
+
+                                {/* SAP loading */}
+                                {sapPreviewLoading && asFoundPass && (
+                                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm"
+                                    style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                                    <svg className="animate-spin w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                    </svg>
+                                    <span style={{ color: "var(--text-muted)" }}>Checking SAP payment orders…</span>
+                                  </div>
+                                )}
+
+                                {/* SAP result — show only when vehicle is linked and fetch done */}
+                                {!sapPreviewLoading && asFoundPass && (
+                                  <>
+                                    {/* Credit orders panel + approver picker */}
+                                    {hasCredit ? (
+                                      <div className="rounded-xl border-2 overflow-hidden"
+                                        style={{ borderColor: errors.mainOutApprover ? "#f87171" : "#2563eb55" }}>
+                                        {/* Header */}
+                                        <div className="px-4 py-3 flex items-center gap-3"
+                                          style={{ background: "linear-gradient(135deg,#eff6ff,#dbeafe)", borderBottom: "1px solid #bfdbfe" }}>
+                                          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#2563eb" }}>
+                                            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                            </svg>
+                                          </div>
+                                          <div>
+                                            <p className="text-sm font-bold" style={{ color: "#1e40af" }}>
+                                              {creditOrders.length} Credit Order{creditOrders.length !== 1 ? "s" : ""} Found — Approver Required
+                                            </p>
+                                            <p className="text-xs" style={{ color: "#3b82f6" }}>
+                                              {immediateOrders.length > 0
+                                                ? `Also ${immediateOrders.length} immediate order${immediateOrders.length !== 1 ? "s" : ""} → Cashier will handle those separately`
+                                                : "No immediate orders — only credit approval needed"}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        {/* Credit orders table */}
+                                        <div style={{ maxHeight: "200px", overflowY: "auto", scrollbarWidth: "thin" }}>
+                                          <table className="w-full text-xs border-collapse">
+                                            <thead>
+                                              <tr style={{ background: "#dbeafe", borderBottom: "1px solid #bfdbfe" }}>
+                                                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: "#1e40af" }}>#</th>
+                                                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: "#1e40af" }}>Order ID</th>
+                                                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: "#1e40af" }}>Status</th>
+                                                <th className="px-3 py-2 text-left font-bold uppercase tracking-wide" style={{ color: "#1e40af" }}>Payment Terms</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {creditOrders.map((o, idx) => (
+                                                <tr key={o.orderId} style={{ background: idx % 2 === 0 ? "#eff6ff" : "#dbeafe30", borderBottom: "1px solid #bfdbfe" }}>
+                                                  <td className="px-3 py-2" style={{ color: "#3b82f6" }}>{idx + 1}</td>
+                                                  <td className="px-3 py-2 font-mono font-bold" style={{ color: "#1e40af" }}>{o.orderId}</td>
+                                                  <td className="px-3 py-2">
+                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: "#f1f5f9", color: "#475569" }}>
+                                                      {o.orderStatus || "Open"}
+                                                    </span>
+                                                  </td>
+                                                  <td className="px-3 py-2">
+                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: "#dbeafe", color: "#1e40af" }}>
+                                                      {o.payTerm || "—"}
+                                                    </span>
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+
+                                        {/* Approver picker */}
+                                        <div className="px-4 py-3" style={{ borderTop: "1px solid #bfdbfe", background: "#f8faff" }}>
+                                          <label className="block text-xs font-bold mb-1.5 uppercase tracking-wide" style={{ color: "#1e40af" }}>
+                                            Select Approver <span style={{ color: "#dc2626" }}>*</span>
+                                          </label>
+                                          <select
+                                            value={mainOutApprover}
+                                            onChange={(e) => { setMainOutApprover(e.target.value); setErrors(p => { const n = {...p}; delete n.mainOutApprover; return n; }); }}
+                                            className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                            style={{ background: "white", borderColor: errors.mainOutApprover ? "#f87171" : "#bfdbfe", color: mainOutApprover ? "var(--text)" : "#94a3b8" }}
+                                          >
+                                            <option value="">— Select approver for credit orders —</option>
+                                            {lookupOptions.approver.map((o) => (
+                                              <option key={o.id ?? o.value} value={o.label ?? o.value}>{o.label ?? o.value}</option>
+                                            ))}
+                                          </select>
+                                          {errors.mainOutApprover && (
+                                            <p className="text-xs mt-1 font-medium" style={{ color: "#dc2626" }}>{errors.mainOutApprover}</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      /* Cash-only — no approver needed */
+                                      active.length > 0 ? (
+                                        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm"
+                                          style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#16a34a" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                          <span style={{ color: "#15803d" }}>
+                                            <strong>{active.length} immediate payment order{active.length !== 1 ? "s" : ""}</strong> — Cash only. No approver needed; will go directly to Cashier.
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl border text-sm"
+                                          style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                          </svg>
+                                          <span style={{ color: "var(--text-muted)" }}>No SAP orders found for this vehicle — payment type will be confirmed by Cashier.</span>
+                                        </div>
+                                      )
+                                    )}
+                                  </>
+                                )}
                               </div>
-                            )}
+                              );
+                            })()}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <Field label="Departure Date" required error={errors.departureDate}>
-                                <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} min={today} />
+                                <DatePicker value={cd.departureDate} onChange={(v) => setC("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
                               </Field>
                               <Field label="Departure Time" required error={errors.departureTime}>
-                                <TextInput type="time" value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} />
+                                <TimePicker value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} date={cd.departureDate} />
                               </Field>
                             </div>
                           </motion.div>
@@ -2211,10 +2434,10 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Gate Out — Schedule Departure</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Estimated Departure Date" required error={errors.departureDate}>
-                    <TextInput type="date" value={lt.departureDate} onChange={(v) => setL("departureDate", v)} error={errors.departureDate} min={today} />
+                    <DatePicker value={lt.departureDate} onChange={(v) => setL("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
                   </Field>
                   <Field label="Estimated Departure Time" required error={errors.departureTime}>
-                    <TextInput type="time" value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} />
+                    <TimePicker value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} date={lt.departureDate} />
                   </Field>
                   <Field label="Reason" className="md:col-span-2">
                     <SearchInput value={lt.reasonToOut} onChange={(v) => setL("reasonToOut", v)} placeholder="Search reason to out" />
@@ -2227,10 +2450,10 @@ export default function CreateGatePassPage() {
                 <SectionTitle>Gate In — Expected Arrival</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Expected Arrival Date">
-                    <TextInput type="date" value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || today} />
+                    <DatePicker value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || today} placeholder="Pick arrival date" />
                   </Field>
                   <Field label="Expected Arrival Time">
-                    <TextInput type="time" value={lt.arrivalTime} onChange={(v) => setL("arrivalTime", v)} />
+                    <TimePicker value={lt.arrivalTime} onChange={(v) => setL("arrivalTime", v)} date={lt.arrivalDate} />
                   </Field>
                 </div>
               </div>
@@ -2333,15 +2556,100 @@ export default function CreateGatePassPage() {
                     </div>
                   </div>
 
+                  {/* SAP Invoice Status */}
+                  {(cdSapLoading || cdSapLoaded) && selectedCdVehicleDetail && (
+                    <div className="rounded-2xl border mb-5 overflow-hidden"
+                      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                      {/* Header */}
+                      <div className="px-5 py-3 flex items-center gap-3 border-b"
+                        style={{ borderColor: "var(--border)" }}>
+                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>SAP Invoice Status</p>
+                        {cdSapLoading && (
+                          <svg className="animate-spin w-3.5 h-3.5 ml-auto" style={{ color: "#2563eb" }} fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="px-5 py-4">
+                        {cdSapLoading ? (
+                          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Checking SAP invoice records…</p>
+                        ) : cdSapOrders.length === 0 ? (
+                          <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
+                            style={{ background: "#fef9c3", border: "1px solid #fde047" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#a16207" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-sm font-medium" style={{ color: "#a16207" }}>No SAP billing records found for this vehicle</p>
+                          </div>
+                        ) : (() => {
+                          const isInvoiced = cdSapOrders.some(o => (o as any).orderStatusCode === "H070");
+                          return (
+                            <div className="space-y-3">
+                              {/* Status badge */}
+                              <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl ${isInvoiced ? "" : ""}`}
+                                style={{
+                                  background: isInvoiced ? "#f0fdf4" : "#fff7ed",
+                                  border: `1px solid ${isInvoiced ? "#86efac" : "#fed7aa"}`,
+                                }}>
+                                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ background: isInvoiced ? "#16a34a" : "#f97316" }} />
+                                <p className="text-sm font-semibold" style={{ color: isInvoiced ? "#15803d" : "#c2410c" }}>
+                                  {isInvoiced ? "Invoiced — Billing Complete (HSTAT: H070)" : "Not Yet Invoiced — Billing Pending"}
+                                </p>
+                              </div>
+                              {/* Orders table */}
+                              <div className="rounded-xl overflow-hidden border" style={{ borderColor: "var(--border)" }}>
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr style={{ background: "var(--surface2)" }}>
+                                      {["Order ID", "Status", "HSTAT", "Billing Type", "Billing Date"].map(h => (
+                                        <th key={h} className="px-3 py-2 text-left font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)", fontSize: "9px" }}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {cdSapOrders.map((o, i) => {
+                                      const hstat = (o as any).orderStatusCode ?? "";
+                                      const invoiced = hstat === "H070";
+                                      return (
+                                        <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                                          <td className="px-3 py-2 font-mono font-bold" style={{ color: "var(--text)" }}>{o.orderId}</td>
+                                          <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{o.orderStatus}</td>
+                                          <td className="px-3 py-2">
+                                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold"
+                                              style={{
+                                                background: invoiced ? "#dcfce7" : "#fef3c7",
+                                                color: invoiced ? "#15803d" : "#b45309",
+                                              }}>{hstat || "—"}</span>
+                                          </td>
+                                          <td className="px-3 py-2 font-mono" style={{ color: "var(--text-muted)" }}>{(o as any).billingType || "—"}</td>
+                                          <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{(o as any).billingDate || "—"}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Gate Out */}
                   <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                     <SectionTitle>Gate Out from Dimo 800</SectionTitle>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <Field label="Estimated Departure Date" required error={errors.departureDate}>
-                        <TextInput type="date" value={cd.departureDate} onChange={(v) => setC("departureDate", v)} error={errors.departureDate} min={today} />
+                        <DatePicker value={cd.departureDate} onChange={(v) => setC("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
                       </Field>
                       <Field label="Estimated Departure Time" required error={errors.departureTime}>
-                        <TextInput type="time" value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} />
+                        <TimePicker value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} date={cd.departureDate} />
                       </Field>
                     </div>
                   </div>

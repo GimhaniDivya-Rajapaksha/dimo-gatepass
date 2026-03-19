@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -40,6 +40,50 @@ function fmtDate(d: string | null) {
   catch { return d; }
 }
 
+// ── Slide to Confirm ──────────────────────────────────────────────────────────
+
+function SlideToConfirm({ onConfirm, disabled }: { onConfirm: () => void; disabled?: boolean }) {
+  const [pos, setPos] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startXRef = useRef(0);
+  const TRACK = 300;
+  const HANDLE = 56;
+  const MAX = TRACK - HANDLE;
+
+  function start(x: number) { if (disabled) return; setDragging(true); startXRef.current = x - pos; }
+  function move(x: number) {
+    if (!dragging) return;
+    const p = Math.max(0, Math.min(MAX, x - startXRef.current));
+    setPos(p);
+    if (p >= MAX - 2) { setDragging(false); setPos(0); onConfirm(); }
+  }
+  function end() { if (dragging) { setDragging(false); setPos(0); } }
+
+  return (
+    <div className="relative rounded-full select-none overflow-hidden"
+      style={{ width: TRACK, height: 52, background: "#d1fae5", border: "2px solid #6ee7b7", opacity: disabled ? 0.5 : 1 }}
+      onMouseMove={(e) => move(e.clientX)} onMouseUp={end} onMouseLeave={end}
+      onTouchMove={(e) => move(e.touches[0].clientX)} onTouchEnd={end}
+    >
+      {/* Fill */}
+      <div className="absolute inset-0 rounded-full" style={{ width: pos + HANDLE, background: "#10b981", opacity: 0.35 }} />
+      {/* Label */}
+      <div className="absolute inset-0 flex items-center justify-center text-sm font-bold pointer-events-none" style={{ color: "#065f46", paddingLeft: HANDLE + 4 }}>
+        → Slide to Confirm Payment Cleared
+      </div>
+      {/* Handle */}
+      <div className="absolute top-1 rounded-full flex items-center justify-center shadow-md cursor-grab active:cursor-grabbing"
+        style={{ left: pos + 4, width: HANDLE - 8, height: 44, background: "linear-gradient(135deg,#059669,#10b981)", transition: dragging ? "none" : "left 0.15s" }}
+        onMouseDown={(e) => start(e.clientX)} onTouchStart={(e) => start(e.touches[0].clientX)}
+      >
+        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 // ── Order Assignment Modal ────────────────────────────────────────────────────
 
 function OrderModal({
@@ -49,7 +93,7 @@ function OrderModal({
 }: {
   pass: GatePass;
   onClose: () => void;
-  onProceed: (result: "APPROVED" | "PENDING_APPROVAL") => void;
+  onProceed: (result: { status: string; creditPending?: boolean }) => void;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
 
@@ -71,8 +115,16 @@ function OrderModal({
   // Selected checkboxes on the right (assigned) side
   const [selectedRight, setSelectedRight] = useState<Set<string>>(new Set());
 
-  const available = orders.filter((o) => !o.isAssigned);
-  const assigned   = orders.filter((o) => o.isAssigned);
+  // Cashier only handles immediate-payment orders; credit orders go to Approver separately
+  const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction", ""];
+  const immediateOrders = orders.filter((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()));
+  const creditOrders    = orders.filter((o) => {
+    const t = (o.payTerm || "").toLowerCase().trim();
+    return t !== "" && !immediateTerms.includes(t);
+  });
+
+  const available = immediateOrders.filter((o) => !o.isAssigned);
+  const assigned   = immediateOrders.filter((o) => o.isAssigned);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -220,7 +272,7 @@ function OrderModal({
       });
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Failed to proceed"); return; }
-      onProceed(d.status as "APPROVED" | "PENDING_APPROVAL");
+      onProceed({ status: d.status, creditPending: d.creditPending });
     } finally {
       setSaving(false);
     }
@@ -285,9 +337,9 @@ function OrderModal({
         <div className="px-6 py-3 border-b flex-shrink-0 flex items-center gap-3"
           style={{ borderColor: "var(--border)", background: "#f8fafc" }}>
           {[
-            { n: "1", text: "Click Sync SAP to load orders", done: orders.length > 0 },
-            { n: "2", text: "Move all paid orders → Fully Paid", done: orders.length > 0 && available.length === 0 },
-            { n: "3", text: orders.length === 0 ? "No orders found? Send to Approver" : available.length === 0 ? "Done & Close — vehicle cleared" : "Partial? Proceed → Approver reviews", done: false },
+            { n: "1", text: "Immediate payment orders auto-loaded from SAP", done: immediateOrders.length > 0 },
+            { n: "2", text: "Mark all immediate orders as Fully Paid", done: immediateOrders.length > 0 && available.length === 0 },
+            { n: "3", text: available.length === 0 && immediateOrders.length > 0 ? "Slide to confirm — your part is done ✓" : "Credit orders are handled by Approver in parallel", done: false },
           ].map((step, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs">
               <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
@@ -308,6 +360,19 @@ function OrderModal({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" : "M5 13l4 4L19 7"} />
             </svg>
             {sapSyncMsg}
+          </div>
+        )}
+
+        {/* Credit orders info banner */}
+        {creditOrders.length > 0 && (
+          <div className="px-6 py-2.5 flex items-center gap-2 text-xs flex-shrink-0"
+            style={{ background: "#eff6ff", borderBottom: "1px solid #bfdbfe" }}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            <span style={{ color: "#1d4ed8" }}>
+              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are being reviewed by the <strong>Approver in parallel</strong> — not your responsibility.
+            </span>
           </div>
         )}
 
@@ -434,46 +499,57 @@ function OrderModal({
           style={{ borderColor: "var(--border)" }}>
           <div className="flex-1">
             {error && <p className="text-sm font-medium" style={{ color: "#ef4444" }}>{error}</p>}
-            {orders.length > 0 && (
+            {immediateOrders.length > 0 && (
               <div className="flex items-center gap-3 text-xs" style={{ color: "var(--text-muted)" }}>
                 <span>
-                  <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> fully paid
+                  <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> immediate paid
                 </span>
                 <span>·</span>
                 <span>
                   <span className="font-semibold" style={{ color: available.length > 0 ? "#c2410c" : "var(--text-muted)" }}>
                     {available.length}
-                  </span> pending payment
+                  </span> unpaid
                 </span>
-                {available.length === 0 && assigned.length > 0 && (
+                {available.length === 0 && (
                   <span className="px-2 py-0.5 rounded-full font-semibold"
                     style={{ background: "#f0fdf4", color: "#15803d" }}>
-                    All paid — ready to complete ✓
-                  </span>
-                )}
-                {available.length > 0 && assigned.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: "#fff7ed", color: "#c2410c" }}>
-                    Partial payment — will go to Approver
+                    All immediate orders cleared ✓
                   </span>
                 )}
               </div>
             )}
           </div>
           {(() => {
-            const allPaid = orders.length > 0 && available.length === 0;
-            const partial = orders.length > 0 && available.length > 0 && assigned.length > 0;
-            const noOrders = orders.length === 0;
-            const bg = noOrders ? "linear-gradient(135deg,#d97706,#b45309)" : allPaid ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "No Orders — Send to Approver"
-              : allPaid ? "Done & Close — Release Vehicle"
-              : partial ? "Send to Approver (partial payment)"
+            // allPaid: all IMMEDIATE orders cleared (credit orders are approver's job)
+            const allPaid = immediateOrders.length > 0 && available.length === 0;
+            const partial = immediateOrders.length > 0 && available.length > 0 && assigned.length > 0;
+            const noOrders = immediateOrders.length === 0;
+
+            // For all-paid case: show Slide to Confirm instead of a regular button
+            if (allPaid) {
+              return saving ? (
+                <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  Processing…
+                </div>
+              ) : (
+                <SlideToConfirm onConfirm={handleProceed} disabled={saving} />
+              );
+            }
+
+            const bg = noOrders ? "linear-gradient(135deg,#d97706,#b45309)" : "linear-gradient(135deg,#d97706,#b45309)";
+            const label = noOrders ? "No Immediate Orders — Mark Done"
+              : partial ? "Some Unpaid — Mark Done Anyway"
               : "Proceed";
             return (
               <button
                 onClick={handleProceed}
                 disabled={saving}
-                title={noOrders ? "No SAP orders found — escalate to Approver" : allPaid ? "All orders paid — release vehicle" : "Some unpaid — needs Approver approval"}
+                title={noOrders ? "No immediate orders — mark cashier part as done" : "Mark remaining as done and proceed"}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
                 style={{ background: bg, flexShrink: 0 }}
               >
@@ -487,7 +563,6 @@ function OrderModal({
                   </>
                 ) : (
                   <>
-                    {allPaid && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
                     {partial && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
                     {label}
                   </>
@@ -566,7 +641,7 @@ export default function CashierReviewPage() {
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50");
+      const res = await fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50&cashierPending=true");
       const d = await res.json();
       setPasses(d.passes ?? []);
       setTotal(d.total ?? 0);
@@ -592,12 +667,14 @@ export default function CashierReviewPage() {
     setTimeout(() => setToastMsg(null), 3500);
   }
 
-  function handleProceedResult(result: "APPROVED" | "PENDING_APPROVAL") {
+  function handleProceedResult(result: { status: string; creditPending?: boolean }) {
     setModalPass(null);
-    if (result === "APPROVED") {
-      showToast("All orders paid — pass approved. Initiator can now Mark as Gate Out.", "success");
+    if (result.status === "APPROVED") {
+      showToast("All checks complete — Security Officer notified for Gate Release.", "success");
+    } else if (result.creditPending) {
+      showToast("Immediate orders cleared — waiting for credit approval.", "info");
     } else {
-      showToast("Partial payment — sent to Approver for review.", "info");
+      showToast("Payment cleared — awaiting further processing.", "info");
     }
     void fetchPasses();
   }

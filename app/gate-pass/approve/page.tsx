@@ -11,6 +11,8 @@ type GatePass = {
   toLocation: string | null; fromLocation: string | null;
   createdBy: { name: string }; createdAt: string;
   parentPass: ParentPass | null;
+  hasCredit?: boolean;
+  creditApproved?: boolean;
 };
 
 const statusCfg: Record<string, { label: string; bg: string; color: string }> = {
@@ -217,9 +219,15 @@ export default function ApproverListPage() {
                                 {stc.label}
                               </span>
                             )}
-                            <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
-                              {sc.label}
-                            </span>
+                            {p.status === "CASHIER_REVIEW" && p.hasCredit && !p.creditApproved ? (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                                Credit Pending
+                              </span>
+                            ) : (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
+                                {sc.label}
+                              </span>
+                            )}
                           </div>
 
                           {/* Vehicle */}

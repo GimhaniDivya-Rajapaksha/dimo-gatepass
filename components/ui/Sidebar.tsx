@@ -14,17 +14,23 @@ interface SidebarProps {
 }
 
 const roleLabels: Record<string, string> = {
-  INITIATOR: "Gate Pass Initiator",
-  APPROVER:  "Approver",
-  RECIPIENT: "Recipient",
-  ADMIN:     "Administrator",
+  INITIATOR:        "Gate Pass Initiator",
+  APPROVER:         "Approver",
+  RECIPIENT:        "Recipient",
+  ADMIN:            "Administrator",
+  CASHIER:          "Cashier",
+  AREA_SALES_OFFICER: "Area Sales Officer",
+  SECURITY_OFFICER: "Security Officer",
 };
 
 const roleColors: Record<string, string> = {
-  INITIATOR: "#3b82f6",
-  APPROVER:  "#f59e0b",
-  RECIPIENT: "#10b981",
-  ADMIN:     "#8b5cf6",
+  INITIATOR:        "#3b82f6",
+  APPROVER:         "#f59e0b",
+  RECIPIENT:        "#10b981",
+  ADMIN:            "#8b5cf6",
+  CASHIER:          "#f59e0b",
+  AREA_SALES_OFFICER: "#06b6d4",
+  SECURITY_OFFICER: "#1d4ed8",
 };
 
 export default function Sidebar({ user, role }: SidebarProps) {
