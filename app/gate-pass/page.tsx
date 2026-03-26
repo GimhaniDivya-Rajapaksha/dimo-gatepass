@@ -480,10 +480,10 @@ export default function GatePassListPage() {
                     const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
                     const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
                     const canCancel  = p.status === "PENDING_APPROVAL";
-                    // For non-AFTER_SALES: standard gate_out when APPROVED
+                    // CD: standard gate_out when APPROVED (LT and MAIN_OUT go directly to Security — no initiator gate_out)
                     // For AFTER_SALES: INITIATOR can gate_out their own MAIN_IN and SUB_OUT; ASO can gate_out SUB_OUT_IN
                     const canGateOut = p.status === "APPROVED" && (
-                      p.passType !== "AFTER_SALES"
+                      p.passType === "CUSTOMER_DELIVERY"
                         ? true
                         : (isInitiator && ["MAIN_IN", "SUB_OUT"].includes(p.passSubType ?? ""))
                           || (isASO && p.passSubType === "SUB_OUT_IN")
