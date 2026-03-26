@@ -23,6 +23,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string; dot:
   PENDING_APPROVAL: { label: "Pending Approval", bg: "#fff7ed", color: "#c2410c", dot: "#f97316" },
   APPROVED:         { label: "Approved",          bg: "#f0fdf4", color: "#15803d", dot: "#22c55e" },
   REJECTED:         { label: "Rejected",          bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
+  INITIATOR_OUT:    { label: "Awaiting Security",   bg: "#f5f3ff", color: "#6d28d9", dot: "#a855f7" },
   GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
   COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6", dot: "#a855f7" },
   CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
@@ -105,14 +106,18 @@ export default function GatePassListPage() {
 
   function askGateOut(p: GatePass) {
     const isAfterSales = p.passType === "AFTER_SALES";
-    const label = p.passType !== "AFTER_SALES" ? "Gate Out"
+    const isLT = p.passType === "LOCATION_TRANSFER";
+    const label = isLT ? "Confirm Departure — Notify Security"
+      : p.passType !== "AFTER_SALES" ? "Gate Out"
       : p.passSubType === "MAIN_IN" ? "Mark IN (Send to Security)"
       : p.passSubType === "SUB_OUT" ? "Gate Out (Send to Security)"
       : "Gate Out";
     setConfirmModal({
       id: p.id, action: "gate_out", icon: "out",
-      title: isAfterSales ? "Confirm Gate Action" : "Confirm Gate Out",
-      message: isAfterSales
+      title: isLT ? "Confirm Vehicle Departure" : isAfterSales ? "Confirm Gate Action" : "Confirm Gate Out",
+      message: isLT
+        ? `Vehicle ${p.vehicle} (${p.gatePassNumber}) will be marked as departed. The Security Officer will be notified to physically confirm Gate OUT at the gate.`
+        : isAfterSales
         ? `Vehicle ${p.vehicle} will be marked for ${label}. This will notify the Security Officer at ${p.fromLocation || "the departure location"} to confirm.`
         : `Gate pass ${p.gatePassNumber} will be marked as Gate Out. This will notify the recipient.`,
       confirmLabel: label,
@@ -338,7 +343,7 @@ export default function GatePassListPage() {
                                 </svg>
                               </button>
                               {canCancel && (
-                                <button onClick={() => handleCancel(p.id)} disabled={cancellingId === p.id}
+                                <button onClick={() => askCancel(p.id)} disabled={cancellingId === p.id}
                                   className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                                   style={{ background: "var(--surface)", borderColor: "#ef4444", color: "#ef4444", opacity: cancellingId === p.id ? 0.5 : 1 }}
                                   title="Cancel">

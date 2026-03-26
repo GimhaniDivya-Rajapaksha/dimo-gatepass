@@ -419,10 +419,11 @@ export default function SecurityGateDashboard() {
       const outLocation = (p: Pass) => !myLocation || !p.fromLocation || p.fromLocation === myLocation;
       const inLocation  = (p: Pass) => !myLocation || !p.toLocation  || p.toLocation  === myLocation;
 
-      // Gate OUT queue: APPROVED (non-SUB_IN) + INITIATOR_OUT
+      // Gate OUT queue: APPROVED (non-SUB_IN) + INITIATOR_OUT (SUB_OUT two-step)
       const approvedAll: Pass[] = outData.passes ?? [];
       const approvedGateOut = approvedAll.filter((p) =>
-        !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN") && outLocation(p)
+        !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN") &&
+        outLocation(p)
       );
       setOutPasses([
         ...approvedGateOut,

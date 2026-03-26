@@ -472,8 +472,13 @@ export default function InitiatorGatePassDetailPage() {
   const isApproverView = role === "APPROVER" || role === "ADMIN";
   const isInitiatorView = role === "INITIATOR" || role === "AREA_SALES_OFFICER";
   const isSecurityOfficer = role === "SECURITY_OFFICER";
-  // Security Officer can confirm Gate OUT for APPROVED passes, or INITIATOR_OUT (SUB_OUT two-step)
-  const canSecurityGateOut = isSecurityOfficer && (data.status === "APPROVED" || data.status === "INITIATOR_OUT");
+  // Security Officer can confirm Gate OUT:
+  // — APPROVED: LT, CD, and AFTER_SALES (except SUB_IN which goes to Gate IN)
+  // — INITIATOR_OUT: SUB_OUT two-step
+  const canSecurityGateOut = isSecurityOfficer && (
+    data.status === "INITIATOR_OUT" ||
+    data.status === "APPROVED"
+  );
   const canSecurityGateIn  = isSecurityOfficer && (
     (data.status === "GATE_OUT" && (data.passSubType === "MAIN_IN" || data.passSubType === "SUB_OUT_IN" || data.passType === "CUSTOMER_DELIVERY")) ||
     (data.status === "APPROVED" && data.passType === "AFTER_SALES" && data.passSubType === "SUB_IN")
@@ -1486,8 +1491,8 @@ export default function InitiatorGatePassDetailPage() {
                       </svg>
                       Awaiting Security Officer
                     </div>
-                  ) : data.status === "INITIATOR_OUT" && data.passType === "AFTER_SALES" && data.passSubType === "SUB_OUT" ? (
-                    // SUB_OUT two-step: initiator confirmed, waiting for security to confirm Gate OUT
+                  ) : data.status === "INITIATOR_OUT" && isCreator ? (
+                    // LT or SUB_OUT two-step: initiator confirmed, waiting for security to confirm Gate OUT
                     <div className="flex items-center gap-2.5 px-5 py-3 rounded-2xl border w-full"
                       style={{ background: "linear-gradient(135deg,#fdf4ff,#ede9fe)", borderColor: "#c4b5fd" }}>
                       <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#ddd6fe" }}>
@@ -1496,7 +1501,7 @@ export default function InitiatorGatePassDetailPage() {
                         </svg>
                       </div>
                       <div>
-                        <p className="text-sm font-bold" style={{ color: "#6d28d9" }}>Gate Out Confirmed — Awaiting Security Release</p>
+                        <p className="text-sm font-bold" style={{ color: "#6d28d9" }}>Departure Confirmed — Awaiting Security Gate Release</p>
                         <p className="text-xs mt-0.5" style={{ color: "#7c3aed" }}>You confirmed vehicle departure. Security Officer will physically confirm Gate OUT at the gate.</p>
                       </div>
                     </div>

@@ -305,9 +305,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.status !== "APPROVED") {
       return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
     }
-    // MAIN_OUT passes must go through Security Officer gate_out (from APPROVED)
-    if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") {
-      return NextResponse.json({ error: "MAIN_OUT passes must be released by Security Officer" }, { status: 403 });
+    // MAIN_OUT and LOCATION_TRANSFER passes must go through Security Officer directly
+    if ((gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") || gatePass.passType === "LOCATION_TRANSFER") {
+      return NextResponse.json({ error: "This pass must be released by Security Officer" }, { status: 403 });
     }
 
     // SUB_OUT: two-step — initiator confirms first (INITIATOR_OUT), then security confirms GATE_OUT

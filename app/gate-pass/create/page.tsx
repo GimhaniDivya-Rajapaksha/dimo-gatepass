@@ -880,14 +880,7 @@ export default function CreateGatePassPage() {
       else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
       if (!cd.departureTime) e.departureTime = "Departure time is required";
       else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
-      // Carrier validation for After Sales out
-      if (transportMode === "CARRIER") {
-        if (!sr.companyName) e.companyName = "Carrier company name is required";
-        if (!sr.driverNIC) e.driverNIC = "Driver NIC is required";
-        else if (!validNIC(sr.driverNIC)) e.driverNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
-        if (!sr.driverName) e.driverName = "Driver name is required";
-        if (sr.contactNo && !validPhone(sr.contactNo)) e.contactNo = "Invalid contact number format";
-      }
+      // Note: Transport Details section is hidden for After Sales out — no carrier validation needed here
     } else if (isSr) {
       if (!sr.vehicle) e.vehicle = "Vehicle is required";
       if (!sr.approver) e.approver = "Approver is required";
