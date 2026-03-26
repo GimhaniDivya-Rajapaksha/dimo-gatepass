@@ -164,7 +164,7 @@ export default function OrdersReportPage() {
   const withImmediate  = filtered.filter(r => r.immediateCount > 0).length;
 
   return (
-    <div className="max-w-7xl pb-10">
+    <div className="w-full pb-10">
 
       {/* Page header */}
       <div className="flex items-start justify-between mb-6 gap-4">
@@ -304,7 +304,7 @@ export default function OrdersReportPage() {
               <thead>
                 <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
                   {["Vehicle", "Gate Pass", "Chassis", "Status", "Credit Orders", "Immediate Orders", "Cashier", "Credit Approval", "Created By", "Date"].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
+                    <th key={h} className="px-3 py-3 text-left text-[10px] font-black uppercase tracking-widest whitespace-nowrap"
                       style={{ color: "var(--text-muted)" }}>
                       {h}
                     </th>
@@ -325,9 +325,9 @@ export default function OrdersReportPage() {
                     }}
                   >
                     {/* Vehicle */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Link href={`/gate-pass/${row.id}`}
-                        className="font-bold hover:underline"
+                        className="font-bold hover:underline whitespace-nowrap"
                         style={{ color: "var(--text)" }}>
                         {row.vehicle}
                       </Link>
@@ -335,9 +335,9 @@ export default function OrdersReportPage() {
                     </td>
 
                     {/* Gate Pass */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Link href={`/gate-pass/${row.id}`}
-                        className="font-mono text-xs font-bold hover:underline"
+                        className="font-mono text-xs font-bold hover:underline whitespace-nowrap"
                         style={{ color: "#2563eb" }}>
                         {row.gatePassNumber}
                       </Link>
@@ -347,29 +347,29 @@ export default function OrdersReportPage() {
                     </td>
 
                     {/* Chassis */}
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs font-semibold" style={{ color: "var(--text)" }}>
+                    <td className="px-3 py-3 max-w-[130px]">
+                      <span className="font-mono text-[10px] font-semibold block truncate" style={{ color: "var(--text)" }} title={row.chassis ?? ""}>
                         {row.chassis || "—"}
                       </span>
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <StatusBadge status={row.status} />
                     </td>
 
                     {/* Credit Orders */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <OrdersPanel type="credit" orders={row.creditOrders} />
                     </td>
 
                     {/* Immediate Orders */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <OrdersPanel type="immediate" orders={row.immediateOrders} />
                     </td>
 
                     {/* Cashier Cleared */}
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
                       {row.immediateCount === 0 ? (
                         <span className="text-xs" style={{ color: "var(--text-muted)" }}>N/A</span>
                       ) : row.cashierCleared ? (
@@ -392,7 +392,7 @@ export default function OrdersReportPage() {
                     </td>
 
                     {/* Credit Approved */}
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
                       {row.creditCount === 0 ? (
                         <span className="text-xs" style={{ color: "var(--text-muted)" }}>N/A</span>
                       ) : row.creditApproved ? (
@@ -415,12 +415,12 @@ export default function OrdersReportPage() {
                     </td>
 
                     {/* Created By */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-xs font-semibold" style={{ color: "var(--text)" }}>{row.createdBy.name}</span>
                     </td>
 
                     {/* Date */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 whitespace-nowrap">
                       <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                         {new Date(row.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
                       </span>
