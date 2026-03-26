@@ -9,6 +9,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
   try {
+    // Ensure brand column exists (safe to run repeatedly)
+    await prisma.$executeRaw`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "brand" TEXT`;
+  } catch { /* ignore */ }
+
+  try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const users = await (prisma.user as any).findMany({
       select: {

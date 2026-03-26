@@ -11,6 +11,8 @@ export async function POST(req: NextRequest) {
   const { userId, defaultLocation, brand, approverId } = await req.json();
   if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
+  try { await prisma.$executeRaw`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "brand" TEXT`; } catch { /* ignore */ }
+
   await (prisma.user as any).update({
     where: { id: userId },
     data: {
