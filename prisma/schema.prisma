@@ -44,6 +44,7 @@ model User {
   approver         User?          @relation("InitiatorApprover", fields: [approverId], references: [id])
   initiators       User[]         @relation("InitiatorApprover")
   defaultLocation  String?
+  brand            String?
   resetToken       String?        @unique
   resetTokenExpiry DateTime?
   createdAt        DateTime       @default(now())

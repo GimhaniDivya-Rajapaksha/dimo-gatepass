@@ -7,12 +7,190 @@ import { motion, AnimatePresence } from "framer-motion";
 type User = {
   id: string; name: string; email: string; role: string | null;
   createdAt: string; approverId?: string | null;
+  defaultLocation?: string | null; brand?: string | null;
   approver?: { id: string; name: string } | null;
 };
 
-const ROLES = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN", "CASHIER", "AREA_SALES_OFFICER"];
-const roleColors: Record<string, string> = { INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669", ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2" };
-const roleBg: Record<string, string> = { INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5", ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff" };
+const ROLES = [
+  "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN",
+  "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER",
+];
+const ROLE_LABELS: Record<string, string> = {
+  INITIATOR: "Initiator", APPROVER: "Approver", RECIPIENT: "Recipient",
+  ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
+  SECURITY_OFFICER: "Security Officer",
+};
+const roleColors: Record<string, string> = {
+  INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669",
+  ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
+  SECURITY_OFFICER: "#0f766e",
+};
+const roleBg: Record<string, string> = {
+  INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5",
+  ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
+  SECURITY_OFFICER: "#f0fdfa",
+};
+
+// Which attributes each role needs
+const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
+  INITIATOR:          ["location", "brand", "approver"],
+  SECURITY_OFFICER:   ["location"],
+  APPROVER:           ["location", "brand"],
+  CASHIER:            ["location"],
+  AREA_SALES_OFFICER: ["location", "brand"],
+  RECIPIENT:          ["location", "brand"],
+  ADMIN:              [],
+};
+
+/* ─── Assign Attributes Modal ─────────────────────────────────────── */
+function AssignAttributesModal({
+  user, approvers, onClose, onSaved,
+}: {
+  user: User;
+  approvers: User[];
+  onClose: () => void;
+  onSaved: (updated: Partial<User>) => void;
+}) {
+  const role = user.role ?? "";
+  const fields = ROLE_ATTRS[role] ?? [];
+  const [location, setLocation] = useState(user.defaultLocation ?? "");
+  const [brand, setBrand] = useState(user.brand ?? "");
+  const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  if (fields.length === 0) return null;
+
+  const handleSave = async () => {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch("/api/admin/assign-attributes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.id,
+          ...(fields.includes("location") ? { defaultLocation: location } : {}),
+          ...(fields.includes("brand") ? { brand } : {}),
+          ...(fields.includes("approver") ? { approverId } : {}),
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
+      onSaved({
+        defaultLocation: fields.includes("location") ? location || null : user.defaultLocation,
+        brand: fields.includes("brand") ? brand || null : user.brand,
+        approverId: fields.includes("approver") ? approverId || null : user.approverId,
+        approver: fields.includes("approver")
+          ? approverId ? (approvers.find(a => a.id === approverId) ? { id: approverId, name: approvers.find(a => a.id === approverId)!.name } : null) : null
+          : user.approver,
+      });
+      onClose();
+    } catch {
+      setError("Failed. Try again.");
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="w-full max-w-md rounded-2xl border p-6 shadow-2xl mx-4"
+        style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-lg font-bold" style={{ color: "var(--text)" }}>Assign Details</h3>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+              {user.name} · <span className="font-semibold" style={{ color: roleColors[role] || "var(--text)" }}>{ROLE_LABELS[role] || role}</span>
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 px-3 py-2.5 rounded-xl text-xs text-red-600 border" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {fields.includes("location") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Location <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={location} onChange={e => setLocation(e.target.value)}
+                placeholder="e.g. Mercedes Centre 800 - DIMO 800"
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              />
+            </div>
+          )}
+
+          {fields.includes("brand") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Brand <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={brand} onChange={e => setBrand(e.target.value)}
+                placeholder="e.g. Mercedes-Benz, TATA, Mitsubishi"
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              />
+            </div>
+          )}
+
+          {fields.includes("approver") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <select
+                value={approverId} onChange={e => setApproverId(e.target.value)}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                <option value="">{approvers.length === 0 ? "No approvers yet" : "None"}</option>
+                {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Summary of what's required */}
+          <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+            <span className="font-semibold" style={{ color: "var(--text)" }}>{ROLE_LABELS[role]} requires: </span>
+            {fields.map(f => f.charAt(0).toUpperCase() + f.slice(1)).join(" + ")}
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold border"
+              style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface2)" }}>
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={loading}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-70 flex items-center justify-center gap-2"
+              style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+              {loading && (
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              )}
+              {loading ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 /* ─── Add User Modal ──────────────────────────────────────────────── */
 function AddUserModal({ onClose, onCreated, approvers }: {
@@ -20,11 +198,13 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   onCreated: (u: User) => void;
   approvers: User[];
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
+  const selectedRole = form.role;
+  const fields = ROLE_ATTRS[selectedRole] ?? [];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,6 +220,19 @@ function AddUserModal({ onClose, onCreated, approvers }: {
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to create user"); setLoading(false); return; }
+      // Also save attributes if provided
+      if (data.id && (form.defaultLocation || form.brand || form.approverId)) {
+        await fetch("/api/admin/assign-attributes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: data.id,
+            defaultLocation: form.defaultLocation || null,
+            brand: form.brand || null,
+            approverId: form.approverId || null,
+          }),
+        });
+      }
       onCreated(data);
       onClose();
     } catch {
@@ -52,7 +245,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <motion.div
         initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        className="w-full max-w-md rounded-2xl border p-6 shadow-2xl mx-4"
+        className="w-full max-w-md rounded-2xl border p-6 shadow-2xl mx-4 max-h-[90vh] overflow-y-auto"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -75,65 +268,61 @@ function AddUserModal({ onClose, onCreated, approvers }: {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-              Full Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              value={form.name} onChange={e => set("name", e.target.value)}
-              placeholder="e.g. Malmi Perera"
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Full Name <span className="text-red-500">*</span></label>
+            <input value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Malmi Perera"
               className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-            />
+              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
           </div>
-
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-              Email Address <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email" value={form.email} onChange={e => set("email", e.target.value)}
-              placeholder="e.g. malmi@dimo.lk"
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Email Address <span className="text-red-500">*</span></label>
+            <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="e.g. malmi@dimo.lk"
               className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-            />
+              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
           </div>
-
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-              Password <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password" value={form.password} onChange={e => set("password", e.target.value)}
-              placeholder="Min. 6 characters"
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Password <span className="text-red-500">*</span></label>
+            <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters"
               className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-            />
+              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
           </div>
-
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
               Role <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional — can assign later)</span>
             </label>
-            <select
-              value={form.role} onChange={e => set("role", e.target.value)}
+            <select value={form.role} onChange={e => set("role", e.target.value)}
               className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-            >
+              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
               <option value="">No role (Pending)</option>
-              {ROLES.map(r => <option key={r} value={r}>{r.charAt(0) + r.slice(1).toLowerCase()}</option>)}
+              {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
             </select>
           </div>
 
-          {form.role === "INITIATOR" && approvers.length > 0 && (
+          {fields.includes("location") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location</label>
+              <input value={form.defaultLocation} onChange={e => set("defaultLocation", e.target.value)}
+                placeholder="e.g. Mercedes Centre 800 - DIMO 800"
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            </div>
+          )}
+          {fields.includes("brand") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Brand</label>
+              <input value={form.brand} onChange={e => set("brand", e.target.value)}
+                placeholder="e.g. Mercedes-Benz, TATA"
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            </div>
+          )}
+          {fields.includes("approver") && approvers.length > 0 && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Assign Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+                Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
-              <select
-                value={form.approverId} onChange={e => set("approverId", e.target.value)}
+              <select value={form.approverId} onChange={e => set("approverId", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-              >
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No approver assigned</option>
                 {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
@@ -141,24 +330,15 @@ function AddUserModal({ onClose, onCreated, approvers }: {
           )}
 
           <div className="flex gap-3 pt-2">
-            <button
-              type="button" onClick={onClose}
+            <button type="button" onClick={onClose}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold border"
-              style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface2)" }}
-            >
+              style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface2)" }}>
               Cancel
             </button>
-            <button
-              type="submit" disabled={loading}
+            <button type="submit" disabled={loading}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-70 flex items-center justify-center gap-2"
-              style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
-            >
-              {loading && (
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-              )}
+              style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+              {loading && <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
               {loading ? "Creating..." : "Create User"}
             </button>
           </div>
@@ -198,8 +378,7 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
         return { name: cols[0] ?? "", email: cols[1] ?? "", password: cols[2] ?? "", role: cols[3] ?? "", approverEmail: cols[4] ?? "" };
       }).filter(r => r.email);
       if (rows.length === 0) { setError("No valid rows found"); return; }
-      setParsed(rows);
-      setError("");
+      setParsed(rows); setError("");
     };
     reader.readAsText(f);
   };
@@ -209,104 +388,62 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
     setLoading(true);
     try {
       const res = await fetch("/api/admin/bulk-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ users: parsed }),
       });
       const data = await res.json();
       setResults(data.results || []);
     } catch {
       setError("Upload failed. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         className="w-full max-w-lg rounded-2xl border p-6 shadow-2xl mx-4 max-h-[90vh] overflow-y-auto"
-        style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-      >
+        style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold" style={{ color: "var(--text)" }}>Bulk Upload Users</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-
         {results.length === 0 ? (
           <>
-            {/* CSV format hint */}
             <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
               <p className="font-semibold mb-1" style={{ color: "var(--text)" }}>CSV Columns (header row required):</p>
               <code className="font-mono">name, email, password, role, approverEmail</code><br />
-              <code className="font-mono opacity-70 text-[10px]">Roles: INITIATOR | APPROVER | RECIPIENT | ADMIN</code>
+              <code className="font-mono opacity-70 text-[10px]">Roles: {ROLES.join(" | ")}</code>
             </div>
-
             <button onClick={downloadTemplate} className="flex items-center gap-2 text-sm mb-4 hover:underline" style={{ color: "var(--accent)" }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               Download Template CSV
             </button>
-
             <label className="flex flex-col items-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors hover:border-blue-400" style={{ borderColor: "var(--border)" }}>
-              <svg className="w-8 h-8" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
+              <svg className="w-8 h-8" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
               <p className="text-sm font-medium" style={{ color: "var(--text)" }}>Click to upload CSV</p>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>Only .csv files are supported</p>
               <input type="file" accept=".csv" onChange={handleFile} className="hidden" />
             </label>
-
             {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
-
             {parsed.length > 0 && (
               <div className="mt-4">
                 <p className="text-sm font-semibold mb-2" style={{ color: "var(--text)" }}>{parsed.length} user{parsed.length !== 1 ? "s" : ""} ready to upload</p>
                 <div className="max-h-40 overflow-auto rounded-xl border text-xs" style={{ borderColor: "var(--border)" }}>
                   <table className="w-full">
-                    <thead>
-                      <tr style={{ background: "var(--surface2)" }}>
-                        {["Name", "Email", "Role"].map(h => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)" }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {parsed.map((r, i) => (
-                        <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                          <td className="px-3 py-1.5" style={{ color: "var(--text)" }}>{r.name || "—"}</td>
-                          <td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.email}</td>
-                          <td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.role || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
+                    <thead><tr style={{ background: "var(--surface2)" }}>{["Name", "Email", "Role"].map(h => <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)" }}>{h}</th>)}</tr></thead>
+                    <tbody>{parsed.map((r, i) => <tr key={i} style={{ borderTop: "1px solid var(--border)" }}><td className="px-3 py-1.5" style={{ color: "var(--text)" }}>{r.name || "—"}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.email}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.role || "—"}</td></tr>)}</tbody>
                   </table>
                 </div>
               </div>
             )}
-
             <div className="flex gap-3 mt-6">
-              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border"
-                style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface2)" }}>
-                Cancel
-              </button>
-              <button
-                onClick={handleUpload} disabled={parsed.length === 0 || loading}
+              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border" style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface2)" }}>Cancel</button>
+              <button onClick={handleUpload} disabled={parsed.length === 0 || loading}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
-                style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
-              >
-                {loading && (
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                )}
+                style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+                {loading && <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>}
                 {loading ? "Uploading..." : parsed.length > 0 ? `Upload ${parsed.length} User${parsed.length !== 1 ? "s" : ""}` : "Upload"}
               </button>
             </div>
@@ -325,13 +462,7 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => { onDone(); onClose(); }}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold text-white"
-              style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
-            >
-              Done
-            </button>
+            <button onClick={() => { onDone(); onClose(); }} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>Done</button>
           </>
         )}
       </motion.div>
@@ -346,12 +477,12 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState<string | null>(null);
-  const [assigningApprover, setAssigningApprover] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [successId, setSuccessId] = useState<string | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [attrModal, setAttrModal] = useState<User | null>(null);
 
   useEffect(() => {
     if (status === "authenticated" && session?.user?.role !== "ADMIN") router.replace("/");
@@ -371,34 +502,23 @@ export default function AdminPage() {
   async function assignRole(userId: string, role: string) {
     setAssigning(userId);
     await fetch("/api/admin/assign-role", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, role }),
     });
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
     setAssigning(null);
     setSuccessId(userId);
     setTimeout(() => setSuccessId(null), 2000);
-  }
-
-  async function assignApprover(userId: string, approverId: string) {
-    setAssigningApprover(userId);
-    const res = await fetch("/api/admin/assign-approver", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, approverId: approverId || null }),
-    });
-    if (res.ok) {
-      const approverUser = approvers.find(a => a.id === approverId) || null;
-      setUsers(prev => prev.map(u => u.id === userId
-        ? { ...u, approverId: approverId || null, approver: approverUser ? { id: approverUser.id, name: approverUser.name } : null }
-        : u
-      ));
+    // Open attributes modal if this role needs extra fields
+    if ((ROLE_ATTRS[role] ?? []).length > 0) {
+      const user = users.find(u => u.id === userId);
+      if (user) setAttrModal({ ...user, role });
     }
-    setAssigningApprover(null);
   }
 
   if (status === "loading") return null;
+
+  const FILTER_TABS = ["ALL", "PENDING", ...ROLES];
 
   const filtered = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
@@ -407,27 +527,31 @@ export default function AdminPage() {
   });
 
   const stats = [
-    { label: "Total Users", value: users.length, color: "#6366f1", bg: "#eef2ff" },
-    { label: "Pending", value: users.filter(u => !u.role).length, color: "#f59e0b", bg: "#fef3c7" },
-    { label: "Initiators", value: users.filter(u => u.role === "INITIATOR").length, color: "#2563eb", bg: "#eff6ff" },
-    { label: "Approvers", value: users.filter(u => u.role === "APPROVER").length, color: "#7c3aed", bg: "#f5f3ff" },
-    { label: "Recipients", value: users.filter(u => u.role === "RECIPIENT").length, color: "#059669", bg: "#ecfdf5" },
+    { label: "Total Users",   value: users.length,                                   color: "#6366f1", bg: "#eef2ff" },
+    { label: "Pending",       value: users.filter(u => !u.role).length,               color: "#f59e0b", bg: "#fef3c7" },
+    { label: "Initiators",    value: users.filter(u => u.role === "INITIATOR").length, color: "#2563eb", bg: "#eff6ff" },
+    { label: "Approvers",     value: users.filter(u => u.role === "APPROVER").length,  color: "#7c3aed", bg: "#f5f3ff" },
+    { label: "Security",      value: users.filter(u => u.role === "SECURITY_OFFICER").length, color: "#0f766e", bg: "#f0fdfa" },
   ];
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AnimatePresence>
         {showAddUser && (
-          <AddUserModal
-            onClose={() => setShowAddUser(false)}
-            onCreated={(u) => setUsers(prev => [u, ...prev])}
-            approvers={approvers}
-          />
+          <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} />
         )}
         {showBulkUpload && (
-          <BulkUploadModal
-            onClose={() => setShowBulkUpload(false)}
-            onDone={loadUsers}
+          <BulkUploadModal onClose={() => setShowBulkUpload(false)} onDone={loadUsers} />
+        )}
+        {attrModal && (ROLE_ATTRS[attrModal.role ?? ""] ?? []).length > 0 && (
+          <AssignAttributesModal
+            user={attrModal}
+            approvers={approvers}
+            onClose={() => setAttrModal(null)}
+            onSaved={(updated) => {
+              setUsers(prev => prev.map(u => u.id === attrModal.id ? { ...u, ...updated } : u));
+              setAttrModal(null);
+            }}
           />
         )}
       </AnimatePresence>
@@ -444,31 +568,20 @@ export default function AdminPage() {
             <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
               style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>
-              <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.5, repeat: Infinity }}
-                className="w-2 h-2 rounded-full bg-amber-500" />
+              <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.5, repeat: Infinity }} className="w-2 h-2 rounded-full bg-amber-500" />
               {users.filter(u => !u.role).length} pending
             </motion.div>
           )}
-          <motion.button
-            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-            onClick={() => setShowBulkUpload(true)}
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={() => setShowBulkUpload(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
-            style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
+            style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
             Bulk Upload
           </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-            onClick={() => setShowAddUser(true)}
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={() => setShowAddUser(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-semibold shadow-md"
-            style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
+            style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
             Add User
           </motion.button>
         </div>
@@ -477,12 +590,8 @@ export default function AdminPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         {stats.map((s, i) => (
-          <motion.div
-            key={s.label}
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-            className="rounded-2xl border p-4 relative overflow-hidden"
-            style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-          >
+          <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
+            className="rounded-2xl border p-4 relative overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
             <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl" style={{ background: s.color }} />
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>{s.label}</p>
@@ -506,13 +615,13 @@ export default function AdminPage() {
           </svg>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {["ALL", "PENDING", "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN"].map(f => (
+          {FILTER_TABS.map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all"
+              className="px-3 py-2 rounded-xl text-xs font-semibold border transition-all"
               style={filter === f
                 ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff", border: "none" }
                 : { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" }}>
-              {f === "ALL" ? "All" : f === "PENDING" ? "Pending" : f.charAt(0) + f.slice(1).toLowerCase()}
+              {f === "ALL" ? "All" : f === "PENDING" ? "Pending" : ROLE_LABELS[f] || f}
             </button>
           ))}
         </div>
@@ -532,7 +641,7 @@ export default function AdminPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>
-                  {["User", "Current Role", "Approver", "Joined", "Assign Role"].map(h => (
+                  {["User", "Current Role", "Location & Brand", "Joined", "Assign Role"].map(h => (
                     <th key={h} className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
@@ -546,6 +655,7 @@ export default function AdminPage() {
                     onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
+                    {/* User */}
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
@@ -558,21 +668,21 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </td>
+
+                    {/* Role badge */}
                     <td className="px-5 py-4">
                       <AnimatePresence mode="wait">
                         {successId === user.id ? (
                           <motion.span key="ok" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
                             className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold"
                             style={{ background: "#ecfdf5", color: "#059669" }}>
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                            </svg>
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                             Updated!
                           </motion.span>
                         ) : user.role ? (
                           <span className="inline-flex px-3 py-1 rounded-full text-xs font-semibold"
                             style={{ background: roleBg[user.role] || "#f1f5f9", color: roleColors[user.role] || "#64748b" }}>
-                            {user.role.charAt(0) + user.role.slice(1).toLowerCase()}
+                            {ROLE_LABELS[user.role] || user.role}
                           </span>
                         ) : (
                           <motion.span animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1.5, repeat: Infinity }}
@@ -584,26 +694,54 @@ export default function AdminPage() {
                         )}
                       </AnimatePresence>
                     </td>
-                    {/* Approver column — only actionable for INITIATOR */}
+
+                    {/* Location & Brand */}
                     <td className="px-5 py-4">
-                      {user.role === "INITIATOR" ? (
-                        <select
-                          value={user.approverId ?? ""}
-                          onChange={e => assignApprover(user.id, e.target.value)}
-                          disabled={assigningApprover === user.id || approvers.length === 0}
-                          className="px-3 py-1.5 rounded-xl border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer disabled:opacity-50 transition-all"
-                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-                        >
-                          <option value="">{approvers.length === 0 ? "No approvers" : "None"}</option>
-                          {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </select>
+                      {user.role && (ROLE_ATTRS[user.role] ?? []).length > 0 ? (
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0">
+                            {user.defaultLocation ? (
+                              <p className="text-xs font-medium truncate max-w-[140px]" style={{ color: "var(--text)" }} title={user.defaultLocation}>
+                                📍 {user.defaultLocation}
+                              </p>
+                            ) : (
+                              <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
+                            )}
+                            {ROLE_ATTRS[user.role].includes("brand") && (
+                              user.brand ? (
+                                <p className="text-xs truncate max-w-[140px]" style={{ color: "var(--text-muted)" }} title={user.brand}>
+                                  🏷 {user.brand}
+                                </p>
+                              ) : (
+                                <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No brand</p>
+                              )
+                            )}
+                            {ROLE_ATTRS[user.role].includes("approver") && user.approver && (
+                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>👤 {user.approver.name}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setAttrModal(user)}
+                            className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center border hover:opacity-80 transition-opacity"
+                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text-muted)" }}
+                            title="Edit location / brand / approver"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
                       )}
                     </td>
+
+                    {/* Joined */}
                     <td className="px-5 py-4 text-xs" style={{ color: "var(--text-muted)" }}>
                       {new Date(user.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
+
+                    {/* Assign Role dropdown */}
                     <td className="px-5 py-4">
                       <select
                         defaultValue=""
@@ -612,7 +750,7 @@ export default function AdminPage() {
                         className="px-3 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer disabled:opacity-50 transition-all"
                         style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                         <option value="" disabled>{assigning === user.id ? "Updating..." : "Assign role..."}</option>
-                        {ROLES.map(r => <option key={r} value={r}>{r.charAt(0) + r.slice(1).toLowerCase()}</option>)}
+                        {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                       </select>
                     </td>
                   </motion.tr>
