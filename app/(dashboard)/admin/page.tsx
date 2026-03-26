@@ -4,6 +4,8 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
+const BRANDS = ["Mercedes-Benz", "TATA", "Jeep"];
+
 type User = {
   id: string; name: string; email: string; role: string | null;
   createdAt: string; approverId?: string | null;
@@ -56,8 +58,16 @@ function AssignAttributesModal({
   const [location, setLocation] = useState(user.defaultLocation ?? "");
   const [brand, setBrand] = useState(user.brand ?? "");
   const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [locations, setLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/locations")
+      .then(r => r.json())
+      .then(d => setLocations(d.locations ?? []))
+      .catch(() => {});
+  }, []);
 
   if (fields.length === 0) return null;
 
@@ -123,12 +133,14 @@ function AssignAttributesModal({
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Location <span className="text-red-500">*</span>
               </label>
-              <input
+              <select
                 value={location} onChange={e => setLocation(e.target.value)}
-                placeholder="e.g. Mercedes Centre 800 - DIMO 800"
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-              />
+              >
+                <option value="">— Select location —</option>
+                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
             </div>
           )}
 
@@ -137,12 +149,14 @@ function AssignAttributesModal({
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Brand <span className="text-red-500">*</span>
               </label>
-              <input
+              <select
                 value={brand} onChange={e => setBrand(e.target.value)}
-                placeholder="e.g. Mercedes-Benz, TATA, Mitsubishi"
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-              />
+              >
+                <option value="">— Select brand —</option>
+                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
             </div>
           )}
 
@@ -162,7 +176,6 @@ function AssignAttributesModal({
             </div>
           )}
 
-          {/* Summary of what's required */}
           <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
             <span className="font-semibold" style={{ color: "var(--text)" }}>{ROLE_LABELS[role]} requires: </span>
             {fields.map(f => f.charAt(0).toUpperCase() + f.slice(1)).join(" + ")}
@@ -201,6 +214,14 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [locations, setLocations] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch("/api/admin/locations")
+      .then(r => r.json())
+      .then(d => setLocations(d.locations ?? []))
+      .catch(() => {});
+  }, []);
 
   const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
   const selectedRole = form.role;
@@ -300,19 +321,23 @@ function AddUserModal({ onClose, onCreated, approvers }: {
           {fields.includes("location") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location</label>
-              <input value={form.defaultLocation} onChange={e => set("defaultLocation", e.target.value)}
-                placeholder="e.g. Mercedes Centre 800 - DIMO 800"
+              <select value={form.defaultLocation} onChange={e => set("defaultLocation", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                <option value="">— Select location —</option>
+                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
             </div>
           )}
           {fields.includes("brand") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Brand</label>
-              <input value={form.brand} onChange={e => set("brand", e.target.value)}
-                placeholder="e.g. Mercedes-Benz, TATA"
+              <select value={form.brand} onChange={e => set("brand", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                <option value="">— Select brand —</option>
+                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
             </div>
           )}
           {fields.includes("approver") && approvers.length > 0 && (
