@@ -5,6 +5,33 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
 const BRANDS = ["Mercedes-Benz", "TATA", "Jeep"];
+// Roles that can be assigned multiple brands (comma-separated in brand field)
+const MULTI_BRAND_ROLES = ["INITIATOR", "APPROVER"];
+
+function BrandSelector({ value, onChange, multi }: { value: string; onChange: (v: string) => void; multi: boolean }) {
+  const selected = value ? value.split(",").map(s => s.trim()).filter(Boolean) : [];
+  const toggle = (b: string) => {
+    if (!multi) { onChange(selected[0] === b ? "" : b); return; }
+    const next = selected.includes(b) ? selected.filter(s => s !== b) : [...selected, b];
+    onChange(next.join(", "));
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      {BRANDS.map(b => {
+        const active = selected.includes(b);
+        return (
+          <button key={b} type="button" onClick={() => toggle(b)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all"
+            style={active
+              ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff", border: "none" }
+              : { background: "var(--surface2)", color: "var(--text-muted)", borderColor: "var(--border)" }}>
+            {active && "✓ "}{b}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 type User = {
   id: string; name: string; email: string; role: string | null;
@@ -148,15 +175,11 @@ function AssignAttributesModal({
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Brand <span className="text-red-500">*</span>
+                {MULTI_BRAND_ROLES.includes(role) && (
+                  <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>
+                )}
               </label>
-              <select
-                value={brand} onChange={e => setBrand(e.target.value)}
-                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-              >
-                <option value="">— Select brand —</option>
-                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
+              <BrandSelector value={brand} onChange={setBrand} multi={MULTI_BRAND_ROLES.includes(role)} />
             </div>
           )}
 
@@ -331,13 +354,13 @@ function AddUserModal({ onClose, onCreated, approvers }: {
           )}
           {fields.includes("brand") && (
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Brand</label>
-              <select value={form.brand} onChange={e => set("brand", e.target.value)}
-                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                <option value="">— Select brand —</option>
-                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Brand
+                {MULTI_BRAND_ROLES.includes(selectedRole) && (
+                  <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>
+                )}
+              </label>
+              <BrandSelector value={form.brand} onChange={v => set("brand", v)} multi={MULTI_BRAND_ROLES.includes(selectedRole)} />
             </div>
           )}
           {fields.includes("approver") && approvers.length > 0 && (
@@ -734,9 +757,13 @@ export default function AdminPage() {
                             )}
                             {ROLE_ATTRS[user.role].includes("brand") && (
                               user.brand ? (
-                                <p className="text-xs truncate max-w-[140px]" style={{ color: "var(--text-muted)" }} title={user.brand}>
-                                  🏷 {user.brand}
-                                </p>
+                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                  {user.brand.split(",").map(b => b.trim()).filter(Boolean).map(b => (
+                                    <span key={b} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                                      {b}
+                                    </span>
+                                  ))}
+                                </div>
                               ) : (
                                 <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No brand</p>
                               )
