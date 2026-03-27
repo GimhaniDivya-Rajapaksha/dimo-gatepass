@@ -86,6 +86,10 @@ export async function GET(req: NextRequest) {
       createdAt: p.createdAt,
       approvedAt: p.approvedAt,
       serviceJobNo: p.serviceJobNo,
+      departureDate: p.departureDate,
+      departureTime: p.departureTime,
+      fromLocation: p.fromLocation,
+      toLocation: p.toLocation,
     };
   });
 
