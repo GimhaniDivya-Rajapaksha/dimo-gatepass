@@ -107,16 +107,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // If MAIN_OUT was CREDIT approved → notify Security Officers that vehicle is ready for gate release
-    if (action === "approve" && gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") {
-      const securityOfficers = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+    // Notify Security Officers at fromLocation when LT or MAIN_OUT is approved → ready for Gate OUT
+    const needsSecurityNotify = (
+      (action === "approve" && gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||
+      (action === "approve" && gatePass.passType === "LOCATION_TRANSFER")
+    );
+    if (needsSecurityNotify) {
+      const fromLoc = gatePass.fromLocation as string | null;
+      const securityWhere = fromLoc
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+        : { role: "SECURITY_OFFICER" as any };
+      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
           data: securityOfficers.map((s: { id: string }) => ({
             userId: s.id,
             type: "GATE_PASS_APPROVED",
-            title: "Vehicle Cleared — Ready for Gate OUT",
-            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — credit approved. Please confirm gate release.`,
+            title: gatePass.passType === "LOCATION_TRANSFER"
+              ? "Location Transfer Approved — Confirm Gate OUT"
+              : "Vehicle Cleared — Ready for Gate OUT",
+            message: gatePass.passType === "LOCATION_TRANSFER"
+              ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — LT approved, heading to ${gatePass.toLocation ?? "destination"}. Please confirm Gate OUT.`
+              : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — credit approved. Please confirm gate release.`,
             gatePassId: gatePass.id,
           })),
         });

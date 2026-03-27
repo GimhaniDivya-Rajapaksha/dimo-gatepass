@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
     passSubType: body.passSubType || null,
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
-    fromLocation: body.fromLocation || null,
+    fromLocation: body.fromLocation || (session.user as { defaultLocation?: string | null }).defaultLocation || null,
     createdById: session.user.id,
     // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
     ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),

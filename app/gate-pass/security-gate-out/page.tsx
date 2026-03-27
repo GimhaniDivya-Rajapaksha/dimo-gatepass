@@ -452,6 +452,12 @@ export default function SecurityGateDashboard() {
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
+  // Auto-refresh every 30 seconds so new approved/gate-out passes appear without manual refresh
+  useEffect(() => {
+    const interval = setInterval(() => { void fetchAll(); }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
   useEffect(() => {
     if (status !== "loading" && (!session || session.user?.role !== "SECURITY_OFFICER")) {
       router.replace("/");
