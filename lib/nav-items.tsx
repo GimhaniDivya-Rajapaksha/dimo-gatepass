@@ -110,6 +110,5 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   SECURITY_OFFICER: [
     { label: "Dashboard", href: "/security", icon: <DashboardIcon /> },
     { label: "Gate IN / OUT", href: "/gate-pass/security-gate-out", icon: <BoxIcon /> },
-    { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
   ],
 };
