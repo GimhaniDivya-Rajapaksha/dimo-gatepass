@@ -135,11 +135,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const isSubOutIn = gatePass.passSubType === "SUB_OUT_IN";
     const isSubIn    = gatePass.passSubType === "SUB_IN";
     const isCd       = gatePass.passType === "CUSTOMER_DELIVERY";
+    const isLT       = gatePass.passType === "LOCATION_TRANSFER";
 
     // SUB_IN: confirmed at APPROVED (Security B confirms vehicle entered ASO compound)
     // Others: confirmed at GATE_OUT
     const validSubIn = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
-    const validGateOut = gatePass.status === "GATE_OUT" && (isMainIn || isSubOutIn || isCd);
+    const validGateOut = gatePass.status === "GATE_OUT" && (isMainIn || isSubOutIn || isCd || isLT);
     if (!validSubIn && !validGateOut) {
       return NextResponse.json({ error: "Not eligible for Security Gate IN confirmation" }, { status: 400 });
     }
@@ -161,6 +162,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         title: isCd ? "Delivery Complete — Security Confirmed Gate IN"
           : isSubOutIn ? "Vehicle Returned — Security Confirmed Gate IN"
           : isSubIn ? "Vehicle Received at Sub-Location — Security Confirmed"
+          : isLT ? "Vehicle Arrived at Destination — Security Confirmed Gate IN"
           : "Vehicle Arrived — Security Confirmed Gate IN",
         message: isCd
           ? `${gatePass.gatePassNumber} — Security Officer confirmed customer delivery is complete.`
@@ -168,6 +170,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle returned to DIMO via Gate IN.`
           : isSubIn
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle has entered the sub-location compound.`
+          : isLT
+          ? `${gatePass.gatePassNumber} — Security Officer at ${gatePass.toLocation ?? "destination"} confirmed vehicle Gate IN. Transfer complete.`
           : `${gatePass.gatePassNumber} — Security Officer confirmed vehicle arrival at the gate.`,
         gatePassId: gatePass.id,
       },
@@ -242,16 +246,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // Notify RECIPIENTs for Location Transfer (they need to confirm arrival)
+    // Notify SECURITY + RECIPIENT at toLocation for Location Transfer
     if (gatePass.passType === "LOCATION_TRANSFER") {
-      const recipients = await prisma.user.findMany({ where: { role: "RECIPIENT" } });
-      if (recipients.length > 0) {
+      const toLoc = gatePass.toLocation as string | null;
+      const locationFilter = toLoc
+        ? { defaultLocation: toLoc }
+        : {};
+
+      const [destSecurity, destRecipients] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "RECIPIENT", ...locationFilter } }),
+      ]);
+
+      const allDestUsers = [...destSecurity, ...destRecipients];
+      if (allDestUsers.length > 0) {
         await prisma.notification.createMany({
-          data: recipients.map((r) => ({
-            userId: r.id,
+          data: allDestUsers.map((u) => ({
+            userId: u.id,
             type: "GATE_PASS_RECEIVED",
-            title: "Vehicle Departing — Confirm Gate IN When It Arrives",
-            message: `Gate pass ${gatePass.gatePassNumber} — Security confirmed Gate OUT. Please confirm when vehicle arrives at destination.`,
+            title: destSecurity.some(s => s.id === u.id)
+              ? "Incoming Vehicle — Confirm Gate IN on Arrival"
+              : "Vehicle Departing — Confirm Gate IN When It Arrives",
+            message: destSecurity.some(s => s.id === u.id)
+              ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security at FROM location confirmed Gate OUT. Vehicle is en route to ${toLoc ?? "your location"}. Please confirm Gate IN when it arrives.`
+              : `Gate pass ${gatePass.gatePassNumber} — Security confirmed Gate OUT. Vehicle is heading to ${toLoc ?? "your location"}. Please confirm when vehicle arrives.`,
             gatePassId: gatePass.id,
           })),
         });

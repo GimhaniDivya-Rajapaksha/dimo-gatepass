@@ -45,17 +45,25 @@ export default function ReceivePage() {
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
+    // Filter by recipient's assigned location (toLocation must match)
+    const myLocation = (session?.user as { defaultLocation?: string | null })?.defaultLocation ?? null;
     try {
       const [pendingRes, completedRes] = await Promise.all([
         fetch("/api/gate-pass?passType=LOCATION_TRANSFER&status=GATE_OUT&limit=50"),
         fetch("/api/gate-pass?passType=LOCATION_TRANSFER&status=COMPLETED&limit=20"),
       ]);
-      if (pendingRes.ok)   setPending((await pendingRes.json()).passes ?? []);
-      if (completedRes.ok) setCompleted((await completedRes.json()).passes ?? []);
+      const [pendingData, completedData] = await Promise.all([
+        pendingRes.ok ? pendingRes.json() : { passes: [] },
+        completedRes.ok ? completedRes.json() : { passes: [] },
+      ]);
+      // Only show passes heading to this recipient's location
+      const locationMatch = (p: GatePass) => !myLocation || !p.toLocation || p.toLocation === myLocation;
+      setPending((pendingData.passes ?? []).filter(locationMatch));
+      setCompleted((completedData.passes ?? []).filter(locationMatch));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (status === "authenticated") fetchPasses();

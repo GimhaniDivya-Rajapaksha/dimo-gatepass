@@ -430,7 +430,7 @@ export default function SecurityGateDashboard() {
         ...(initiatorOutData.passes ?? []).filter(outLocation),
       ]);
 
-      // Gate IN queue: APPROVED SUB_IN + GATE_OUT MAIN_IN/SUB_OUT_IN/CustomerDelivery
+      // Gate IN queue: APPROVED SUB_IN + GATE_OUT MAIN_IN/SUB_OUT_IN/CustomerDelivery/LocationTransfer
       const approvedSubIn: Pass[] = (subInData.passes ?? []).filter(inLocation);
       const allGateOut: Pass[] = inData.passes ?? [];
       setInPasses([
@@ -438,7 +438,8 @@ export default function SecurityGateDashboard() {
         ...allGateOut.filter((p) =>
           inLocation(p) && (
             (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN")) ||
-            p.passType === "CUSTOMER_DELIVERY"
+            p.passType === "CUSTOMER_DELIVERY" ||
+            p.passType === "LOCATION_TRANSFER"
           )
         ),
       ]);

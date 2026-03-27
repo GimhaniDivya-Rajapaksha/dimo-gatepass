@@ -480,7 +480,7 @@ export default function InitiatorGatePassDetailPage() {
     data.status === "APPROVED"
   );
   const canSecurityGateIn  = isSecurityOfficer && (
-    (data.status === "GATE_OUT" && (data.passSubType === "MAIN_IN" || data.passSubType === "SUB_OUT_IN" || data.passType === "CUSTOMER_DELIVERY")) ||
+    (data.status === "GATE_OUT" && (data.passSubType === "MAIN_IN" || data.passSubType === "SUB_OUT_IN" || data.passType === "CUSTOMER_DELIVERY" || data.passType === "LOCATION_TRANSFER")) ||
     (data.status === "APPROVED" && data.passType === "AFTER_SALES" && data.passSubType === "SUB_IN")
   );
   const isASO = role === "AREA_SALES_OFFICER";
