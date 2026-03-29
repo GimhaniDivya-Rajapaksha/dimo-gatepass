@@ -45,51 +45,27 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        // First sign-in: store from credentials
+        // First sign-in only: load all user attributes from DB and store in JWT.
+        // After this, NO further DB calls are made for auth — the JWT is self-contained.
         token.id = user.id;
         token.role = (user as { role: string | null }).role ?? null;
-      } else {
-        // Subsequent requests: ensure id is always populated (handles old sessions missing id)
-        if (!token.id && token.email) {
-          try {
-            const rows = await prisma.$queryRaw<{ id: string; role: string | null; defaultLocation: string | null }[]>`
-              SELECT id, role::text, "defaultLocation" FROM "User" WHERE email = ${token.email as string} LIMIT 1
-            `;
-            if (rows[0]) {
-              token.id = rows[0].id;
-              token.role = rows[0].role ?? null;
-              token.defaultLocation = rows[0].defaultLocation ?? null;
-            }
-          } catch {
-            // DB temporarily unreachable
+        try {
+          const rows = await prisma.$queryRaw<{ defaultLocation: string | null; approverName: string | null }[]>`
+            SELECT u."defaultLocation", a.name AS "approverName"
+            FROM "User" u
+            LEFT JOIN "User" a ON a.id = u."approverId"
+            WHERE u.id = ${user.id as string}
+            LIMIT 1
+          `;
+          if (rows[0]) {
+            token.defaultLocation = rows[0].defaultLocation ?? null;
+            token.approverName = rows[0].approverName ?? null;
           }
-        } else if (token.id) {
-          // Re-fetch role + approver from DB at most once every 5 minutes.
-          // This prevents pool exhaustion on Vercel where every API call runs getServerSession.
-          const FIVE_MIN = 5 * 60 * 1000;
-          const lastRefreshed = (token.lastRefreshed as number) ?? 0;
-          if (Date.now() - lastRefreshed > FIVE_MIN) {
-            try {
-              const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null; approverName: string | null }[]>`
-                SELECT u.role::text, u."defaultLocation",
-                       a.name AS "approverName"
-                FROM "User" u
-                LEFT JOIN "User" a ON a.id = u."approverId"
-                WHERE u.id = ${token.id as string}
-                LIMIT 1
-              `;
-              if (rows[0]) {
-                token.role = rows[0].role ?? null;
-                token.defaultLocation = rows[0].defaultLocation ?? null;
-                token.approverName = rows[0].approverName ?? null;
-                token.lastRefreshed = Date.now();
-              }
-            } catch {
-              // DB temporarily unreachable — keep using cached role from token
-            }
-          }
+        } catch {
+          // Non-fatal: defaultLocation/approverName will be null until re-login
         }
       }
+      // Subsequent requests: return token as-is — zero DB queries.
       return token;
     },
     async session({ session, token }) {
