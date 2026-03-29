@@ -671,22 +671,18 @@ export default function CreateGatePassPage() {
   }, [session?.user?.role, passType]);
 
 
-  // Auto-fetch the initiator's assigned approver
+  // Auto-assign approver from session (approverName is embedded in JWT — no extra fetch needed)
   useEffect(() => {
     if (status === "authenticated") {
-      fetch("/api/me")
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-          if (d?.user?.approver) {
-            setAssignedApprover(d.user.approver);
-            setLt(p => ({ ...p, approver: d.user.approver.name }));
-            setCd(p => ({ ...p, approver: d.user.approver.name }));
-            setSr(p => ({ ...p, approver: d.user.approver.name }));
-          }
-        })
-        .catch(() => {});
+      const approverName = (session?.user as { approverName?: string | null })?.approverName ?? null;
+      if (approverName) {
+        setAssignedApprover({ id: "", name: approverName });
+        setLt(p => ({ ...p, approver: approverName }));
+        setCd(p => ({ ...p, approver: approverName }));
+        setSr(p => ({ ...p, approver: approverName }));
+      }
     }
-  }, [status]);
+  }, [status, session]);
 
   const fetchLookup = async (field: LookupField, q = "", lt_type?: string) => {
     if (field === "location") setLocationLoading(true);

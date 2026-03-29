@@ -59,15 +59,21 @@ export const authOptions: NextAuthOptions = {
             // DB temporarily unreachable
           }
         } else if (token.id) {
-          // Re-fetch role from DB so role changes take effect on next request.
+          // Re-fetch role + approver from DB so changes take effect on next request.
           // Fallback to cached token values if DB is temporarily unreachable.
           try {
-            const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null }[]>`
-              SELECT role::text, "defaultLocation" FROM "User" WHERE id = ${token.id as string} LIMIT 1
+            const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null; approverName: string | null }[]>`
+              SELECT u.role::text, u."defaultLocation",
+                     a.name AS "approverName"
+              FROM "User" u
+              LEFT JOIN "User" a ON a.id = u."approverId"
+              WHERE u.id = ${token.id as string}
+              LIMIT 1
             `;
             if (rows[0]) {
               token.role = rows[0].role ?? null;
               token.defaultLocation = rows[0].defaultLocation ?? null;
+              token.approverName = rows[0].approverName ?? null;
             }
           } catch {
             // DB temporarily unreachable — keep using cached role from token
@@ -81,6 +87,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.id;
         session.user.role = token.role;
         session.user.defaultLocation = (token.defaultLocation as string | null) ?? null;
+        session.user.approverName = (token.approverName as string | null) ?? null;
       }
       return session;
     },
