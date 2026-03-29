@@ -59,24 +59,29 @@ export const authOptions: NextAuthOptions = {
             // DB temporarily unreachable
           }
         } else if (token.id) {
-          // Re-fetch role + approver from DB so changes take effect on next request.
-          // Fallback to cached token values if DB is temporarily unreachable.
-          try {
-            const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null; approverName: string | null }[]>`
-              SELECT u.role::text, u."defaultLocation",
-                     a.name AS "approverName"
-              FROM "User" u
-              LEFT JOIN "User" a ON a.id = u."approverId"
-              WHERE u.id = ${token.id as string}
-              LIMIT 1
-            `;
-            if (rows[0]) {
-              token.role = rows[0].role ?? null;
-              token.defaultLocation = rows[0].defaultLocation ?? null;
-              token.approverName = rows[0].approverName ?? null;
+          // Re-fetch role + approver from DB at most once every 5 minutes.
+          // This prevents pool exhaustion on Vercel where every API call runs getServerSession.
+          const FIVE_MIN = 5 * 60 * 1000;
+          const lastRefreshed = (token.lastRefreshed as number) ?? 0;
+          if (Date.now() - lastRefreshed > FIVE_MIN) {
+            try {
+              const rows = await prisma.$queryRaw<{ role: string | null; defaultLocation: string | null; approverName: string | null }[]>`
+                SELECT u.role::text, u."defaultLocation",
+                       a.name AS "approverName"
+                FROM "User" u
+                LEFT JOIN "User" a ON a.id = u."approverId"
+                WHERE u.id = ${token.id as string}
+                LIMIT 1
+              `;
+              if (rows[0]) {
+                token.role = rows[0].role ?? null;
+                token.defaultLocation = rows[0].defaultLocation ?? null;
+                token.approverName = rows[0].approverName ?? null;
+                token.lastRefreshed = Date.now();
+              }
+            } catch {
+              // DB temporarily unreachable — keep using cached role from token
             }
-          } catch {
-            // DB temporarily unreachable — keep using cached role from token
           }
         }
       }
