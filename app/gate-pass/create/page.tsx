@@ -707,19 +707,29 @@ export default function CreateGatePassPage() {
   };
 
   useEffect(() => {
-    if (status === "authenticated") {
-      void fetchLookup("location", "", locationType || undefined);
-      void fetchLookup("outReason");
-      void fetchLookup("vehicle");
-      void fetchLookup("approver");
-      void fetchLookup("companyName");
-      void fetchLookup("carrierRegNo");
-      // Fetch DIMO locations for SR OUT "From Location" dropdown
-      fetch("/api/lookups?field=location&locationType=DIMO&limit=200")
-        .then(r => r.ok ? r.json() : null)
-        .then((d: { options?: LookupOption[] } | null) => { if (d?.options) setDimoLocations(d.options); })
-        .catch(() => {});
-    }
+    if (status !== "authenticated") return;
+    // Single bulk request instead of 7 simultaneous fetches
+    setLocationLoading(true);
+    const params = new URLSearchParams({ fields: "location,outReason,approver,companyName,carrierRegNo", dimoLocationType: "DIMO" });
+    if (locationType) params.set("locationType", locationType);
+    fetch(`/api/lookups?${params.toString()}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: Record<string, LookupOption[]> | null) => {
+        if (!d) return;
+        setLookupOptions(prev => ({
+          ...prev,
+          location: d.location ?? prev.location,
+          outReason: d.outReason ?? prev.outReason,
+          approver: d.approver ?? prev.approver,
+          companyName: d.companyName ?? prev.companyName,
+          carrierRegNo: d.carrierRegNo ?? prev.carrierRegNo,
+        }));
+        if (d.dimoLocation) setDimoLocations(d.dimoLocation);
+      })
+      .catch(() => {})
+      .finally(() => setLocationLoading(false));
+    // Vehicle lookup is separate (may call SAP)
+    void fetchLookup("vehicle");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType]);
 

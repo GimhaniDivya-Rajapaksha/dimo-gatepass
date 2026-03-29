@@ -22,6 +22,54 @@ export async function GET(req: NextRequest) {
   const take = field === "location" ? Math.min(rawLimit, 500) : Math.min(rawLimit, 50);
   const locationType = searchParams.get("locationType") ?? undefined;
 
+  // ── Bulk mode: ?fields=location,outReason,approver,... ──────────────────
+  const fieldsParam = searchParams.get("fields");
+  if (fieldsParam) {
+    const fields = fieldsParam.split(",").map(f => f.trim()) as LookupField[];
+    const locType = searchParams.get("locationType") ?? undefined;
+    const dimoLocType = searchParams.get("dimoLocationType") ?? undefined;
+    try {
+      const [locations, dimoLocations, outReasons, approvers, companies, carriers] = await Promise.all([
+        prisma.locationOption.findMany({
+          where: locType ? { locationType: locType } as Record<string, unknown> : {},
+          orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
+          take: 300,
+        }),
+        dimoLocType
+          ? prisma.locationOption.findMany({
+              where: { locationType: dimoLocType } as Record<string, unknown>,
+              orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
+              take: 200,
+            })
+          : Promise.resolve([]),
+        fields.includes("outReason") ? prisma.outReasonOption.findMany({ orderBy: { value: "asc" }, take: 50 }) : Promise.resolve([]),
+        fields.includes("approver") ? prisma.user.findMany({ where: { role: "APPROVER" }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
+        fields.includes("companyName") ? prisma.carrierOption.findMany({ orderBy: { companyName: "asc" }, take: 50 }) : Promise.resolve([]),
+        fields.includes("carrierRegNo") ? prisma.carrierOption.findMany({ orderBy: { registrationNo: "asc" }, take: 50 }) : Promise.resolve([]),
+      ]);
+      const mapLoc = (row: { id: string; plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string }) => ({
+        id: row.id,
+        value: `${row.plantDescription} - ${row.storageDescription}`,
+        label: `${row.plantDescription} – ${row.storageDescription}`,
+        plantCode: row.plantCode,
+        plantDescription: row.plantDescription,
+        storageLocation: row.storageLocation,
+        storageDescription: row.storageDescription,
+      });
+      return NextResponse.json({
+        location: locations.map(mapLoc),
+        dimoLocation: dimoLocations.map(mapLoc),
+        outReason: outReasons.map((r: { id: string; value: string }) => ({ id: r.id, value: r.value, label: r.value })),
+        approver: approvers.map((r: { id: string; name: string }) => ({ id: r.id, value: r.name, label: r.name })),
+        companyName: (companies as { id: string; companyName: string; registrationNo: string }[]).map(r => ({ id: r.id, value: r.companyName, label: r.companyName, registrationNo: r.registrationNo })),
+        carrierRegNo: (carriers as { id: string; registrationNo: string; companyName: string }[]).map(r => ({ id: r.id, value: r.registrationNo, label: `${r.registrationNo} — ${r.companyName}`, companyName: r.companyName })),
+      });
+    } catch (e) {
+      console.error("Bulk lookups error:", e);
+      return NextResponse.json({ error: "DB error" }, { status: 500 });
+    }
+  }
+
   if (!field) return NextResponse.json({ options: [] });
 
   try {
