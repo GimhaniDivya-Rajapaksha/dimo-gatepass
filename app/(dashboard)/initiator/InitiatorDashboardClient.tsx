@@ -515,6 +515,61 @@ export default function InitiatorDashboardClient({ user }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isASO, user.defaultLocation]);
 
+  // Individual refresh functions used by refresh buttons and action handlers
+  const fetchIncoming = useCallback(async () => {
+    if (!isASO) return;
+    setIncomingLoading(true);
+    try {
+      const outParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", locationView: "true", limit: "50" });
+      if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
+      const outRes = await fetch(`/api/gate-pass?${outParams}`);
+      if (!outRes.ok) return;
+      const outData = await outRes.json();
+      const subOutPasses: IncomingVehicle[] = (outData.passes || []).filter((p: IncomingVehicle) => p.status === "APPROVED" || p.status === "GATE_OUT");
+      const inParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_IN", locationView: "true", limit: "100" });
+      const inRes = await fetch(`/api/gate-pass?${inParams}`);
+      const subInStatusByParent = new Map<string, string>();
+      if (inRes.ok) {
+        const inData = await inRes.json();
+        (inData.passes || []).forEach((p: { parentPass: { id: string } | null; status: string }) => {
+          if (p.parentPass?.id && p.status !== "COMPLETED") subInStatusByParent.set(p.parentPass.id, p.status);
+        });
+      }
+      setIncoming(
+        subOutPasses
+          .filter((p) => { const s = p.parentPass?.id ? subInStatusByParent.get(p.parentPass.id) : undefined; return s !== "GATE_OUT"; })
+          .map((p) => ({ ...p, hasActiveSubIn: p.parentPass?.id ? subInStatusByParent.has(p.parentPass.id) : false }))
+      );
+    } finally { setIncomingLoading(false); }
+  }, [isASO, user.defaultLocation]);
+
+  const fetchArrivingVehicles = useCallback(async () => {
+    if (isASO) return;
+    setArrivingLoading(true);
+    try {
+      const params = new URLSearchParams({ passType: "AFTER_SALES", limit: "100" });
+      const res = await fetch(`/api/gate-pass?${params}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      setArrivingVehicles((d.passes || []).filter((p: GatePass) =>
+        (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
+        || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
+      ));
+    } finally { setArrivingLoading(false); }
+  }, [isASO]);
+
+  const fetchMainInActive = useCallback(async () => {
+    if (isASO) return;
+    setMainInLoading(true);
+    try {
+      const params = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", status: "GATE_OUT", limit: "50" });
+      const res = await fetch(`/api/gate-pass?${params}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      setMainInActive(d.passes || []);
+    } finally { setMainInLoading(false); }
+  }, [isASO]);
+
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: "10" });
