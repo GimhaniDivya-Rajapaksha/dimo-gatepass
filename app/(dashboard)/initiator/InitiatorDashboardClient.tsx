@@ -438,131 +438,82 @@ export default function InitiatorDashboardClient({ user }: Props) {
   const [arrivingLoading, setArrivingLoading] = useState(false);
   const [confirmingArrivedId, setConfirmingArrivedId] = useState<string | null>(null);
 
-  const fetchIncoming = useCallback(async () => {
-    if (!isASO) return;
-    setIncomingLoading(true);
-    try {
-      // locationView=true bypasses the createdById filter so we see ALL SUB_OUTs going to this location
-      // Fetch APPROVED + GATE_OUT SUB_OUTs (newly created = APPROVED, physically departed = GATE_OUT)
-      const outParams = new URLSearchParams({
-        passType: "AFTER_SALES", passSubType: "SUB_OUT",
-        locationView: "true", limit: "50",
-      });
-      if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
-
-      const inParams = new URLSearchParams({
-        passType: "AFTER_SALES", passSubType: "SUB_IN",
-        locationView: "true", limit: "100",
-      });
-
-      const [outRes, inRes] = await Promise.all([
-        fetch(`/api/gate-pass?${outParams}`),
-        fetch(`/api/gate-pass?${inParams}`),
-      ]);
-      if (!outRes.ok) return;
-      const outData = await outRes.json();
-
-      // Only show SUB_OUTs that are APPROVED (pending departure) or GATE_OUT (in transit)
-      const subOutPasses: IncomingVehicle[] = (outData.passes || []).filter(
-        (p: IncomingVehicle) => p.status === "APPROVED" || p.status === "GATE_OUT"
-      );
-
-      // Track SUB_IN status per parentPassId:
-      // - "APPROVED"  → SUB_IN created, not yet received → show "SUB IN Created" badge
-      // - "GATE_OUT"  → vehicle already received → hide the SUB_OUT row entirely
-      const subInStatusByParent = new Map<string, string>();
-      if (inRes.ok) {
-        const inData = await inRes.json();
-        (inData.passes || []).forEach((p: { parentPass: { id: string } | null; status: string }) => {
-          if (p.parentPass?.id && p.status !== "COMPLETED") {
-            subInStatusByParent.set(p.parentPass.id, p.status);
-          }
-        });
-      }
-
-      setIncoming(
-        subOutPasses
-          // Hide SUB_OUTs whose vehicle has already been received (SUB_IN is at GATE_OUT)
-          .filter((p) => {
-            const subInStatus = p.parentPass?.id ? subInStatusByParent.get(p.parentPass.id) : undefined;
-            return subInStatus !== "GATE_OUT";
-          })
-          .map((p) => ({
-            ...p,
-            // hasActiveSubIn = true means SUB_IN exists but vehicle not yet marked received
-            hasActiveSubIn: p.parentPass?.id ? subInStatusByParent.has(p.parentPass.id) : false,
-          }))
-      );
-    } finally {
-      setIncomingLoading(false);
-    }
-  }, [isASO, user.defaultLocation]);
-
-  useEffect(() => { void fetchIncoming(); }, [fetchIncoming]);
-
   // INITIATOR only: MAIN_IN passes at GATE_OUT = vehicle received at HQ, ready for action
   const [mainInActive, setMainInActive] = useState<GatePass[]>([]);
   const [mainInLoading, setMainInLoading] = useState(false);
 
-  const fetchMainInActive = useCallback(async () => {
-    if (isASO) return;
-    setMainInLoading(true);
-    try {
-      const params = new URLSearchParams({
-        passType: "AFTER_SALES", passSubType: "MAIN_IN", status: "GATE_OUT", limit: "50",
-      });
-      const res = await fetch(`/api/gate-pass?${params}`);
-      if (!res.ok) return;
-      const d = await res.json();
-      setMainInActive(d.passes || []);
-    } finally {
-      setMainInLoading(false);
-    }
-  }, [isASO]);
-
-  useEffect(() => { void fetchMainInActive(); }, [fetchMainInActive]);
-
-  // INITIATOR only: fetch AFTER_SALES SUB_OUT_IN passes returning to initiator's location
-  // SUB_OUT_IN = vehicle returning from service center back to DIMO — INITIATOR physically receives it
-  // SUB_IN passes are handled by ASO (informational only, not shown here)
-  const fetchArrivingVehicles = useCallback(async () => {
-    if (isASO) return;
-    setArrivingLoading(true);
-    try {
-      const params = new URLSearchParams({ passType: "AFTER_SALES", limit: "100" });
-      const res = await fetch(`/api/gate-pass?${params}`);
-      if (!res.ok) return;
-      const d = await res.json();
-      setArrivingVehicles(
-        (d.passes || []).filter((p: GatePass) =>
-          // SUB_OUT_IN: vehicle actively returning to HQ — needs confirm on arrival
-          (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
-          // SUB_IN at GATE_OUT: vehicle is at service center, ASO hasn't dispatched return yet — informational
-          || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
-        )
-      );
-    } finally {
-      setArrivingLoading(false);
-    }
-  }, [isASO]);
-
-  useEffect(() => { void fetchArrivingVehicles(); }, [fetchArrivingVehicles]);
-
-  // Fetch DRAFT passes created by security needing completion
+  // ── Single coordinated initial load (replaces 5 separate simultaneous fetches) ──
   useEffect(() => {
-    fetch("/api/gate-pass?status=DRAFT&limit=20")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setDraftPasses(d.passes ?? []); })
-      .catch(() => {});
-  }, []);
+    let cancelled = false;
 
-  // Fetch real stats separately
-  useEffect(() => {
-    fetch("/api/gate-pass/stats")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setStats(d); setStatsLoading(false); })
-      .catch(() => setStatsLoading(false));
-  }, []);
+    async function loadAll() {
+      if (isASO) {
+        // ASO: fetch incoming vehicles (2 calls) + stats + drafts sequentially
+        setIncomingLoading(true);
+        try {
+          const outParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", locationView: "true", limit: "50" });
+          if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
+          const outRes = await fetch(`/api/gate-pass?${outParams}`);
+          if (!cancelled && outRes.ok) {
+            const outData = await outRes.json();
+            const subOutPasses: IncomingVehicle[] = (outData.passes || []).filter(
+              (p: IncomingVehicle) => p.status === "APPROVED" || p.status === "GATE_OUT"
+            );
+            const inParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_IN", locationView: "true", limit: "100" });
+            const inRes = await fetch(`/api/gate-pass?${inParams}`);
+            const subInStatusByParent = new Map<string, string>();
+            if (inRes.ok) {
+              const inData = await inRes.json();
+              (inData.passes || []).forEach((p: { parentPass: { id: string } | null; status: string }) => {
+                if (p.parentPass?.id && p.status !== "COMPLETED") subInStatusByParent.set(p.parentPass.id, p.status);
+              });
+            }
+            if (!cancelled) setIncoming(
+              subOutPasses
+                .filter((p) => { const s = p.parentPass?.id ? subInStatusByParent.get(p.parentPass.id) : undefined; return s !== "GATE_OUT"; })
+                .map((p) => ({ ...p, hasActiveSubIn: p.parentPass?.id ? subInStatusByParent.has(p.parentPass.id) : false }))
+            );
+          }
+        } finally { if (!cancelled) setIncomingLoading(false); }
+      } else {
+        // INITIATOR: fetch main-in + arriving vehicles sequentially
+        setMainInLoading(true);
+        setArrivingLoading(true);
+        try {
+          const mainInParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", status: "GATE_OUT", limit: "50" });
+          const mainInRes = await fetch(`/api/gate-pass?${mainInParams}`);
+          if (!cancelled && mainInRes.ok) { const d = await mainInRes.json(); setMainInActive(d.passes || []); }
+        } finally { if (!cancelled) setMainInLoading(false); }
+
+        try {
+          const arrivingParams = new URLSearchParams({ passType: "AFTER_SALES", limit: "100" });
+          const arrivingRes = await fetch(`/api/gate-pass?${arrivingParams}`);
+          if (!cancelled && arrivingRes.ok) {
+            const d = await arrivingRes.json();
+            setArrivingVehicles((d.passes || []).filter((p: GatePass) =>
+              (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
+              || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
+            ));
+          }
+        } finally { if (!cancelled) setArrivingLoading(false); }
+      }
+
+      // Stats + drafts after role-specific data
+      const [statsRes, draftRes] = await Promise.all([
+        fetch("/api/gate-pass/stats"),
+        fetch("/api/gate-pass?status=DRAFT&limit=20"),
+      ]);
+      if (!cancelled) {
+        if (statsRes.ok) { const d = await statsRes.json(); setStats(d); }
+        setStatsLoading(false);
+        if (draftRes.ok) { const d = await draftRes.json(); setDraftPasses(d.passes ?? []); }
+      }
+    }
+
+    void loadAll();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isASO, user.defaultLocation]);
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
