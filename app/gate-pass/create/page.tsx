@@ -636,7 +636,7 @@ export default function CreateGatePassPage() {
   const [cdSapLoaded, setCdSapLoaded] = useState(false);
 
   useEffect(() => {
-    const allowed = ["INITIATOR", "AREA_SALES_OFFICER"];
+    const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR"];
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
 
@@ -891,7 +891,6 @@ export default function CreateGatePassPage() {
       if (!sr.arrivalTime) e.arrivalTime = "Arrival time is required";
       else if (!e.arrivalDate && isPastDateTime(sr.arrivalDate, sr.arrivalTime)) e.arrivalTime = "Arrival time cannot be in the past";
     } else {
-      if (!cd.approver) e.approver = "Approver is required";
       if (!cd.vehicle) e.vehicle = "Vehicle is required";
       if (!cd.departureDate) e.departureDate = "Departure date is required";
       else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
@@ -915,7 +914,14 @@ export default function CreateGatePassPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      console.log("[Submit blocked] Validation errors:", errs);
+      // Scroll to first error field
+      const firstKey = Object.keys(errs)[0];
+      document.querySelector(`[name="${firstKey}"], [data-field="${firstKey}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     setLoading(true);
 
     const ltCarrierMileage = { companyName: lt.companyName, carrierRegNo: lt.carrierRegNo, driverName: lt.driverName, driverNIC: lt.driverNIC, driverContact: lt.contactNo, mileage: lt.mileage, insurance: lt.insurance, garagePlate: lt.garagePlate };
@@ -2459,27 +2465,6 @@ export default function CreateGatePassPage() {
                   <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                     <SectionTitle>Vehicle Details</SectionTitle>
                     <div className="grid grid-cols-1 gap-4">
-                      <Field label="Select Approver" required error={errors.approver}>
-                        {assignedApprover ? (
-                          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                            </svg>
-                            <span className="font-medium">{assignedApprover.name}</span>
-                            <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                          </div>
-                        ) : (
-                          <SearchInput
-                            value={cd.approver}
-                            onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
-                            onFocus={() => void fetchLookup("approver", cd.approver)}
-                            placeholder="Search approver"
-                            error={errors.approver}
-                            options={lookupOptions.approver}
-                          />
-                        )}
-                      </Field>
 
                       <Field label="Vehicle" required error={errors.vehicle} className="md:col-span-2">
                         <div className="flex gap-2">
@@ -2811,6 +2796,21 @@ export default function CreateGatePassPage() {
 
         {errors.form && (
           <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-600 bg-red-50 border border-red-200">{errors.form}</div>
+        )}
+
+        {/* Error summary — shown when submit is blocked */}
+        {Object.keys(errors).length > 0 && (
+          <div className="mb-4 rounded-2xl border px-5 py-4" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
+            <p className="text-sm font-bold mb-2" style={{ color: "#991b1b" }}>Please fix the following before submitting:</p>
+            <ul className="space-y-1">
+              {Object.entries(errors).map(([, msg]) => (
+                <li key={msg} className="text-sm flex items-center gap-2" style={{ color: "#b91c1c" }}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {/* Actions */}

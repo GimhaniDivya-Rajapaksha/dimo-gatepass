@@ -16,6 +16,7 @@ type Pass = {
   status: string;
   approvedAt: string | null;
   createdAt: string;
+  updatedAt: string;
   departureDate: string | null;
   requestedBy: string | null;
   companyName: string | null;
@@ -426,7 +427,7 @@ function PassCard({ p, mode, onConfirmed }: {
             target="_blank"
             rel="noopener noreferrer"
             className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-opacity hover:opacity-80"
-            style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}>
+            style={{ borderColor: "rgba(16,185,129,0.5)", color: "#059669", background: "rgba(16,185,129,0.08)" }}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
             </svg>
@@ -459,12 +460,15 @@ export default function SecurityGateDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [outPasses, setOutPasses] = useState<Pass[]>([]);
-  const [inPasses, setInPasses]   = useState<Pass[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [toast, setToast]         = useState<{ msg: string; ok: boolean } | null>(null);
-  const [gateMode, setGateMode]   = useState<GateMode>("BOTH");
-  const [search, setSearch]       = useState("");
+  const [outPasses,        setOutPasses]        = useState<Pass[]>([]);
+  const [inPasses,         setInPasses]         = useState<Pass[]>([]);
+  const [draftPasses,      setDraftPasses]      = useState<Pass[]>([]);
+  const [releasedToday,    setReleasedToday]    = useState(0);
+  const [clearedInToday,   setClearedInToday]   = useState(0);
+  const [loading,          setLoading]          = useState(true);
+  const [toast,            setToast]            = useState<{ msg: string; ok: boolean } | null>(null);
+  const [search,           setSearch]           = useState("");
+  const [gateMode,         setGateMode]         = useState<GateMode>("BOTH");
 
   useEffect(() => {
     try {
@@ -487,16 +491,25 @@ export default function SecurityGateDashboard() {
     setLoading(true);
     const myLocation = (session?.user as { defaultLocation?: string | null })?.defaultLocation ?? null;
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayISO = todayStart.toISOString();
+
     try {
-      const [outRes, initiatorOutRes, inRes, subInRes] = await Promise.all([
+      const [outRes, initiatorOutRes, inRes, subInRes, initiatorInRes, releasedRes, clearedRes, draftRes] = await Promise.all([
         fetch("/api/gate-pass?status=APPROVED&limit=100"),
         fetch("/api/gate-pass?status=INITIATOR_OUT&limit=100"),
         fetch("/api/gate-pass?status=GATE_OUT&limit=100"),
         fetch("/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
+        fetch("/api/gate-pass?status=INITIATOR_IN&limit=100"),
+        fetch(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200`),
+        fetch(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200`),
+        fetch("/api/gate-pass?status=DRAFT&limit=50"),
       ]);
-      const [outData, initiatorOutData, inData, subInData] = await Promise.all([
-        outRes.json(), initiatorOutRes.json(), inRes.json(), subInRes.json(),
+      const [outData, initiatorOutData, inData, subInData, initiatorInData, releasedData, clearedData, draftData] = await Promise.all([
+        outRes.json(), initiatorOutRes.json(), inRes.json(), subInRes.json(), initiatorInRes.json(), releasedRes.json(), clearedRes.json(), draftRes.json(),
       ]);
+      setDraftPasses(draftData.passes ?? []);
 
       const outLocation = (p: Pass) => !myLocation || !p.fromLocation || p.fromLocation === myLocation;
       const inLocation  = (p: Pass) => !myLocation || !p.toLocation  || p.toLocation  === myLocation;
@@ -513,16 +526,20 @@ export default function SecurityGateDashboard() {
 
       const approvedSubIn: Pass[] = (subInData.passes ?? []).filter(inLocation);
       const allGateOut: Pass[]    = inData.passes ?? [];
+      // INITIATOR_IN: MAIN_IN passes where initiator marked vehicle at gate; security at toLocation confirms
+      const initiatorInPasses: Pass[] = (initiatorInData.passes ?? []).filter(inLocation);
       setInPasses([
+        ...initiatorInPasses,
         ...approvedSubIn,
         ...allGateOut.filter((p) =>
           inLocation(p) && (
             (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN")) ||
-            p.passType === "CUSTOMER_DELIVERY" ||
             p.passType === "LOCATION_TRANSFER"
           )
         ),
       ]);
+      setReleasedToday((releasedData.passes ?? []).length);
+      setClearedInToday((clearedData.passes ?? []).length);
     } catch {
       showToast("Failed to refresh passes.", false);
     } finally {
@@ -559,6 +576,7 @@ export default function SecurityGateDashboard() {
   const filteredOut = outPasses.filter(filterPass);
   const filteredIn  = inPasses.filter(filterPass);
 
+
   function handleConfirmed(id: string, mode: "out" | "in") {
     if (mode === "out") setOutPasses(prev => prev.filter(p => p.id !== id));
     else setInPasses(prev => prev.filter(p => p.id !== id));
@@ -586,6 +604,8 @@ export default function SecurityGateDashboard() {
 
       {/* ── Page header ── */}
       <div className="mb-5">
+
+        {/* Title row */}
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
@@ -601,7 +621,7 @@ export default function SecurityGateDashboard() {
             </div>
           </div>
 
-          {/* Mode toggle + counts + refresh */}
+          {/* Mode toggle + refresh */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: "var(--border)" }}>
               {(["OUT", "BOTH", "IN"] as GateMode[]).map((m) => (
@@ -618,14 +638,6 @@ export default function SecurityGateDashboard() {
                 </button>
               ))}
             </div>
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
-              style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.2)" }}>
-              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />{outPasses.length} OUT
-            </div>
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
-              style={{ background: "rgba(20,184,166,0.12)", color: "#2dd4bf", border: "1px solid rgba(20,184,166,0.2)" }}>
-              <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />{inPasses.length} IN
-            </div>
             <button onClick={() => void fetchAll()}
               className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-80 transition-opacity"
               style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
@@ -635,6 +647,30 @@ export default function SecurityGateDashboard() {
               </svg>
             </button>
           </div>
+        </div>
+
+        {/* ── Stats row ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          {[
+            { label: "Pending Gate OUT",   value: outPasses.length,  accent: "#4f46e5", bg: "rgba(79,70,229,0.1)",  border: "rgba(79,70,229,0.25)",  icon: "M17 16l4-4m0 0l-4-4m4 4H7" },
+            { label: "Released Today",     value: releasedToday,     accent: "#2563eb", bg: "rgba(37,99,235,0.1)",  border: "rgba(37,99,235,0.25)",  icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
+            { label: "Pending Gate IN",    value: inPasses.length,   accent: "#0f766e", bg: "rgba(15,118,110,0.1)", border: "rgba(15,118,110,0.25)", icon: "M7 16l-4-4m0 0l4-4m-4 4h18" },
+            { label: "Cleared IN Today",   value: clearedInToday,    accent: "#15803d", bg: "rgba(21,128,61,0.1)",  border: "rgba(21,128,61,0.25)",  icon: "M5 13l4 4L19 7" },
+          ].map(({ label, value, accent, bg, border, icon }) => (
+            <div key={label} className="rounded-2xl px-4 py-3 flex items-center gap-3"
+              style={{ background: bg, border: `1px solid ${border}` }}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(255,255,255,0.15)" }}>
+                <svg className="w-4 h-4" style={{ color: accent }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d={icon} />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-black leading-none" style={{ color: accent }}>{value}</p>
+                <p className="text-[11px] font-semibold mt-0.5" style={{ color: accent, opacity: 0.75 }}>{label}</p>
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* ── Search bar ── */}
@@ -667,6 +703,41 @@ export default function SecurityGateDashboard() {
           </p>
         )}
       </div>
+
+      {/* ── DRAFT passes pending completion ── */}
+      {draftPasses.length > 0 && (
+        <div className="rounded-2xl border mb-6 overflow-hidden" style={{ background: "var(--surface)", borderColor: "#f59e0b80" }}>
+          <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: "var(--border)", background: "#fffbeb" }}>
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              <p className="text-sm font-bold" style={{ color: "#92400e" }}>Passes Awaiting Completion</p>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>{draftPasses.length}</span>
+            </div>
+            <p className="text-xs" style={{ color: "#b45309" }}>Initiator/Service Advisor has been notified</p>
+          </div>
+          <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+            {draftPasses.map((p) => {
+              const dir = (p as any).gateDirection as string | null;
+              const typeLabel = p.passType === "AFTER_SALES" ? "After Sales" : p.passType === "LOCATION_TRANSFER" ? "Location Transfer" : "Customer Delivery";
+              return (
+                <div key={p.id} className="flex items-center gap-4 px-5 py-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold font-mono" style={{ color: "var(--accent)" }}>{p.gatePassNumber}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>{typeLabel}</span>
+                      {dir && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: dir === "IN" ? "#f0fdfa" : "#eef2ff", color: dir === "IN" ? "#0f766e" : "#3730a3" }}>Gate {dir}</span>}
+                    </div>
+                    <p className="text-sm font-semibold font-mono mt-0.5" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                  </div>
+                  <span className="text-xs px-3 py-1.5 rounded-xl font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Pending Completion</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

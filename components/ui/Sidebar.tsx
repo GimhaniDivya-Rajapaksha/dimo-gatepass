@@ -38,8 +38,24 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const searchParams = useSearchParams();
   const { theme }  = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (role !== "INITIATOR" && role !== "SERVICE_ADVISOR") return;
+    fetch("/api/gate-pass?status=DRAFT&limit=1")
+      .then(r => r.json())
+      .then(d => setDraftCount(d.total ?? 0))
+      .catch(() => {});
+    const id = setInterval(() => {
+      fetch("/api/gate-pass?status=DRAFT&limit=1")
+        .then(r => r.json())
+        .then(d => setDraftCount(d.total ?? 0))
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [role]);
 
   const isDark   = mounted && theme === "dark";
   const navItems = navItemsByRole[role ?? ""] ?? navItemsByRole["INITIATOR"];
@@ -133,8 +149,14 @@ export default function Sidebar({ user, role }: SidebarProps) {
                   style={{ background: isActive ? c.iconActiveBg : c.iconBg, color: isActive ? lime : c.text, boxShadow: isActive ? c.iconGlow : "none" }}>
                   {item.icon}
                 </span>
-                <span className="relative z-10 truncate">{item.label}</span>
-                {isActive && (
+                <span className="relative z-10 truncate flex-1">{item.label}</span>
+                {item.showDraftBadge && draftCount > 0 && (
+                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
+                    style={{ background: "#f59e0b", color: "#1c1400" }}>
+                    {draftCount}
+                  </span>
+                )}
+                {isActive && !item.showDraftBadge && (
                   <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>

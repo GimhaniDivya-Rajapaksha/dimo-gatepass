@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
   const { userId, role } = await req.json();
-  const validRoles = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN", "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER"];
+  const validRoles = ["INITIATOR", "APPROVER", "RECIPIENT", "ADMIN", "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR"];
   if (!userId || !validRoles.includes(role)) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }

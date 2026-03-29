@@ -194,8 +194,6 @@ export default function TimePicker({
           </svg>
         )}
       </button>
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-
       {/* ── Popup — rendered at fixed position to escape overflow:hidden parents ── */}
       <AnimatePresence>
         {open && (

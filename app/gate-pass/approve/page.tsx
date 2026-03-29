@@ -9,10 +9,11 @@ type GatePass = {
   status: string; vehicle: string; chassis: string | null;
   departureDate: string | null; requestedBy: string | null;
   toLocation: string | null; fromLocation: string | null;
+  paymentType: string | null;
+  hasCredit: boolean | null; creditApproved: boolean | null;
+  hasImmediate: boolean | null; cashierCleared: boolean | null;
   createdBy: { name: string }; createdAt: string;
   parentPass: ParentPass | null;
-  hasCredit?: boolean;
-  creditApproved?: boolean;
 };
 
 const statusCfg: Record<string, { label: string; bg: string; color: string }> = {
@@ -83,6 +84,7 @@ export default function ApproverListPage() {
 
   useEffect(() => { fetchPasses(); void fetchCounts(); }, [fetchPasses, fetchCounts]);
   useEffect(() => { setPage(1); }, [activeType, search]);
+
 
   const handleView = (id: string) => {
     fetch(`/api/notifications/read`, { method: "POST" });
@@ -360,7 +362,7 @@ export default function ApproverListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
-                  {["Action", "Gate Pass No", "Vehicle / Chassis", activeType === "LOCATION_TRANSFER" ? "To Location" : "Vehicle Details", "Requested By", "Departure Date", "Status"].map((h) => (
+                  {["Action", "Gate Pass No", "Vehicle / Chassis", activeType === "LOCATION_TRANSFER" ? "To Location" : "Payment Type", "Requested By", "Departure Date", "Status"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
@@ -413,7 +415,7 @@ export default function ApproverListPage() {
                           {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
                         </td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>
-                          {activeType === "LOCATION_TRANSFER" ? (p.toLocation || "-") : (p.vehicle || "-")}
+                          {activeType === "LOCATION_TRANSFER" ? (p.toLocation || "-") : (p.paymentType || "-")}
                         </td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.createdBy.name}</td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>

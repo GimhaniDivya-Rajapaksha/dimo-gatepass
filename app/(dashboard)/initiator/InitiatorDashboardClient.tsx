@@ -425,6 +425,9 @@ export default function InitiatorDashboardClient({ user }: Props) {
   const [totalPages, setTotalPages] = useState(1);
   const [markingOutId, setMarkingOutId] = useState<string | null>(null);
 
+  // Security-created DRAFT passes needing completion
+  const [draftPasses, setDraftPasses] = useState<GatePass[]>([]);
+
   // ASO only: vehicles en route (SUB_OUT at GATE_OUT)
   const [incoming, setIncoming] = useState<IncomingVehicle[]>([]);
   const [incomingLoading, setIncomingLoading] = useState(false);
@@ -544,6 +547,14 @@ export default function InitiatorDashboardClient({ user }: Props) {
   }, [isASO]);
 
   useEffect(() => { void fetchArrivingVehicles(); }, [fetchArrivingVehicles]);
+
+  // Fetch DRAFT passes created by security needing completion
+  useEffect(() => {
+    fetch("/api/gate-pass?status=DRAFT&limit=20")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setDraftPasses(d.passes ?? []); })
+      .catch(() => {});
+  }, []);
 
   // Fetch real stats separately
   useEffect(() => {
@@ -805,6 +816,57 @@ export default function InitiatorDashboardClient({ user }: Props) {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Security-created DRAFT passes needing completion */}
+      {draftPasses.length > 0 && (
+        <div className="rounded-2xl border mb-6 overflow-hidden" style={{ background: "var(--surface)", borderColor: "#f59e0b80", boxShadow: "var(--card-shadow)" }}>
+          <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--border)", background: "#fffbeb" }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#fef3c7" }}>
+                <svg className="w-4 h-4" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="font-bold text-sm" style={{ color: "#92400e" }}>Security Created Passes — Action Required</h2>
+                <p className="text-xs" style={{ color: "#b45309" }}>Security Officer registered these vehicles. Please open and complete the details.</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>
+              {draftPasses.length} pending
+            </span>
+          </div>
+          <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
+            {draftPasses.map((p) => {
+              const dirLabel = (p as any).gateDirection === "IN" ? "Gate IN" : "Gate OUT";
+              const typeLabel = p.passType === "AFTER_SALES" ? "After Sales" : p.passType === "LOCATION_TRANSFER" ? "Location Transfer" : "Customer Delivery";
+              return (
+                <div key={p.id} className="flex items-center gap-4 px-5 py-3.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-bold font-mono" style={{ color: "var(--accent)" }}>{p.gatePassNumber}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>{typeLabel}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: (p as any).gateDirection === "IN" ? "#f0fdfa" : "#eef2ff", color: (p as any).gateDirection === "IN" ? "#0f766e" : "#3730a3" }}>{dirLabel}</span>
+                    </div>
+                    <p className="text-sm font-semibold font-mono mt-0.5" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                    <p className="text-xs" style={{ color: "var(--text-muted)" }}>By Security · {p.createdBy.name}</p>
+                  </div>
+                  <Link
+                    href={`/gate-pass/complete/${p.id}`}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0"
+                    style={{ background: "linear-gradient(135deg,#d97706,#f59e0b)" }}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Complete
+                  </Link>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1245,21 +1307,6 @@ export default function InitiatorDashboardClient({ user }: Props) {
                               <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.color }} />
                               {sc.label}
                             </span>
-                          )}
-                          {/* Mark as OUT — only for APPROVED non-AFTER_SALES (LT/CD) */}
-                          {p.status === "APPROVED" && p.passType !== "AFTER_SALES" && (
-                            <button
-                              onClick={() => handleMarkOut(p.id)}
-                              disabled={markingOutId === p.id}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold disabled:opacity-50 transition-all hover:opacity-80"
-                              style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}
-                              title="Mark as Gate Out"
-                            >
-                              {markingOutId === p.id
-                                ? <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg>}
-                              {markingOutId === p.id ? "..." : "Mark OUT"}
-                            </button>
                           )}
                         </div>
                       </td>

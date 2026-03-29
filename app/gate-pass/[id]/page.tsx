@@ -1055,8 +1055,8 @@ export default function InitiatorGatePassDetailPage() {
             </div>
           )}
 
-          {/* ── APPROVER / ALL: Customer Delivery Invoice Status panel ── */}
-          {data?.passType === "CUSTOMER_DELIVERY" && serviceOrders.length > 0 && (() => {
+          {/* ── APPROVER / ALL: Customer Delivery Invoice Status panel (hidden from Security) ── */}
+          {data?.passType === "CUSTOMER_DELIVERY" && serviceOrders.length > 0 && !isSecurityOfficer && (() => {
             const isInvoiced = data.paymentType === "INVOICED";
             return (
               <div className="w-full rounded-2xl border mb-3 overflow-hidden"

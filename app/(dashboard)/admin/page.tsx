@@ -42,22 +42,22 @@ type User = {
 
 const ROLES = [
   "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN",
-  "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER",
+  "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR",
 ];
 const ROLE_LABELS: Record<string, string> = {
   INITIATOR: "Initiator", APPROVER: "Approver", RECIPIENT: "Recipient",
   ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
-  SECURITY_OFFICER: "Security Officer",
+  SECURITY_OFFICER: "Security Officer", SERVICE_ADVISOR: "Service Advisor",
 };
 const roleColors: Record<string, string> = {
   INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669",
   ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
-  SECURITY_OFFICER: "#0f766e",
+  SECURITY_OFFICER: "#0f766e", SERVICE_ADVISOR: "#ea580c",
 };
 const roleBg: Record<string, string> = {
   INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5",
   ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
-  SECURITY_OFFICER: "#f0fdfa",
+  SECURITY_OFFICER: "#f0fdfa", SERVICE_ADVISOR: "#fff7ed",
 };
 
 // Which attributes each role needs
@@ -67,6 +67,7 @@ const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
   APPROVER:           ["location", "brand"],
   CASHIER:            ["location"],
   AREA_SALES_OFFICER: ["location", "brand"],
+  SERVICE_ADVISOR:    ["location", "brand"],
   RECIPIENT:          ["location", "brand"],
   ADMIN:              [],
 };
@@ -579,7 +580,8 @@ export default function AdminPage() {
     { label: "Pending",       value: users.filter(u => !u.role).length,               color: "#f59e0b", bg: "#fef3c7" },
     { label: "Initiators",    value: users.filter(u => u.role === "INITIATOR").length, color: "#2563eb", bg: "#eff6ff" },
     { label: "Approvers",     value: users.filter(u => u.role === "APPROVER").length,  color: "#7c3aed", bg: "#f5f3ff" },
-    { label: "Security",      value: users.filter(u => u.role === "SECURITY_OFFICER").length, color: "#0f766e", bg: "#f0fdfa" },
+    { label: "Security",         value: users.filter(u => u.role === "SECURITY_OFFICER").length,  color: "#0f766e", bg: "#f0fdfa" },
+    { label: "Service Advisors", value: users.filter(u => u.role === "SERVICE_ADVISOR").length,   color: "#ea580c", bg: "#fff7ed" },
   ];
 
   return (

@@ -15,6 +15,7 @@ enum Role {
   AREA_SALES_OFFICER
   CASHIER
   SECURITY_OFFICER
+  SERVICE_ADVISOR
 }
 
 enum PassType {
@@ -28,10 +29,12 @@ enum GatePassStatus {
   APPROVED
   REJECTED
   INITIATOR_OUT
+  INITIATOR_IN
   GATE_OUT
   COMPLETED
   CANCELLED
   CASHIER_REVIEW
+  DRAFT
 }
 
 model User {
@@ -100,8 +103,10 @@ model GatePass {
   creditApproved  Boolean  @default(false)
   hasCredit       Boolean  @default(false)
   hasImmediate    Boolean  @default(false)
-  serviceJobNo   String?   // After Sales service job/work order number
-  parentPassId   String?
+  serviceJobNo      String?   // After Sales service job/work order number
+  securityCreated   Boolean  @default(false) // created by Security Officer with vehicle only
+  gateDirection     String?  // "IN" | "OUT" — direction selected by security at creation
+  parentPassId      String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
   subPasses      GatePass[] @relation("SubPasses")
   fromLocation   String?

@@ -101,7 +101,9 @@ export async function GET(req: NextRequest) {
 
     if (field === "vehicle") {
       // ── 1. Try SAP first ────────────────────────────────────────────────
-      const passType = (searchParams.get("passType") ?? "both") as
+      const rawPassType = searchParams.get("passType") ?? "both";
+      // AFTER_SALES → use both SAP endpoints (IN + OUT) to load all vehicles
+      const passType = (rawPassType === "AFTER_SALES" ? "both" : rawPassType) as
         "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both";
 
       try {
@@ -215,7 +217,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session || (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN")) {
+  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR"];
+  if (!session || !allowedToPost.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 

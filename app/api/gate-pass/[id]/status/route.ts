@@ -82,7 +82,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (session.user.role !== "APPROVER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
-    // All approvals → APPROVED; initiator/ASO will then Mark as OUT from the detail page
+
+    // ── Standard approve / reject flow (LT, AFTER_SALES, CD-CREDIT) ──
     const newStatus = action === "approve" ? "APPROVED" : "REJECTED";
     const updated = await prisma.gatePass.update({
       where: { id },
@@ -107,10 +108,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // Notify Security Officers at fromLocation when LT or MAIN_OUT is approved → ready for Gate OUT
+    // Notify Security Officers at fromLocation when LT, MAIN_OUT, or CD-INVOICED is approved
     const needsSecurityNotify = (
       (action === "approve" && gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||
-      (action === "approve" && gatePass.passType === "LOCATION_TRANSFER")
+      (action === "approve" && gatePass.passType === "LOCATION_TRANSFER") ||
+      (action === "approve" && gatePass.passType === "CUSTOMER_DELIVERY")
     );
     if (needsSecurityNotify) {
       const fromLoc = gatePass.fromLocation as string | null;
@@ -125,9 +127,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             type: "GATE_PASS_APPROVED",
             title: gatePass.passType === "LOCATION_TRANSFER"
               ? "Location Transfer Approved — Confirm Gate OUT"
+              : gatePass.passType === "CUSTOMER_DELIVERY"
+              ? "Customer Delivery Approved — Confirm Gate OUT"
               : "Vehicle Cleared — Ready for Gate OUT",
             message: gatePass.passType === "LOCATION_TRANSFER"
               ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — LT approved, heading to ${gatePass.toLocation ?? "destination"}. Please confirm Gate OUT.`
+              : gatePass.passType === "CUSTOMER_DELIVERY"
+              ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — customer delivery approved. Please confirm Gate OUT.`
               : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — credit approved. Please confirm gate release.`,
             gatePassId: gatePass.id,
           })),
@@ -138,7 +144,95 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // SECURITY_OFFICER: confirm Gate IN for GATE_OUT MAIN_IN / SUB_OUT_IN passes, APPROVED SUB_IN, or Customer Delivery
+  // CASHIER: clear payment for CD immediate pass
+  if (action === "cashier_clear_cd") {
+    const canClear = session.user.role === "CASHIER";
+    if (!canClear) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.passType !== "CUSTOMER_DELIVERY") {
+      return NextResponse.json({ error: "cashier_clear_cd only valid for Customer Delivery" }, { status: 400 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !gatePass.hasImmediate) {
+      return NextResponse.json({ error: "Pass not in cashier review state" }, { status: 400 });
+    }
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: { status: "APPROVED", cashierCleared: true },
+    });
+
+    // Notify initiator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_APPROVED",
+        title: "Payment Cleared — Vehicle Ready for Gate OUT",
+        message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by ${session.user.role === "CASHIER" ? "Cashier" : "Approver"}. Security Officer will confirm Gate OUT.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    // Notify Security Officers at fromLocation
+    const fromLocCd = gatePass.fromLocation as string | null;
+    const secWhereCd = fromLocCd
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLocCd }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficersCd = await prisma.user.findMany({ where: secWhereCd });
+    if (secOfficersCd.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficersCd.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Customer Delivery Cleared — Confirm Gate OUT",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — payment cleared. Customer delivery ready for Gate OUT.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    return NextResponse.json({ ok: true, status: "APPROVED" });
+  }
+
+  // INITIATOR: mark MAIN_IN as INITIATOR_IN (vehicle physically at gate, security to confirm entry)
+  if (action === "initiator_gate_in") {
+    if (session.user.role !== "INITIATOR") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.passType !== "AFTER_SALES" || gatePass.passSubType !== "MAIN_IN") {
+      return NextResponse.json({ error: "Only MAIN_IN passes support this action" }, { status: 400 });
+    }
+    if (gatePass.status !== "APPROVED") {
+      return NextResponse.json({ error: "Pass must be APPROVED before marking as IN" }, { status: 400 });
+    }
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: { status: "INITIATOR_IN" as any },
+    });
+
+    // Notify Security Officers at toLocation (where the vehicle is arriving)
+    const toLoc = gatePass.toLocation as string | null;
+    const securityWhere = toLoc
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: toLoc }
+      : { role: "SECURITY_OFFICER" as any };
+    const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+    if (securityOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: securityOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Incoming Vehicle — Confirm Gate IN",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Initiator confirmed vehicle is at the gate. Please confirm Gate IN entry.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    return NextResponse.json({ ok: true, status: "INITIATOR_IN" });
+  }
+
+  // SECURITY_OFFICER: confirm Gate IN for GATE_OUT MAIN_IN / SUB_OUT_IN passes, APPROVED SUB_IN, or INITIATOR_IN MAIN_IN
   if (action === "security_gate_in") {
     if (session.user.role !== "SECURITY_OFFICER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
@@ -146,14 +240,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const isMainIn   = gatePass.passSubType === "MAIN_IN";
     const isSubOutIn = gatePass.passSubType === "SUB_OUT_IN";
     const isSubIn    = gatePass.passSubType === "SUB_IN";
-    const isCd       = gatePass.passType === "CUSTOMER_DELIVERY";
     const isLT       = gatePass.passType === "LOCATION_TRANSFER";
 
     // SUB_IN: confirmed at APPROVED (Security B confirms vehicle entered ASO compound)
+    // MAIN_IN: confirmed at INITIATOR_IN (new flow) or GATE_OUT (legacy)
     // Others: confirmed at GATE_OUT
-    const validSubIn = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
-    const validGateOut = gatePass.status === "GATE_OUT" && (isMainIn || isSubOutIn || isCd || isLT);
-    if (!validSubIn && !validGateOut) {
+    const validSubIn     = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
+    const validGateOut   = gatePass.status === "GATE_OUT" && (isMainIn || isSubOutIn || isLT);
+    const validInitiatorIn = gatePass.status === "INITIATOR_IN" && isMainIn;
+    if (!validSubIn && !validGateOut && !validInitiatorIn) {
       return NextResponse.json({ error: "Not eligible for Security Gate IN confirmation" }, { status: 400 });
     }
 
@@ -171,14 +266,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data: {
         userId: gatePass.createdById,
         type: "GATE_PASS_RECEIVED",
-        title: isCd ? "Delivery Complete — Security Confirmed Gate IN"
-          : isSubOutIn ? "Vehicle Returned — Security Confirmed Gate IN"
+        title: isSubOutIn ? "Vehicle Returned — Security Confirmed Gate IN"
           : isSubIn ? "Vehicle Received at Sub-Location — Security Confirmed"
           : isLT ? "Vehicle Arrived at Destination — Security Confirmed Gate IN"
           : "Vehicle Arrived — Security Confirmed Gate IN",
-        message: isCd
-          ? `${gatePass.gatePassNumber} — Security Officer confirmed customer delivery is complete.`
-          : isSubOutIn
+        message: isSubOutIn
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle returned to DIMO via Gate IN.`
           : isSubIn
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle has entered the sub-location compound.`
@@ -239,10 +331,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Gate pass must be APPROVED or initiator-confirmed" }, { status: 400 });
     }
 
+    const now = new Date();
+    const actualDepartureDate = now.toISOString().split("T")[0]; // "YYYY-MM-DD"
+    const actualDepartureTime = now.toTimeString().slice(0, 5);   // "HH:MM"
+
+    // Customer Delivery: vehicle goes directly to customer — complete immediately on Gate OUT
+    const isCdPass = gatePass.passType === "CUSTOMER_DELIVERY";
+
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
-        status: "GATE_OUT",
+        status: isCdPass ? "COMPLETED" : "GATE_OUT",
+        departureDate: actualDepartureDate,
+        departureTime: actualDepartureTime,
         ...(mismatchNote ? { comments: `[MISMATCH] ${mismatchNote}` } : {}),
       },
     });
@@ -252,8 +353,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data: {
         userId: gatePass.createdById,
         type: "GATE_PASS_APPROVED",
-        title: "Security Confirmed Gate OUT",
-        message: `${gatePass.gatePassNumber} — Security Officer confirmed Gate OUT. Vehicle has been released.`,
+        title: isCdPass ? "Security Confirmed Gate OUT — Delivery Complete" : "Security Confirmed Gate OUT",
+        message: isCdPass
+          ? `${gatePass.gatePassNumber} — Security Officer confirmed Gate OUT. Customer delivery is complete.`
+          : `${gatePass.gatePassNumber} — Security Officer confirmed Gate OUT. Vehicle has been released.`,
         gatePassId: gatePass.id,
       },
     });
@@ -335,9 +438,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.status !== "APPROVED") {
       return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
     }
-    // MAIN_OUT and LOCATION_TRANSFER passes must go through Security Officer directly
-    if ((gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") || gatePass.passType === "LOCATION_TRANSFER") {
-      return NextResponse.json({ error: "This pass must be released by Security Officer" }, { status: 403 });
+    // MAIN_OUT, LOCATION_TRANSFER, and CUSTOMER_DELIVERY passes must go through Security Officer directly
+    // MAIN_IN uses initiator_gate_in action (not gate_out)
+    if (
+      (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||
+      (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_IN") ||
+      gatePass.passType === "LOCATION_TRANSFER" ||
+      gatePass.passType === "CUSTOMER_DELIVERY"
+    ) {
+      return NextResponse.json({ error: "This pass must be processed via the correct action" }, { status: 403 });
     }
 
     // SUB_OUT: two-step — initiator confirms first (INITIATOR_OUT), then security confirms GATE_OUT

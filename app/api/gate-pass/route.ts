@@ -19,14 +19,20 @@ export async function GET(req: NextRequest) {
   const role = session.user.role;
   const where: Record<string, unknown> = {};
 
-  if (role === "INITIATOR") {
-    // INITIATOR sees own passes AND sub-passes linked to their main passes
-    where.AND = [{
-      OR: [
-        { createdById: session.user.id },
-        { parentPass: { createdById: session.user.id } },
-      ]
-    }];
+  if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
+    if (status === "DRAFT") {
+      // DRAFT passes are created by security officers — all Initiators/SAs can see and complete them
+      where.AND = [{ status: "DRAFT" }];
+    } else if (role === "INITIATOR") {
+      // INITIATOR sees own passes AND sub-passes linked to their main passes
+      where.AND = [{
+        OR: [
+          { createdById: session.user.id },
+          { parentPass: { createdById: session.user.id } },
+        ]
+      }];
+    }
+    // SERVICE_ADVISOR (non-DRAFT): sees all passes (fall through)
   } else if (role === "AREA_SALES_OFFICER") {
     // ASO sees their own passes + AFTER_SALES passes destined for their location
     // UNLESS locationView=true (Vehicles Incoming dashboard) or searching by GP number
@@ -73,6 +79,9 @@ export async function GET(req: NextRequest) {
     where.status = status;
   }
 
+  // CD approver queue: only PENDING_APPROVAL (credit passes routed here at creation)
+  // IMMEDIATE passes go directly to CASHIER_REVIEW; INVOICED go directly to APPROVED
+
   // For approver AFTER_SALES queue: include CASHIER_REVIEW passes with credit pending
   if (passType === "AFTER_SALES" && status === "PENDING_APPROVAL") {
     delete (where as any).status;
@@ -104,9 +113,14 @@ export async function GET(req: NextRequest) {
   const passSubType = searchParams.get("passSubType");
   if (passSubType) where.passSubType = passSubType;
 
+  const updatedAfter = searchParams.get("updatedAfter");
+  if (updatedAfter) {
+    (where as any).updatedAt = { gte: new Date(updatedAfter) };
+  }
+
   try {
     const [total, passes] = await Promise.all([
-      prisma.gatePass.count({ where }),
+      prisma.gatePass.count({ where: where as any }),
       prisma.gatePass.findMany({
         where,
         include: {
@@ -120,7 +134,7 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: "desc" },
         skip,
         take: limit,
-      }),
+      } as any),
     ]);
     return NextResponse.json({ passes, total, page, totalPages: Math.ceil(total / limit) });
   } catch (err) {
@@ -132,7 +146,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
   const session = await getServerSession(authOptions);
-  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER"];
+  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR"];
   if (!session || !allowedRoles.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -201,17 +215,18 @@ export async function POST(req: NextRequest) {
   if (body.passType === "AFTER_SALES" && body.serviceJobNo) {
     createData.serviceJobNo = body.serviceJobNo;
   }
-  // Store invoice flag hint from frontend (server-side will confirm below)
-  if (body.passType === "CUSTOMER_DELIVERY" && typeof body.isInvoiced === "boolean") {
-    createData.paymentType = body.isInvoiced ? "INVOICED" : "NOT_INVOICED";
-  }
 
   const gatePass = await (prisma.gatePass.create as any)({
     data: createData,
   });
 
-  // CUSTOMER_DELIVERY: auto-fetch SAP orders at creation, store invoice data, set paymentType authoritatively
+  // CUSTOMER_DELIVERY: auto-route based on SAP payTerm at creation
+  // IMMEDIATE payment terms → Cashier (CASHIER_REVIEW)
+  // CREDIT payment terms   → Approver (PENDING_APPROVAL)
+  // No SAP data / unknown  → Approver (PENDING_APPROVAL, safe default)
   if (body.passType === "CUSTOMER_DELIVERY") {
+    const immediateTerms = ["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"];
+
     try {
       const { fetchSapOrders } = await import("@/lib/sap");
       const chassisNo = (createData.chassis as string | null) ?? "";
@@ -220,24 +235,60 @@ export async function POST(req: NextRequest) {
       const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
 
       if (active.length > 0) {
-        // Store each order — use payTerm field to store "HSTAT:<code>|<billingType>" for approver display
+        // Store SAP orders for display
         await prisma.serviceOrder.createMany({
           data: active.map((o) => ({
-            gatePassId: gatePass.id,
+            gatePassId:  gatePass.id,
             orderId:     o.orderId,
             orderStatus: o.orderStatus || o.orderStatusCode || "—",
             payTerm:     `HSTAT:${o.orderStatusCode}|${o.billingType}|${o.billingDate}`,
             isAssigned:  o.orderStatusCode === "H070",
           })),
         });
-        const isInvoiced = active.some((o) => o.orderStatusCode === "H070");
-        await prisma.$executeRaw`UPDATE "GatePass" SET "paymentType" = ${isInvoiced ? "INVOICED" : "NOT_INVOICED"} WHERE id = ${gatePass.id}`;
-        gatePass.paymentType = isInvoiced ? "INVOICED" : "NOT_INVOICED";
+
+        // Route based on payTerm ONLY (H070/invoice status is irrelevant for payment routing)
+        const hasImmediate = active.some((o) =>
+          immediateTerms.includes((o.payTerm || o.payTermCode || "").toLowerCase().trim())
+        );
+        const hasCredit = active.some((o) => {
+          const t = (o.payTerm || o.payTermCode || "").toLowerCase().trim();
+          return t !== "" && !immediateTerms.includes(t);
+        });
+
+        if (hasImmediate) {
+          // Immediate payment (or mixed) → Cashier; immediate always takes priority
+          await prisma.gatePass.update({
+            where: { id: gatePass.id },
+            data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
+          });
+          gatePass.status = "CASHIER_REVIEW";
+          const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+          if (cashiers.length > 0) {
+            await prisma.notification.createMany({
+              data: cashiers.map((c) => ({
+                userId: c.id,
+                type: "CASHIER_REVIEW_REQUIRED",
+                title: "CD Payment Clearance Required",
+                message: `${gatePassNumber} (${gatePass.vehicle}) — Customer Delivery, immediate payment. Please confirm payment clearance.`,
+                gatePassId: gatePass.id,
+              })),
+            });
+          }
+          return NextResponse.json({ gatePass }, { status: 201 });
+        } else if (hasCredit) {
+          // Only credit orders → Approver
+          await prisma.gatePass.update({
+            where: { id: gatePass.id },
+            data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
+          });
+          gatePass.status = "PENDING_APPROVAL";
+        }
       }
     } catch (err) {
-      console.error("[CD] SAP invoice fetch error:", err);
-      // Non-fatal — pass is still created; paymentType stays as frontend-provided hint
+      console.error("[CD] SAP fetch error:", err);
+      // Non-fatal — status stays PENDING_APPROVAL, Approver will decide
     }
+    // Fall through to standard Approver notification below
   }
 
   // MAIN_OUT: auto-fetch SAP orders at creation, detect payment types, notify CASHIER + APPROVER in parallel

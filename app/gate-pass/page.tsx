@@ -20,13 +20,15 @@ type GatePass = {
 };
 
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
-  PENDING_APPROVAL: { label: "Pending Approval", bg: "#fff7ed", color: "#c2410c", dot: "#f97316" },
-  APPROVED:         { label: "Approved",          bg: "#f0fdf4", color: "#15803d", dot: "#22c55e" },
-  REJECTED:         { label: "Rejected",          bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
-  INITIATOR_OUT:    { label: "Awaiting Security",   bg: "#f5f3ff", color: "#6d28d9", dot: "#a855f7" },
-  GATE_OUT:         { label: "Gate Out",           bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
-  COMPLETED:        { label: "Completed",          bg: "#f5f3ff", color: "#5b21b6", dot: "#a855f7" },
-  CANCELLED:        { label: "Cancelled",          bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
+  DRAFT:            { label: "Pending Completion", bg: "#fffbeb", color: "#92400e", dot: "#f59e0b" },
+  PENDING_APPROVAL: { label: "Pending Approval",   bg: "#fff7ed", color: "#c2410c", dot: "#f97316" },
+  APPROVED:         { label: "Approved",            bg: "#f0fdf4", color: "#15803d", dot: "#22c55e" },
+  REJECTED:         { label: "Rejected",            bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
+  INITIATOR_OUT:    { label: "Awaiting Security OUT", bg: "#f5f3ff", color: "#6d28d9", dot: "#a855f7" },
+  INITIATOR_IN:     { label: "Awaiting Security IN",  bg: "#ecfdf5", color: "#065f46", dot: "#10b981" },
+  GATE_OUT:         { label: "Gate Out",            bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" },
+  COMPLETED:        { label: "Completed",           bg: "#f5f3ff", color: "#5b21b6", dot: "#a855f7" },
+  CANCELLED:        { label: "Cancelled",           bg: "#f9fafb", color: "#6b7280", dot: "#9ca3af" },
   CASHIER_REVIEW:   { label: "Cashier Review",      bg: "#fef3c7", color: "#b45309", dot: "#f59e0b" },
 };
 
@@ -69,11 +71,12 @@ export default function GatePassListPage() {
   const isInitiator = session?.user?.role === "INITIATOR";
   const isASO = session?.user?.role === "AREA_SALES_OFFICER";
   const [gatingInId, setGatingInId] = useState<string | null>(null);
+  const [markingInId, setMarkingInId] = useState<string | null>(null);
 
   // Styled confirm modal (replaces browser confirm())
   type ConfirmModal = {
     id: string;
-    action: "gate_out" | "gate_in" | "cancel";
+    action: "gate_out" | "gate_in" | "initiator_gate_in" | "cancel";
     icon: "out" | "in" | "cancel";
     title: string;
     message: string;
@@ -138,6 +141,16 @@ export default function GatePassListPage() {
     });
   }
 
+  function askMarkIn(p: GatePass) {
+    setConfirmModal({
+      id: p.id, action: "initiator_gate_in", icon: "in",
+      title: "Mark Vehicle as IN",
+      message: `Vehicle ${p.vehicle} (${p.gatePassNumber}) is at the gate. This will notify the Security Officer at ${p.toLocation || "your location"} to confirm Gate IN entry.`,
+      confirmLabel: "Mark as IN — Notify Security",
+      confirmColor: "#059669",
+    });
+  }
+
   function askCancel(id: string) {
     setConfirmModal({
       id, action: "cancel", icon: "cancel",
@@ -164,6 +177,12 @@ export default function GatePassListPage() {
         await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "gate_in" }) });
         fetchPasses();
       } finally { setGatingInId(null); }
+    } else if (action === "initiator_gate_in") {
+      setMarkingInId(id);
+      try {
+        await fetch(`/api/gate-pass/${id}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "initiator_gate_in" }) });
+        fetchPasses();
+      } finally { setMarkingInId(null); }
     } else if (action === "cancel") {
       setCancellingId(id);
       try {
@@ -480,17 +499,21 @@ export default function GatePassListPage() {
                     const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
                     const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
                     const canCancel  = p.status === "PENDING_APPROVAL";
-                    // CD: standard gate_out when APPROVED (LT and MAIN_OUT go directly to Security — no initiator gate_out)
-                    // For AFTER_SALES: INITIATOR can gate_out their own MAIN_IN and SUB_OUT; ASO can gate_out SUB_OUT_IN
+                    // LT, CD, and MAIN_OUT go directly to Security — no initiator gate_out needed
+                    // MAIN_IN uses initiator_gate_in (Mark as IN → security confirms)
+                    // For AFTER_SALES: INITIATOR can gate_out their SUB_OUT; ASO can gate_out SUB_OUT_IN
                     const canGateOut = p.status === "APPROVED" && (
-                      p.passType === "CUSTOMER_DELIVERY"
-                        ? true
-                        : (isInitiator && ["MAIN_IN", "SUB_OUT"].includes(p.passSubType ?? ""))
-                          || (isASO && p.passSubType === "SUB_OUT_IN")
+                      (isInitiator && p.passType === "AFTER_SALES" && p.passSubType === "SUB_OUT")
+                      || (isASO && p.passType === "AFTER_SALES" && p.passSubType === "SUB_OUT_IN")
                     );
 
-                    // For AFTER_SALES GATE_OUT: INITIATOR/ASO can confirm arrived (gate_in → COMPLETED)
+                    // MAIN_IN: initiator marks as IN → security confirms (not initiator gate_in)
+                    const canMarkIn = isInitiator && p.passType === "AFTER_SALES"
+                      && p.passSubType === "MAIN_IN" && p.status === "APPROVED";
+
+                    // For AFTER_SALES GATE_OUT: ASO can confirm arrived (gate_in → COMPLETED); MAIN_IN handled by security
                     const canGateIn = p.passType === "AFTER_SALES" && p.status === "GATE_OUT"
+                      && p.passSubType !== "MAIN_IN"
                       && (isInitiator || isASO);
 
                     const gateOutLabel = p.passType !== "AFTER_SALES" ? "Gate Out"
@@ -527,6 +550,17 @@ export default function GatePassListPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                               </svg>
                             </button>
+                            {canMarkIn && (
+                              <button onClick={() => askMarkIn(p)} disabled={markingInId === p.id}
+                                className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"
+                                style={{ background: "#ecfdf5", borderColor: "#10b981", color: "#065f46", opacity: markingInId === p.id ? 0.5 : 1 }}
+                                title="Mark as IN — notify security to confirm gate entry">
+                                {markingInId === p.id
+                                  ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14" /></svg>}
+                                Mark as IN
+                              </button>
+                            )}
                             {canGateOut && (
                               <button onClick={() => askGateOut(p)} disabled={gatingOutId === p.id}
                                 className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"

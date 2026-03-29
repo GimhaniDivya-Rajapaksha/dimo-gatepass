@@ -19,6 +19,9 @@ type GatePass = {
   fromLocation: string | null;
   departureDate: string | null;
   serviceJobNo: string | null;
+  paymentType: string | null;
+  hasImmediate?: boolean;
+  cashierCleared?: boolean;
   createdBy: { name: string; email: string };
   createdAt: string;
   parentPass: { id: string; gatePassNumber: string; vehicle: string; serviceJobNo: string | null } | null;
@@ -632,19 +635,29 @@ export default function CashierReviewPage() {
   const router = useRouter();
 
   const [passes, setPasses] = useState<GatePass[]>([]);
+  const [cdPasses, setCdPasses] = useState<GatePass[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
+  const [clearingCdId, setClearingCdId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "success" | "info" } | null>(null);
+  const [activeTab, setActiveTab] = useState<"AFTER_SALES" | "CUSTOMER_DELIVERY">("AFTER_SALES");
 
   // All hooks must be declared before any conditional returns
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50&cashierPending=true");
-      const d = await res.json();
-      setPasses(d.passes ?? []);
-      setTotal(d.total ?? 0);
+      const [asRes, cdRes] = await Promise.all([
+        fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50&cashierPending=true"),
+        fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=CUSTOMER_DELIVERY&limit=50"),
+      ]);
+      const asData = await asRes.json();
+      const cdData = await cdRes.json();
+      const asPasses: GatePass[] = asData.passes ?? [];
+      const cdFiltered: GatePass[] = (cdData.passes ?? []).filter((p: GatePass) => p.hasImmediate && !p.cashierCleared);
+      setPasses(asPasses);
+      setCdPasses(cdFiltered);
+      setTotal((asData.total ?? 0) + cdFiltered.length);
     } finally {
       setLoading(false);
     }
@@ -679,8 +692,30 @@ export default function CashierReviewPage() {
     void fetchPasses();
   }
 
+  async function handleClearCd(passId: string) {
+    setClearingCdId(passId);
+    try {
+      const res = await fetch(`/api/gate-pass/${passId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_clear_cd" }),
+      });
+      const d = await res.json();
+      if (!res.ok) { showToast(d.error ?? "Failed to clear payment", "info"); return; }
+      showToast("Payment cleared — Security Officer notified for Gate OUT.", "success");
+      void fetchPasses();
+    } catch {
+      showToast("Network error", "info");
+    } finally {
+      setClearingCdId(null);
+    }
+  }
+
+  const asCount = passes.length;
+  const cdCount = cdPasses.length;
+
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col gap-0">
       {/* Toast */}
       <AnimatePresence>
         {toastMsg && (
@@ -691,9 +726,7 @@ export default function CashierReviewPage() {
               color:      toastMsg.type === "success" ? "#15803d" : "#1d4ed8",
               border: `1px solid ${toastMsg.type === "success" ? "#bbf7d0" : "#bfdbfe"}`,
             }}
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 40 }}
+            initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
           >
             <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {toastMsg.type === "success"
@@ -707,18 +740,20 @@ export default function CashierReviewPage() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Order Review</h1>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Payment Review</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
-            Review service orders and mark jobs as complete or escalate to approver
+            Clear payments and confirm gate release readiness
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 rounded-xl text-sm font-semibold"
-            style={{ background: "#fef3c7", color: "#b45309" }}>
-            {total} pending review
-          </div>
+          {total > 0 && (
+            <div className="px-3 py-1.5 rounded-xl text-sm font-semibold"
+              style={{ background: "#fef3c7", color: "#b45309" }}>
+              {total} pending
+            </div>
+          )}
           <button onClick={() => void fetchPasses()}
             className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-80 transition-opacity"
             style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
@@ -729,131 +764,184 @@ export default function CashierReviewPage() {
         </div>
       </div>
 
-      {/* Instructions banner */}
-      <div className="rounded-2xl border px-5 py-3 mb-4 flex items-start gap-3 flex-shrink-0"
-        style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
-        <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <div className="text-sm" style={{ color: "#1d4ed8" }}>
-          <span className="font-semibold">How it works: </span>
-          Open a pass → add the service orders → move fully-paid orders to <strong>Assigned</strong> →
-          click <strong>Proceed</strong>. If all are assigned → job is <strong>Completed</strong>.
-          If some remain → sent to <strong>Approver</strong> for partial payment approval.
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4">
+        {([
+          { key: "AFTER_SALES",       label: "Service / Repair",     count: asCount, icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
+          { key: "CUSTOMER_DELIVERY", label: "Customer Delivery",    count: cdCount, icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
+        ] as const).map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              style={active
+                ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
+                : { background: "var(--surface2)", color: "var(--text-muted)", border: "1px solid var(--border)" }
+              }
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
+              </svg>
+              {tab.label}
+              {tab.count > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold"
+                  style={active
+                    ? { background: "rgba(255,255,255,0.25)", color: "#fff" }
+                    : { background: "#ef4444", color: "#fff" }
+                  }
+                >
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Scrollable list */}
-      <div style={{ flex: "1 1 0", overflowY: "auto", minHeight: 0 }}>
+      <div>
         {loading ? (
-          <div className="flex items-center justify-center py-20">
+          <div className="flex items-center justify-center py-24">
             <svg className="animate-spin w-8 h-8" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
           </div>
-        ) : passes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-4">
-            <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
-              style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
-              <svg className="w-10 h-10" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="text-center">
-              <p className="text-base font-semibold" style={{ color: "var(--text)" }}>All clear!</p>
-              <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>No passes waiting for order review</p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {passes.map((p, i) => (
-              <motion.div
-                key={p.id}
-                className="rounded-2xl border p-5 flex items-center gap-5"
-                style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04 }}
-              >
-                {/* Left: pass info */}
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                    style={{ background: "#fef3c7" }}>
-                    <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                  </div>
-                  <div>
-                    <Link href={`/gate-pass/${p.id}`}
-                      className="text-sm font-bold font-mono hover:underline"
-                      style={{ color: "var(--accent)" }}>
-                      {p.gatePassNumber}
-                    </Link>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {fmtDate(p.createdAt)} · {p.createdBy.name}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-
-                {/* Vehicle */}
-                <div className="flex-shrink-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Vehicle</p>
-                  <p className="text-sm font-bold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
-                  {p.chassis && <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
-                </div>
-
-                <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-
-                {/* Journey */}
-                <div className="flex-shrink-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Main OUT from</p>
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span style={{ color: "var(--text)" }}>{p.fromLocation || "—"}</span>
-                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                    </svg>
-                    <span className="font-medium" style={{ color: "var(--accent)" }}>{p.toLocation || "—"}</span>
-                  </div>
-                </div>
-
-                {/* Service Job No */}
-                {(p.serviceJobNo || p.parentPass?.serviceJobNo) && (
-                  <>
-                    <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-                    <div className="flex-shrink-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Job No</p>
-                      <p className="text-sm font-mono font-bold" style={{ color: "#b45309" }}>
-                        {p.serviceJobNo ?? p.parentPass?.serviceJobNo}
-                      </p>
+        ) : activeTab === "AFTER_SALES" ? (
+          /* ── After Sales tab ── */
+          passes.length === 0 ? (
+            <EmptyState icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" title="All clear!" sub="No service passes awaiting order review" />
+          ) : (
+            <>
+              <div className="rounded-2xl border px-4 py-3 mb-3 flex items-center gap-2.5"
+                style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs" style={{ color: "#1d4ed8" }}>
+                  Open a pass → assign fully-paid orders → <strong>Proceed</strong>. Uncleared orders escalate to Approver.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {passes.map((p, i) => (
+                  <motion.div key={p.id}
+                    className="rounded-2xl border p-4 flex items-center gap-4"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  >
+                    {/* Icon + GP number */}
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#fef3c7" }}>
+                      <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
                     </div>
-                  </>
-                )}
 
-                <div className="flex-1" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link href={`/gate-pass/${p.id}`} className="text-sm font-bold font-mono hover:underline" style={{ color: "var(--accent)" }}>
+                          {p.gatePassNumber}
+                        </Link>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
+                          Awaiting Review
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        <p className="text-sm font-semibold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                        {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
+                        {(p.serviceJobNo || p.parentPass?.serviceJobNo) && (
+                          <span className="text-xs font-semibold" style={{ color: "#b45309" }}>
+                            Job: {p.serviceJobNo ?? p.parentPass?.serviceJobNo}
+                          </span>
+                        )}
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(p.createdAt)} · {p.createdBy.name}</span>
+                      </div>
+                    </div>
 
-                {/* Cashier Review badge */}
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0"
-                  style={{ background: "#fef3c7", color: "#b45309" }}>
-                  Awaiting Review
-                </span>
+                    <button
+                      onClick={() => setModalPass(p)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      </svg>
+                      Review Orders
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )
 
-                {/* Review button */}
-                <button
-                  onClick={() => setModalPass(p)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow transition-all hover:opacity-90 flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                  </svg>
-                  Review Orders
-                </button>
-              </motion.div>
-            ))}
-          </div>
+        ) : (
+          /* ── Customer Delivery tab ── */
+          cdPasses.length === 0 ? (
+            <EmptyState icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" title="All clear!" sub="No Customer Delivery passes awaiting payment clearance" />
+          ) : (
+            <>
+              <div className="rounded-2xl border px-4 py-3 mb-3 flex items-center gap-2.5"
+                style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}>
+                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs" style={{ color: "#15803d" }}>
+                  Confirm customer has paid in full before releasing the vehicle for Gate OUT.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {cdPasses.map((p, i) => (
+                  <motion.div key={p.id}
+                    className="rounded-2xl border p-4 flex items-center gap-4"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  >
+                    {/* Icon */}
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#fef3c7" }}>
+                      <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link href={`/gate-pass/${p.id}`} className="text-sm font-bold font-mono hover:underline" style={{ color: "var(--accent)" }}>
+                          {p.gatePassNumber}
+                        </Link>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
+                          Awaiting Review
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        <p className="text-sm font-semibold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                        {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(p.createdAt)} · {p.createdBy.name}</span>
+                      </div>
+                    </div>
+
+                    {/* Confirm Payment Cleared */}
+                    <button
+                      onClick={() => void handleClearCd(p.id)}
+                      disabled={clearingCdId === p.id}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 disabled:opacity-60 flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}
+                    >
+                      {clearingCdId === p.id
+                        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      }
+                      {clearingCdId === p.id ? "Processing…" : "Confirm Payment Cleared"}
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )
         )}
       </div>
 
@@ -867,6 +955,23 @@ export default function CashierReviewPage() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, sub }: { icon: string; title: string; sub: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4">
+      <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
+        style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
+        <svg className="w-10 h-10" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} />
+        </svg>
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold" style={{ color: "var(--text)" }}>{title}</p>
+        <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>{sub}</p>
+      </div>
     </div>
   );
 }
