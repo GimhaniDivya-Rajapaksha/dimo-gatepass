@@ -8,6 +8,7 @@ export default async function DashboardIndexPage() {
 
   const role = session.user.role;
   if (role === "INITIATOR") redirect("/initiator");
+  if (role === "SERVICE_ADVISOR") redirect("/initiator");
   if (role === "APPROVER") redirect("/approver");
   if (role === "RECIPIENT") redirect("/recipient");
   if (role === "CASHIER") redirect("/cashier");
