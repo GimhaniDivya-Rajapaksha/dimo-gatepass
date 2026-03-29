@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const field = searchParams.get("field") as LookupField | null;
   const q = normalize(searchParams.get("q") ?? "");
-  const take = Math.min(parseInt(searchParams.get("limit") ?? "20", 10), 50);
+  const rawLimit = parseInt(searchParams.get("limit") ?? "20", 10);
+  // Locations need a higher cap to show full lists without typing
+  const take = field === "location" ? Math.min(rawLimit, 500) : Math.min(rawLimit, 50);
   const locationType = searchParams.get("locationType") ?? undefined;
 
   if (!field) return NextResponse.json({ options: [] });

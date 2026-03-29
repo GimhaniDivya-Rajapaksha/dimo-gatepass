@@ -30,7 +30,7 @@ function Field({ children, label: lbl, required, error, className = "" }: {
   );
 }
 
-function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption }: {
+function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption, loading }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -39,6 +39,7 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
   options?: LookupOption[];
   onSelect?: (o: LookupOption) => void;
   renderOption?: (o: LookupOption) => React.ReactNode;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,13 +63,28 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         className="w-full border rounded-xl px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
         style={{ background: "var(--surface2)", borderColor: error ? "#f87171" : "var(--border)", color: "var(--text)" }}
       />
-      <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
+      {loading ? (
+        <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+        </svg>
+      ) : (
+        <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      )}
       {open && (
         <div className="absolute z-30 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-          {options && options.length > 0 ? (
+          {loading ? (
+            <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+              Loading…
+            </p>
+          ) : options && options.length > 0 ? (
             options.map((o) => (
               <button
                 key={o.id}
@@ -573,6 +589,7 @@ export default function CreateGatePassPage() {
     location: [], outReason: [], vehicle: [],
     approver: [], companyName: [], carrierRegNo: [],
   });
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD" for min date constraint
 
@@ -672,8 +689,11 @@ export default function CreateGatePassPage() {
   }, [status]);
 
   const fetchLookup = async (field: LookupField, q = "", lt_type?: string) => {
+    if (field === "location") setLocationLoading(true);
     try {
-      const params = new URLSearchParams({ field, q, limit: "40" });
+      // Use higher limit for locations so full lists appear without typing
+      const limit = field === "location" ? "300" : "40";
+      const params = new URLSearchParams({ field, q, limit });
       if (field === "location" && lt_type) params.set("locationType", lt_type);
       // Tell the vehicle lookup which SAP API to query based on current pass type
       if (field === "vehicle" && passType && passType !== "AFTER_SALES") {
@@ -685,6 +705,8 @@ export default function CreateGatePassPage() {
       setLookupOptions((prev) => ({ ...prev, [field]: data.options ?? [] }));
     } catch {
       // silently keep existing options
+    } finally {
+      if (field === "location") setLocationLoading(false);
     }
   };
 
@@ -2261,9 +2283,10 @@ export default function CreateGatePassPage() {
                     <SearchInput
                       value={lt.toLocation}
                       onChange={(v) => { setL("toLocation", v); setSelectedLocationDetail(null); void fetchLookup("location", v, locationType || undefined); }}
-                      onFocus={() => void fetchLookup("location", lt.toLocation, locationType || undefined)}
+                      onFocus={() => { if (lookupOptions.location.length === 0) void fetchLookup("location", lt.toLocation, locationType || undefined); }}
                       placeholder="Search location"
                       error={errors.toLocation}
+                      loading={locationLoading}
                       options={lookupOptions.location}
                       onSelect={(o) => {
                         setSelectedLocationDetail({
