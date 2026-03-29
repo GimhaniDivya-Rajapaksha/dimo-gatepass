@@ -1,5 +1,6 @@
 "use client";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import TimePicker from "@/components/ui/TimePicker";
 import { useState, useEffect, useRef } from "react";
@@ -135,7 +136,7 @@ function GridField({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-export default function InitiatorGatePassDetailPage() {
+function InitiatorGatePassDetailPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1762,5 +1763,13 @@ export default function InitiatorGatePassDetailPage() {
 
       </motion.div>
     </>
+  );
+}
+
+export default function InitiatorGatePassDetailPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)" }}>Loading…</div>}>
+      <InitiatorGatePassDetailPageInner />
+    </Suspense>
   );
 }

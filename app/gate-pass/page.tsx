@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -53,7 +53,7 @@ function getCurrentLocation(p: GatePass): { label: string; inTransit: boolean; c
   return { label: last?.toLocation || p.toLocation || "?", inTransit: false, completed: false };
 }
 
-export default function GatePassListPage() {
+function GatePassListPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [passes, setPasses] = useState<GatePass[]>([]);
@@ -693,6 +693,14 @@ export default function GatePassListPage() {
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+export default function GatePassListPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)" }}>Loading…</div>}>
+      <GatePassListPageInner />
+    </Suspense>
   );
 }
 
