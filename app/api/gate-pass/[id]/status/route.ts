@@ -361,19 +361,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // Notify SECURITY + RECIPIENT at toLocation for Location Transfer
+    // Notify SECURITY + INITIATOR at toLocation for Location Transfer
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc
-        ? { defaultLocation: toLoc }
-        : {};
+      const locationFilter = toLoc ? { defaultLocation: toLoc } : {};
 
-      const [destSecurity, destRecipients] = await Promise.all([
+      const [destSecurity, destInitiators] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "RECIPIENT", ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
       ]);
 
-      const allDestUsers = [...destSecurity, ...destRecipients];
+      const allDestUsers = [...destSecurity, ...destInitiators];
       if (allDestUsers.length > 0) {
         await prisma.notification.createMany({
           data: allDestUsers.map((u) => ({
@@ -381,10 +379,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             type: "GATE_PASS_RECEIVED",
             title: destSecurity.some(s => s.id === u.id)
               ? "Incoming Vehicle — Confirm Gate IN on Arrival"
-              : "Vehicle Departing — Confirm Gate IN When It Arrives",
+              : "Vehicle Arriving — Confirm Gate IN When It Reaches You",
             message: destSecurity.some(s => s.id === u.id)
               ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security at FROM location confirmed Gate OUT. Vehicle is en route to ${toLoc ?? "your location"}. Please confirm Gate IN when it arrives.`
-              : `Gate pass ${gatePass.gatePassNumber} — Security confirmed Gate OUT. Vehicle is heading to ${toLoc ?? "your location"}. Please confirm when vehicle arrives.`,
+              : `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm when it arrives.`,
             gatePassId: gatePass.id,
           })),
         });
@@ -573,15 +571,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
     } else {
-      // Non-AFTER_SALES: notify all RECIPIENTs
-      const recipients = await prisma.user.findMany({ where: { role: "RECIPIENT" } });
-      if (recipients.length > 0) {
+      // Non-AFTER_SALES (LT): notify INITIATORs at toLocation
+      const toLoc = gatePass.toLocation as string | null;
+      const locationFilter = toLoc ? { defaultLocation: toLoc } : {};
+      const destInitiators = await prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } });
+      if (destInitiators.length > 0) {
         await prisma.notification.createMany({
-          data: recipients.map((r) => ({
+          data: destInitiators.map((r) => ({
             userId: r.id,
             type: "GATE_PASS_RECEIVED",
-            title: "Vehicle En Route",
-            message: `Gate pass ${gatePass.gatePassNumber} has been marked as Gate Out. Vehicle is on the way.`,
+            title: "Vehicle Arriving — Action Required",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm when it arrives.`,
             gatePassId: gatePass.id,
           })),
         });
@@ -599,8 +599,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const recipientAllowed = session.user.role === "RECIPIENT"
       && (gatePass.passType !== "AFTER_SALES"
           || ["MAIN_IN", "MAIN_OUT", "SUB_OUT"].includes(gatePass.passSubType ?? ""));
+    // INITIATOR can confirm gate_in for LT passes heading to their location, and AFTER_SALES
+    const initiatorAllowed = session.user.role === "INITIATOR"
+      && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES");
     const canGateIn = recipientAllowed
-      || ((session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER") && gatePass.passType === "AFTER_SALES");
+      || initiatorAllowed
+      || (session.user.role === "AREA_SALES_OFFICER" && gatePass.passType === "AFTER_SALES");
     if (!canGateIn) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
