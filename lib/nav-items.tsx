@@ -62,6 +62,11 @@ const OrdersReportIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
   </svg>
 );
+const ArrivalsIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" />
+  </svg>
+);
 
 const UsersIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -97,7 +102,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
     { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
     { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon /> },
-    { label: "Sent to Recipient", href: "/gate-pass?status=GATE_OUT", icon: <BoxIcon /> },
+    { label: "Vehicle Arrivals", href: "/gate-pass/receive", icon: <ArrivalsIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],

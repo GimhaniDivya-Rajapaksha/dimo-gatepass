@@ -38,7 +38,8 @@ export default function ReceivePage() {
   const [acknowledging, setAcknowledging]   = useState<string | null>(null);
 
   useEffect(() => {
-    if (status === "authenticated" && session?.user?.role !== "RECIPIENT") {
+    const allowedRoles = ["RECIPIENT", "INITIATOR", "SERVICE_ADVISOR"];
+    if (status === "authenticated" && !allowedRoles.includes(session?.user?.role ?? "")) {
       router.replace("/");
     }
   }, [status, session, router]);
@@ -100,7 +101,7 @@ export default function ReceivePage() {
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold" style={{ color: "var(--text)" }}>
-          <span className="font-normal">Recipient</span> Dashboard
+          Vehicle <span className="font-normal">Arrivals</span>
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
           Confirm vehicle arrivals for Location Transfer passes

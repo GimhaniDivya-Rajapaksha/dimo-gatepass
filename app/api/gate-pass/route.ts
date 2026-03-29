@@ -23,6 +23,15 @@ export async function GET(req: NextRequest) {
     if (status === "DRAFT") {
       // DRAFT passes are created by security officers — all Initiators/SAs can see and complete them
       where.AND = [{ status: "DRAFT" }];
+    } else if (status === "GATE_OUT" && role === "INITIATOR") {
+      // Vehicle arrivals: show own GATE_OUT passes + any pass heading to their location
+      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+      const orClauses: unknown[] = [
+        { createdById: session.user.id },
+        { parentPass: { createdById: session.user.id } },
+      ];
+      if (myLocation) orClauses.push({ toLocation: myLocation });
+      where.AND = [{ OR: orClauses }];
     } else if (role === "INITIATOR") {
       // INITIATOR sees own passes AND sub-passes linked to their main passes
       where.AND = [{
