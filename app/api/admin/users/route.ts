@@ -26,6 +26,6 @@ export async function GET() {
     return NextResponse.json(users);
   } catch (e) {
     console.error("Admin users error:", e);
-    return NextResponse.json([], { status: 200 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "DB error" }, { status: 500 });
   }
 }

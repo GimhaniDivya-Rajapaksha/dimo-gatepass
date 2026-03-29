@@ -525,6 +525,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
@@ -538,10 +539,16 @@ export default function AdminPage() {
   }, [status, session, router]);
 
   const loadUsers = () => {
+    setLoading(true);
+    setLoadError(null);
     fetch("/api/admin/users")
-      .then(r => r.ok ? r.json() : [])
+      .then(async r => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        return d;
+      })
       .then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(e => { setLoadError(e.message); setLoading(false); });
   };
 
   useEffect(() => { loadUsers(); }, []);
@@ -697,7 +704,14 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {loadError ? (
+                  <tr><td colSpan={5} className="text-center py-16">
+                    <p style={{ color: "#ef4444", marginBottom: "0.75rem" }}>Failed to load users: {loadError}</p>
+                    <button onClick={loadUsers} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#2563eb" }}>Retry</button>
+                  </td></tr>
+                ) : loading ? (
+                  <tr><td colSpan={5} className="text-center py-16" style={{ color: "var(--text-muted)" }}>Loading users…</td></tr>
+                ) : filtered.length === 0 ? (
                   <tr><td colSpan={5} className="text-center py-16" style={{ color: "var(--text-muted)" }}>No users found</td></tr>
                 ) : filtered.map((user, i) => (
                   <motion.tr key={user.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
