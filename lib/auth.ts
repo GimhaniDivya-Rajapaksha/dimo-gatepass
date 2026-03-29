@@ -17,12 +17,17 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        // Use raw SQL to bypass stale Prisma client enum validation (CASHIER, AREA_SALES_OFFICER not in generated client)
-        const rows = await prisma.$queryRaw<{ id: string; name: string; email: string; passwordHash: string; role: string | null }[]>`
-          SELECT id, name, email, "passwordHash", role::text FROM "User" WHERE email = ${credentials.email} LIMIT 1
-        `;
-        const user = rows[0];
+        let rows: { id: string; name: string; email: string; passwordHash: string; role: string | null }[];
+        try {
+          rows = await prisma.$queryRaw<{ id: string; name: string; email: string; passwordHash: string; role: string | null }[]>`
+            SELECT id, name, email, "passwordHash", role::text FROM "User" WHERE email = ${credentials.email} LIMIT 1
+          `;
+        } catch (e) {
+          console.error("[auth] DB error during login:", e instanceof Error ? e.message : e);
+          throw new Error("Database unavailable. Please try again in a moment.");
+        }
 
+        const user = rows[0];
         if (!user) return null;
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);

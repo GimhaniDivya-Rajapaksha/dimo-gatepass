@@ -37,7 +37,12 @@ export default function LoginPage() {
     const result = await signIn("credentials", { email, password, redirect: false });
 
     if (result?.error) {
-      setError("Invalid email or password. Please try again.");
+      const msg = result.error.toLowerCase();
+      if (msg.includes("database") || msg.includes("unavailable") || msg.includes("pool") || msg.includes("maxclients")) {
+        setError("Database temporarily unavailable. Please wait a moment and try again.");
+      } else {
+        setError("Invalid email or password. Please try again.");
+      }
       setLoading(false);
       return;
     }
