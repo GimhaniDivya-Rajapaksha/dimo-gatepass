@@ -914,6 +914,7 @@ export default function CreateGatePassPage() {
       else if (!e.arrivalDate && isPastDateTime(sr.arrivalDate, sr.arrivalTime)) e.arrivalTime = "Arrival time cannot be in the past";
     } else {
       if (!cd.vehicle) e.vehicle = "Vehicle is required";
+      if (!cd.approver) e.approver = "Approver is required";
       if (!cd.departureDate) e.departureDate = "Departure date is required";
       else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
       if (!cd.departureTime) e.departureTime = "Departure time is required";
@@ -2641,6 +2642,32 @@ export default function CreateGatePassPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Approver — Customer Delivery */}
+                  <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                    <SectionTitle>Approver</SectionTitle>
+                    <Field label="Approver" required error={errors.approver}>
+                      {assignedApprover ? (
+                        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                          <span className="font-medium">{assignedApprover.name}</span>
+                          <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
+                        </div>
+                      ) : (
+                        <SearchInput
+                          value={cd.approver}
+                          onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
+                          onFocus={() => void fetchLookup("approver", cd.approver)}
+                          placeholder="Search approver"
+                          error={errors.approver}
+                          options={lookupOptions.approver}
+                        />
+                      )}
+                    </Field>
+                  </div>
 
                   {/* Gate Out */}
                   <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
