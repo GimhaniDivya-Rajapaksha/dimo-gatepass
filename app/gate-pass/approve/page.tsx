@@ -122,6 +122,7 @@ export default function ApproverListPage() {
                     ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
                     : { background: "var(--surface2)", color: "var(--text-muted)" }
                   }
+                  suppressHydrationWarning
                 >
                   {label}
                   {cnt > 0 && (
@@ -147,6 +148,7 @@ export default function ApproverListPage() {
               placeholder="Search passes..."
               className="w-full border rounded-xl px-4 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              suppressHydrationWarning
             />
             <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

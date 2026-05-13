@@ -2,12 +2,126 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
+
+function normalizeEnv(value?: string) {
+  if (!value) return undefined;
+  let normalized = value.trim();
+  normalized = normalized.replace(/\\r\\n$/g, "").replace(/\\n$/g, "");
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized || undefined;
+}
+
+async function loadUserClaims(params: { id?: string; email?: string }) {
+  const id = normalizeEnv(params.id);
+  const email = normalizeEnv(params.email)?.toLowerCase();
+
+  if (!id && !email) return null;
+
+  return prisma.user.findFirst({
+    where: id ? { id } : { email },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      defaultLocation: true,
+      approver: { select: { name: true } },
+    },
+  });
+}
+
+async function ensureAzureUser(params: { email: string; name?: string | null }) {
+  const email = normalizeEnv(params.email)?.toLowerCase();
+
+  if (!email) return null;
+  const name = normalizeEnv(params.name ?? undefined) || email;
+
+  const existing = await loadUserClaims({ email }).catch(() => null);
+  if (existing) return existing;
+
+  const passwordHash = await bcrypt.hash(randomBytes(24).toString("hex"), 10);
+
+  try {
+    const created = await prisma.user.create({
+      data: {
+        email,
+        name,
+        passwordHash,
+        role: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        defaultLocation: true,
+        approver: { select: { name: true } },
+      },
+    });
+    return created;
+  } catch {
+    return loadUserClaims({ email }).catch(() => null);
+  }
+}
+
+const azureClientId = normalizeEnv(process.env.AZURE_AD_CLIENT_ID);
+const azureTenantId = normalizeEnv(process.env.AZURE_AD_TENANT_ID);
+const azureClientSecret = normalizeEnv(process.env.AZURE_AD_CLIENT_SECRET);
+
+type AzureProfile = {
+  sub?: string;
+  name?: string;
+  email?: string;
+  preferred_username?: string;
+  upn?: string;
+};
+
+const azureChecks: Array<"pkce" | "state"> = ["pkce", "state"];
 
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: normalizeEnv(process.env.NEXTAUTH_SECRET),
+  debug: process.env.NODE_ENV === "development",
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
+    ...(azureClientId && azureTenantId && azureClientSecret
+      ? [
+          {
+            id: "azure-ad",
+            name: "Microsoft",
+            type: "oauth" as const,
+            clientId: azureClientId,
+            clientSecret: azureClientSecret,
+            wellKnown: `https://login.microsoftonline.com/${azureTenantId}/v2.0/.well-known/openid-configuration`,
+            issuer: `https://login.microsoftonline.com/${azureTenantId}/v2.0`,
+            authorization: {
+              params: {
+                scope: "openid profile email",
+              },
+            },
+            idToken: true,
+            checks: azureChecks,
+            profile(profile: AzureProfile) {
+              return {
+                id: String(profile.sub ?? ""),
+                name: String(profile.name ?? profile.preferred_username ?? "Microsoft User"),
+                email: String(profile.email ?? profile.preferred_username ?? profile.upn ?? ""),
+                image: null,
+                role: null,
+              };
+            },
+            style: {
+              logo: "/azure.svg",
+              text: "#fff",
+              bg: "#0072c6",
+            },
+          },
+        ]
+      : []),
     CredentialsProvider({
       name: "credentials",
       credentials: {
@@ -43,29 +157,34 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
+    async signIn({ user, account }) {
+      if (account?.provider !== "azure-ad") return true;
+
+      const email = normalizeEnv(user.email ?? undefined)?.toLowerCase();
+      if (!email) return "/login?error=NoAzureEmail";
+
+      const ensuredUser = await ensureAzureUser({
+        email,
+        name: user.name ?? email,
+      }).catch(() => null);
+
+      if (!ensuredUser) return "/login?error=AccountProvisioningFailed";
+
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
-        // First sign-in only: load all user attributes from DB and store in JWT.
-        // After this, NO further DB calls are made for auth — the JWT is self-contained.
-        token.id = user.id;
-        token.role = (user as { role: string | null }).role ?? null;
-        try {
-          const rows = await prisma.$queryRaw<{ defaultLocation: string | null; approverName: string | null }[]>`
-            SELECT u."defaultLocation", a.name AS "approverName"
-            FROM "User" u
-            LEFT JOIN "User" a ON a.id = u."approverId"
-            WHERE u.id = ${user.id as string}
-            LIMIT 1
-          `;
-          if (rows[0]) {
-            token.defaultLocation = rows[0].defaultLocation ?? null;
-            token.approverName = rows[0].approverName ?? null;
-          }
-        } catch {
-          // Non-fatal: defaultLocation/approverName will be null until re-login
-        }
+        const claims =
+          await loadUserClaims({
+            id: user.id,
+            email: user.email ?? undefined,
+          }).catch(() => null);
+
+        token.id = claims?.id ?? user.id;
+        token.role = claims?.role ?? (user as { role: string | null }).role ?? null;
+        token.defaultLocation = claims?.defaultLocation ?? null;
+        token.approverName = claims?.approver?.name ?? null;
       }
-      // Subsequent requests: return token as-is — zero DB queries.
       return token;
     },
     async session({ session, token }) {
@@ -76,6 +195,14 @@ export const authOptions: NextAuthOptions = {
         session.user.approverName = (token.approverName as string | null) ?? null;
       }
       return session;
+    },
+  },
+  logger: {
+    error(code, metadata) {
+      console.error("[next-auth][error]", code, metadata);
+    },
+    warn(code) {
+      console.warn("[next-auth][warn]", code);
     },
   },
 };

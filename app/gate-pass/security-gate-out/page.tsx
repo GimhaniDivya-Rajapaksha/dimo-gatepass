@@ -29,7 +29,12 @@ type Pass = {
   passSubType: string | null;
   createdBy: { name: string };
   approvedBy: { name: string } | null;
+  parentPass?: { gatePassNumber: string } | null;
 };
+
+function sortNewestFirst<T extends { updatedAt: string; createdAt: string }>(a: T, b: T) {
+  return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+}
 
 /* ── Colour palette ── */
 const colorMap: Record<string, { hex: string; border: string; label: string }> = {
@@ -97,7 +102,7 @@ function CarSVG({ size = 28, color = "white" }: { size?: number; color?: string 
 function PassCard({ p, mode, onConfirmed }: {
   p: Pass;
   mode: "out" | "in";
-  onConfirmed: (id: string) => void;
+  onConfirmed: (id: string, sapMsg?: string | null, warning?: string | null) => void;
 }) {
   const isOut = mode === "out";
   const color = getColor(p.vehicleColor);
@@ -133,12 +138,16 @@ function PassCard({ p, mode, onConfirmed }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: isOut ? "security_gate_out" : "security_gate_in" }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || "Failed");
+        throw new Error(data.error || "Failed");
       }
       setDone(true);
-      setTimeout(() => onConfirmed(p.id), 1500);
+      const loc = data.liveLocationUpdate?.currentLocation;
+      const sapMsg = loc
+        ? `Location updated → ${loc.label} (Plant ${loc.plantCode} · Sloc ${loc.storageLocation})`
+        : null;
+      setTimeout(() => onConfirmed(p.id, sapMsg, data.liveLocationUpdateError || null), 1500);
     } catch (e) {
       setConfirming(false);
       setSlidePos(0);
@@ -172,7 +181,7 @@ function PassCard({ p, mode, onConfirmed }: {
           </svg>
         </div>
         <p className="font-bold text-sm" style={{ color: "var(--text)" }}>Gate {isOut ? "OUT" : "IN"} Confirmed!</p>
-        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{p.gatePassNumber}</p>
+        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{p.parentPass?.gatePassNumber ?? p.gatePassNumber}</p>
       </motion.div>
     );
   }
@@ -197,7 +206,7 @@ function PassCard({ p, mode, onConfirmed }: {
         <div className="flex items-center gap-2 mb-3 flex-wrap relative z-10">
           <span className="text-[10px] font-black px-2.5 py-1 rounded-lg tracking-widest uppercase"
             style={{ background: pillBg, color: pillColor, border: `1px solid ${accentLight}30` }}>
-            {isOut ? "▶ OUT" : "◀ IN"} · {p.gatePassNumber}
+            {isOut ? "▶ OUT" : "◀ IN"} · {p.parentPass?.gatePassNumber ?? p.gatePassNumber}
           </span>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md"
             style={{ background: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
@@ -230,8 +239,8 @@ function PassCard({ p, mode, onConfirmed }: {
             {p.make && (
               <p className="text-xs font-semibold" style={{ color: `${accentLight}cc` }}>{p.make}</p>
             )}
-            {/* LT route */}
-            {p.passType === "LOCATION_TRANSFER" && (p.fromLocation || p.toLocation) && (
+            {/* Route — LT and AFTER_SALES sub-passes */}
+            {(p.passType === "LOCATION_TRANSFER" || (p.passType === "AFTER_SALES" && p.passSubType && ["SUB_OUT","SUB_OUT_IN","SUB_IN"].includes(p.passSubType))) && (p.fromLocation || p.toLocation) && (
               <p className="text-[10px] mt-1 font-mono" style={{ color: "rgba(255,255,255,0.5)" }}>
                 {p.fromLocation || "?"} → {p.toLocation || "?"}
               </p>
@@ -469,6 +478,9 @@ export default function SecurityGateDashboard() {
   const [toast,            setToast]            = useState<{ msg: string; ok: boolean } | null>(null);
   const [search,           setSearch]           = useState("");
   const [gateMode,         setGateMode]         = useState<GateMode>("BOTH");
+  const [liveLocation,     setLiveLocation]     = useState<string | null>(null);
+  const [locationLoaded,   setLocationLoaded]   = useState(false);
+  const isInitialFetch = useRef(true);
 
   useEffect(() => {
     try {
@@ -482,62 +494,91 @@ export default function SecurityGateDashboard() {
     try { localStorage.setItem("security_gate_mode", m); } catch { /* ignore */ }
   }
 
-  const showToast = (msg: string, ok = true) => {
+  const showToast = (msg: string, ok = true, duration = 3500) => {
     setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), duration);
   };
 
+  const myLocation = liveLocation ?? (session?.user as { defaultLocation?: string | null })?.defaultLocation ?? null;
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let active = true;
+
+    async function loadLiveMe() {
+      try {
+        const res = await fetch("/api/me", { cache: "no-store" });
+        if (!res.ok) { if (active) setLocationLoaded(true); return; }
+        const data = await res.json();
+        if (!active) return;
+        setLiveLocation(data.user?.defaultLocation ?? null);
+      } catch {
+        if (active) setLiveLocation(null);
+      } finally {
+        if (active) setLocationLoaded(true);
+      }
+    }
+
+    void loadLiveMe();
+    return () => { active = false; };
+  }, [status]);
+
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    const myLocation = (session?.user as { defaultLocation?: string | null })?.defaultLocation ?? null;
+    if (isInitialFetch.current) {
+      setLoading(true);
+      isInitialFetch.current = false;
+    }
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayISO = todayStart.toISOString();
 
+    // Match by plant name prefix so the security officer sees all sub-locations within their plant.
+    // e.g. "Weliweriya DM Logistics - Vehicle Park-1" → matches "Weliweriya DM Logistics - EVIN MOTERS" etc.
+    const plantName = myLocation ? myLocation.split(" - ")[0].trim() : null;
+    const fromLocQ = plantName ? `&fromLocationPlant=${encodeURIComponent(plantName)}` : "";
+    const toLocQ   = plantName ? `&toLocationPlant=${encodeURIComponent(plantName)}`   : "";
+
     try {
-      const [outRes, initiatorOutRes, inRes, subInRes, initiatorInRes, releasedRes, clearedRes, draftRes] = await Promise.all([
-        fetch("/api/gate-pass?status=APPROVED&limit=100"),
-        fetch("/api/gate-pass?status=INITIATOR_OUT&limit=100"),
-        fetch("/api/gate-pass?status=GATE_OUT&limit=100"),
-        fetch("/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
-        fetch("/api/gate-pass?status=INITIATOR_IN&limit=100"),
-        fetch(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200`),
-        fetch(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200`),
-        fetch("/api/gate-pass?status=DRAFT&limit=50"),
-      ]);
-      const [outData, initiatorOutData, inData, subInData, initiatorInData, releasedData, clearedData, draftData] = await Promise.all([
-        outRes.json(), initiatorOutRes.json(), inRes.json(), subInRes.json(), initiatorInRes.json(), releasedRes.json(), clearedRes.json(), draftRes.json(),
-      ]);
+      // Sequential fetches — connection pool limit is 1 on Supabase free tier
+      const outData        = await fetch(`/api/gate-pass?status=APPROVED&limit=100${fromLocQ}`).then(r => r.json());
+      const initiatorOutData = await fetch(`/api/gate-pass?status=INITIATOR_OUT&limit=100${fromLocQ}`).then(r => r.json());
+      const inData         = await fetch(`/api/gate-pass?status=GATE_OUT&limit=100${toLocQ}`).then(r => r.json());
+      const subInData      = await fetch(`/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100${toLocQ}`).then(r => r.json());
+      const initiatorInData = await fetch(`/api/gate-pass?status=INITIATOR_IN&limit=100${toLocQ}`).then(r => r.json());
+      const releasedData   = await fetch(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`).then(r => r.json());
+      const clearedData    = await fetch(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`).then(r => r.json());
+      const draftData      = await fetch("/api/gate-pass?status=DRAFT&limit=50").then(r => r.json());
       setDraftPasses(draftData.passes ?? []);
 
-      const outLocation = (p: Pass) => !myLocation || !p.fromLocation || p.fromLocation === myLocation;
-      const inLocation  = (p: Pass) => !myLocation || !p.toLocation  || p.toLocation  === myLocation;
-
+      // Server already scoped by location — just filter by pass type/subtype
       const approvedAll: Pass[] = outData.passes ?? [];
       const approvedGateOut = approvedAll.filter((p) =>
         !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN") &&
-        (p.passType === "LOCATION_TRANSFER" || outLocation(p))
+        !(p.passType === "AFTER_SALES" && p.passSubType === "MAIN_IN")
       );
       setOutPasses([
         ...approvedGateOut,
-        ...(initiatorOutData.passes ?? []).filter(outLocation),
-      ]);
+        ...(initiatorOutData.passes ?? []),
+      ].sort(sortNewestFirst));
 
-      const approvedSubIn: Pass[] = (subInData.passes ?? []).filter(inLocation);
+      // APPROVED MAIN_IN: server filtered by fromLocation (vehicle arriving to this security's plant)
+      const approvedMainIn: Pass[] = approvedAll.filter((p) =>
+        p.passType === "AFTER_SALES" && p.passSubType === "MAIN_IN"
+      );
+      const approvedSubIn: Pass[] = subInData.passes ?? [];
       const allGateOut: Pass[]    = inData.passes ?? [];
-      // INITIATOR_IN: MAIN_IN passes where initiator marked vehicle at gate; security at toLocation confirms
-      const initiatorInPasses: Pass[] = (initiatorInData.passes ?? []).filter(inLocation);
+      const initiatorInPasses: Pass[] = initiatorInData.passes ?? [];
+      // Gate IN: server already scoped by toLocation — just filter by pass type
       setInPasses([
+        ...approvedMainIn,
         ...initiatorInPasses,
         ...approvedSubIn,
         ...allGateOut.filter((p) =>
-          inLocation(p) && (
-            (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN")) ||
-            p.passType === "LOCATION_TRANSFER"
-          )
+          (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN" || p.passSubType === "SUB_OUT")) ||
+          p.passType === "LOCATION_TRANSFER"
         ),
-      ]);
+      ].sort(sortNewestFirst));
       setReleasedToday((releasedData.passes ?? []).length);
       setClearedInToday((clearedData.passes ?? []).length);
     } catch {
@@ -545,14 +586,40 @@ export default function SecurityGateDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation]);
 
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => { if (locationLoaded) void fetchAll(); }, [fetchAll, locationLoaded]);
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 90 seconds
   useEffect(() => {
-    const interval = setInterval(() => { void fetchAll(); }, 30_000);
+    const interval = setInterval(() => { void fetchAll(); }, 90_000);
     return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  // Notification-triggered refresh: poll every 8s for near real-time gate updates.
+  // Trigger on GATE_PASS_RECEIVED (vehicle en route Gate IN)
+  // and GATE_PASS_APPROVED (initiator confirmed departure → ready for Gate OUT).
+  const lastNotifCount = useRef(0);
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/notifications");
+        if (!res.ok) return;
+        const data = await res.json();
+        const incoming = (data.notifications ?? []).filter(
+          (n: { type: string; read: boolean }) =>
+            (n.type === "GATE_PASS_RECEIVED" || n.type === "GATE_PASS_APPROVED") && !n.read
+        ).length;
+        if (incoming > lastNotifCount.current) {
+          lastNotifCount.current = incoming;
+          void fetchAll();
+        } else {
+          lastNotifCount.current = incoming;
+        }
+      } catch { /* ignore */ }
+    }, 8_000);
+    return () => clearInterval(poll);
   }, [fetchAll]);
 
   useEffect(() => {
@@ -571,16 +638,23 @@ export default function SecurityGateDashboard() {
     p.vehicle.toLowerCase().includes(q) ||
     (p.make ?? "").toLowerCase().includes(q) ||
     (p.vehicleColor ?? "").toLowerCase().includes(q) ||
-    p.gatePassNumber.toLowerCase().includes(q);
+    p.gatePassNumber.toLowerCase().includes(q) ||
+    (p.parentPass?.gatePassNumber ?? "").toLowerCase().includes(q);
 
   const filteredOut = outPasses.filter(filterPass);
   const filteredIn  = inPasses.filter(filterPass);
 
 
-  function handleConfirmed(id: string, mode: "out" | "in") {
+  function handleConfirmed(id: string, mode: "out" | "in", sapMsg?: string | null, warning?: string | null) {
     if (mode === "out") setOutPasses(prev => prev.filter(p => p.id !== id));
     else setInPasses(prev => prev.filter(p => p.id !== id));
-    showToast(`Gate ${mode === "out" ? "OUT" : "IN"} confirmed successfully!`);
+    if (warning) {
+      showToast(`Gate ${mode === "out" ? "OUT" : "IN"} confirmed — SAP location update failed: ${warning}`, false, 6000);
+    } else if (sapMsg) {
+      showToast(`Gate ${mode === "out" ? "OUT" : "IN"} confirmed! ${sapMsg}`, true, 6000);
+    } else {
+      showToast(`Gate ${mode === "out" ? "OUT" : "IN"} confirmed successfully!`, true);
+    }
   }
 
   return (
@@ -617,7 +691,11 @@ export default function SecurityGateDashboard() {
             </div>
             <div>
               <h1 className="text-2xl font-black" style={{ color: "var(--text)", letterSpacing: "-0.01em" }}>Security Gate</h1>
-              <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Confirm vehicle movements at the gate</p>
+              <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
+                {myLocation ? (
+                  <span>Gate: <span className="font-semibold" style={{ color: "var(--text)" }}>{myLocation}</span></span>
+                ) : "Confirm vehicle movements at the gate"}
+              </p>
             </div>
           </div>
 
@@ -725,7 +803,7 @@ export default function SecurityGateDashboard() {
                 <div key={p.id} className="flex items-center gap-4 px-5 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold font-mono" style={{ color: "var(--accent)" }}>{p.gatePassNumber}</span>
+                      <span className="text-sm font-bold font-mono" style={{ color: "var(--accent)" }}>{p.parentPass?.gatePassNumber ?? p.gatePassNumber}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>{typeLabel}</span>
                       {dir && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: dir === "IN" ? "#f0fdfa" : "#eef2ff", color: dir === "IN" ? "#0f766e" : "#3730a3" }}>Gate {dir}</span>}
                     </div>
@@ -790,7 +868,7 @@ export default function SecurityGateDashboard() {
                 </div>
               ) : (
                 filteredOut.map((p) => (
-                  <PassCard key={p.id} p={p} mode="out" onConfirmed={(id) => handleConfirmed(id, "out")} />
+                  <PassCard key={p.id} p={p} mode="out" onConfirmed={(id, sapMsg, warning) => handleConfirmed(id, "out", sapMsg, warning)} />
                 ))
               )}
             </div>
@@ -838,7 +916,7 @@ export default function SecurityGateDashboard() {
                 </div>
               ) : (
                 filteredIn.map((p) => (
-                  <PassCard key={p.id} p={p} mode="in" onConfirmed={(id) => handleConfirmed(id, "in")} />
+                  <PassCard key={p.id} p={p} mode="in" onConfirmed={(id, sapMsg, warning) => handleConfirmed(id, "in", sapMsg, warning)} />
                 ))
               )}
             </div>

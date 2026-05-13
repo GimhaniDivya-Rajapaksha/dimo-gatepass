@@ -99,11 +99,13 @@ function OrderModal({
   onProceed: (result: { status: string; creditPending?: boolean }) => void;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
+  const isCustomerDelivery = pass.passType === "CUSTOMER_DELIVERY";
 
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
 
@@ -230,6 +232,7 @@ function OrderModal({
   }
 
   async function handleDeleteOrder(id: string) {
+    if (!window.confirm("Remove this order from the payment review list?")) return;
     await fetch(`/api/service-orders?id=${id}`, { method: "DELETE" });
     await fetchOrders();
   }
@@ -268,13 +271,20 @@ function OrderModal({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/service-orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "proceed", gatePassId: pass.id }),
-      });
+      const res = isCustomerDelivery
+        ? await fetch(`/api/gate-pass/${pass.id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "cashier_clear_cd" }),
+          })
+        : await fetch("/api/service-orders", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "proceed", gatePassId: pass.id }),
+          });
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Failed to proceed"); return; }
+      setConfirmProceed(false);
       onProceed({ status: d.status, creditPending: d.creditPending });
     } finally {
       setSaving(false);
@@ -285,7 +295,7 @@ function OrderModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.5)" }}>
       <motion.div
-        className="w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col"
+        className="relative w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col"
         style={{ background: "var(--surface)", maxHeight: "90vh" }}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -297,7 +307,7 @@ function OrderModal({
           style={{ borderColor: "var(--border)" }}>
           <div>
             <h2 className="text-base font-bold" style={{ color: "var(--text)" }}>
-              Select{" "}
+              {isCustomerDelivery ? "Review" : "Select"}{" "}
               <span className="font-mono" style={{ color: "var(--accent)" }}>{jobNo}</span>
               {" "}Orders
             </h2>
@@ -342,7 +352,7 @@ function OrderModal({
           {[
             { n: "1", text: "Immediate payment orders auto-loaded from SAP", done: immediateOrders.length > 0 },
             { n: "2", text: "Mark all immediate orders as Fully Paid", done: immediateOrders.length > 0 && available.length === 0 },
-            { n: "3", text: available.length === 0 && immediateOrders.length > 0 ? "Slide to confirm — your part is done ✓" : "Credit orders are handled by Approver in parallel", done: false },
+            { n: "3", text: available.length === 0 && immediateOrders.length > 0 ? `${isCustomerDelivery ? "Proceed" : "Slide to confirm"} — your part is done` : "Credit orders are handled by Approver in parallel", done: false },
           ].map((step, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs">
               <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
@@ -374,7 +384,7 @@ function OrderModal({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
             </svg>
             <span style={{ color: "#1d4ed8" }}>
-              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are being reviewed by the <strong>Approver in parallel</strong> — not your responsibility.
+              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are being reviewed by the <strong>Approver in the same location</strong> — not your responsibility.
             </span>
           </div>
         )}
@@ -529,7 +539,7 @@ function OrderModal({
             const noOrders = immediateOrders.length === 0;
 
             // For all-paid case: show Slide to Confirm instead of a regular button
-            if (allPaid) {
+            if (allPaid && !isCustomerDelivery) {
               return saving ? (
                 <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
                   style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
@@ -544,15 +554,17 @@ function OrderModal({
               );
             }
 
-            const bg = noOrders ? "linear-gradient(135deg,#d97706,#b45309)" : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "No Immediate Orders — Mark Done"
-              : partial ? "Some Unpaid — Mark Done Anyway"
+            const bg = allPaid || isCustomerDelivery
+              ? "linear-gradient(135deg,#059669,#10b981)"
+              : "linear-gradient(135deg,#d97706,#b45309)";
+            const label = noOrders ? "No Immediate Orders — Proceed"
+              : partial ? "Some Unpaid — Proceed Anyway"
               : "Proceed";
             return (
               <button
-                onClick={handleProceed}
+                onClick={() => setConfirmProceed(true)}
                 disabled={saving}
-                title={noOrders ? "No immediate orders — mark cashier part as done" : "Mark remaining as done and proceed"}
+                title={noOrders ? "No immediate orders — proceed with cashier confirmation" : "Confirm and proceed"}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
                 style={{ background: bg, flexShrink: 0 }}
               >
@@ -574,6 +586,51 @@ function OrderModal({
             );
           })()}
         </div>
+
+        {confirmProceed && (
+          <div className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: "rgba(15, 23, 42, 0.45)" }}>
+            <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#eff6ff", color: "#2563eb" }}>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold" style={{ color: "var(--text)" }}>
+                    Confirm Proceed
+                  </h3>
+                  <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                    {isCustomerDelivery
+                      ? "Confirm that payment is cleared and this customer delivery can move to security gate out."
+                      : "Confirm the cashier review is complete for this service pass. Remaining credit items, if any, will stay with the approver."}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setConfirmProceed(false)}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: "var(--surface2)", color: "var(--text-muted)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleProceed}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                >
+                  {saving ? "Processing..." : "Yes, Proceed"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </motion.div>
     </div>
   );
@@ -639,7 +696,6 @@ export default function CashierReviewPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
-  const [clearingCdId, setClearingCdId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "success" | "info" } | null>(null);
   const [activeTab, setActiveTab] = useState<"AFTER_SALES" | "CUSTOMER_DELIVERY">("AFTER_SALES");
 
@@ -690,25 +746,6 @@ export default function CashierReviewPage() {
       showToast("Payment cleared — awaiting further processing.", "info");
     }
     void fetchPasses();
-  }
-
-  async function handleClearCd(passId: string) {
-    setClearingCdId(passId);
-    try {
-      const res = await fetch(`/api/gate-pass/${passId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "cashier_clear_cd" }),
-      });
-      const d = await res.json();
-      if (!res.ok) { showToast(d.error ?? "Failed to clear payment", "info"); return; }
-      showToast("Payment cleared — Security Officer notified for Gate OUT.", "success");
-      void fetchPasses();
-    } catch {
-      showToast("Network error", "info");
-    } finally {
-      setClearingCdId(null);
-    }
   }
 
   const asCount = passes.length;
@@ -889,7 +926,7 @@ export default function CashierReviewPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p className="text-xs" style={{ color: "#15803d" }}>
-                  Confirm customer has paid in full before releasing the vehicle for Gate OUT.
+                  Open a pass to review SAP orders, confirm payment, and proceed to Gate OUT clearance.
                 </p>
               </div>
               <div className="flex flex-col gap-3">
@@ -924,18 +961,16 @@ export default function CashierReviewPage() {
                       </div>
                     </div>
 
-                    {/* Confirm Payment Cleared */}
+                    {/* Review Orders */}
                     <button
-                      onClick={() => void handleClearCd(p.id)}
-                      disabled={clearingCdId === p.id}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 disabled:opacity-60 flex-shrink-0"
-                      style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}
+                      onClick={() => setModalPass(p)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
                     >
-                      {clearingCdId === p.id
-                        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      }
-                      {clearingCdId === p.id ? "Processing…" : "Confirm Payment Cleared"}
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      </svg>
+                      Review Orders
                     </button>
                   </motion.div>
                 ))}

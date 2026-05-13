@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +18,94 @@ type GatePass = {
   createdBy: { name: string }; createdAt: string;
   subPasses?: SubPass[];
 };
+
+function collapseJourneyPasses(items: GatePass[]) {
+  const subTypeRank: Record<string, number> = {
+    MAIN_IN: 1,
+    SUB_OUT: 2,
+    SUB_IN: 3,
+    MAIN_OUT: 4,
+  };
+  const statusRank: Record<string, number> = {
+    PENDING_APPROVAL: 1,
+    CASHIER_REVIEW: 2,
+    APPROVED: 3,
+    INITIATOR_OUT: 4,
+    INITIATOR_IN: 4,
+    GATE_OUT: 5,
+    COMPLETED: 6,
+  };
+
+  const grouped = new Map<string, GatePass>();
+  for (const pass of items) {
+    if (pass.passType !== "AFTER_SALES") {
+      grouped.set(`id:${pass.id}`, pass);
+      continue;
+    }
+
+    const key = `journey:${pass.gatePassNumber}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, pass);
+      continue;
+    }
+
+    const existingSubRank = subTypeRank[existing.passSubType ?? ""] ?? 0;
+    const passSubRank = subTypeRank[pass.passSubType ?? ""] ?? 0;
+    const existingStatusRank = statusRank[existing.status] ?? 0;
+    const passStatusRank = statusRank[pass.status] ?? 0;
+    const existingTs = new Date(existing.createdAt).getTime();
+    const passTs = new Date(pass.createdAt).getTime();
+
+    if (
+      passSubRank > existingSubRank ||
+      (passSubRank === existingSubRank && passTs > existingTs)
+    ) {
+      grouped.set(key, pass);
+    }
+  }
+
+  return Array.from(grouped.values());
+}
+
+function getJourneyStageBadge(p: GatePass) {
+  if (p.passType !== "AFTER_SALES" || !p.passSubType) {
+    return statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
+  }
+
+  if (p.passSubType === "MAIN_OUT" && p.status === "CASHIER_REVIEW") {
+    return { label: "AWAITING CASHIER", bg: "#fef3c7", color: "#b45309", dot: "#f59e0b" };
+  }
+
+  if (p.passSubType === "MAIN_OUT" && p.status === "PENDING_APPROVAL") {
+    return { label: "AWAITING APPROVER", bg: "#fff7ed", color: "#c2410c", dot: "#f97316" };
+  }
+
+  if (p.passSubType === "SUB_OUT" && p.status === "GATE_OUT") {
+    return statusCfg["GATE_OUT"];
+  }
+
+  if (p.passSubType === "SUB_OUT" && p.status === "COMPLETED") {
+    return { label: "GATE IN", bg: "#ecfdf5", color: "#065f46", dot: "#10b981" };
+  }
+
+  if (p.passSubType === "SUB_IN" && p.status === "GATE_OUT") {
+    return { label: "GATE IN", bg: "#ecfdf5", color: "#065f46", dot: "#10b981" };
+  }
+
+  if (p.passSubType === "MAIN_OUT" && ["GATE_OUT", "COMPLETED"].includes(p.status)) {
+    return statusCfg["COMPLETED"];
+  }
+
+  const stageLabel = p.passSubType.replace(/_/g, " ");
+  const stageColor =
+    p.passSubType === "MAIN_IN" ? { bg: "#f0fdf4", color: "#15803d", dot: "#22c55e" } :
+    p.passSubType === "SUB_OUT" ? { bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" } :
+    p.passSubType === "SUB_IN" ? { bg: "#fffbeb", color: "#b45309", dot: "#f59e0b" } :
+    { bg: "#f5f3ff", color: "#6d28d9", dot: "#a855f7" };
+
+  return { label: stageLabel, ...stageColor };
+}
 
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
   DRAFT:            { label: "Pending Completion", bg: "#fffbeb", color: "#92400e", dot: "#f59e0b" },
@@ -46,11 +134,28 @@ function getCurrentLocation(p: GatePass): { label: string; inTransit: boolean; c
   const lastActive = sorted.find(sp => !["COMPLETED", "CANCELLED"].includes(sp.status));
   if (lastActive?.passSubType === "SUB_OUT") return { label: `In Transit → ${lastActive.toLocation || "?"}`, inTransit: true, completed: false };
   if (lastActive?.passSubType === "SUB_IN")  return { label: lastActive.toLocation || p.toLocation || "?", inTransit: false, completed: false };
-  // All subs completed
+  // All subs completed — find the last SUB_OUT to show vehicle is at that sub-location
+  const lastSubOut = sorted.find(sp => sp.passSubType === "SUB_OUT" && sp.status === "COMPLETED");
   const last = sorted[0];
   if (last?.passSubType === "MAIN_OUT" && ["COMPLETED", "GATE_OUT", "APPROVED"].includes(last.status))
     return { label: "Journey Complete", inTransit: false, completed: true };
+  // If last completed is a SUB_OUT, vehicle is now at that sub-location (Security IN confirmed)
+  if (lastSubOut && last?.passSubType === "SUB_OUT" && last?.status === "COMPLETED")
+    return { label: lastSubOut.toLocation || "Sub-Location", inTransit: false, completed: false };
   return { label: last?.toLocation || p.toLocation || "?", inTransit: false, completed: false };
+}
+
+function getDisplayCurrentLocation(
+  p: GatePass,
+  liveLocation: string | null | undefined
+): { label: string; inTransit: boolean; completed: boolean } {
+  const derived = getCurrentLocation(p);
+  if (derived.inTransit || !liveLocation?.trim()) return derived;
+  return {
+    ...derived,
+    label: liveLocation,
+    completed: false,
+  };
 }
 
 function GatePassListPageInner() {
@@ -72,6 +177,7 @@ function GatePassListPageInner() {
   const isASO = session?.user?.role === "AREA_SALES_OFFICER";
   const [gatingInId, setGatingInId] = useState<string | null>(null);
   const [markingInId, setMarkingInId] = useState<string | null>(null);
+  const [liveLocations, setLiveLocations] = useState<Record<string, string | null>>({});
 
   // Styled confirm modal (replaces browser confirm())
   type ConfirmModal = {
@@ -96,9 +202,32 @@ function GatePassListPageInner() {
       const res = await fetch(`/api/gate-pass?${params}`);
       if (res.ok) {
         const d = await res.json();
-        setPasses(d.passes || []);
-        setTotal(d.total || 0);
-        setTotalPages(d.totalPages || 1);
+        const collapsed = collapseJourneyPasses(d.passes || []);
+        setPasses(collapsed);
+        setTotal(collapsed.length);
+        setTotalPages(1);
+
+        const items = collapsed.map((pass) => ({
+          key: pass.id,
+          vehicleNo: pass.vehicle,
+          chassisNo: pass.chassis,
+        }));
+
+        if (items.length > 0) {
+          try {
+            const liveRes = await fetch("/api/vehicle-locations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ items }),
+            });
+            const liveData = await liveRes.json().catch(() => ({ locations: {} }));
+            setLiveLocations(liveData.locations ?? {});
+          } catch {
+            setLiveLocations({});
+          }
+        } else {
+          setLiveLocations({});
+        }
       }
     } finally { setLoading(false); }
   }, [page, search, statusFilter, passTypeFilter]);
@@ -106,6 +235,24 @@ function GatePassListPageInner() {
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
   useEffect(() => { setPage(1); }, [search, statusFilter, passTypeFilter]);
   useEffect(() => { setStatusFilter(searchParams.get("status") ?? "ALL"); setPage(1); }, [searchParams]);
+
+  // Auto-refresh when Security confirms Gate IN on a SUB_OUT (initiator sees status update)
+  const lastNotifCount = useRef(0);
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/notifications");
+        if (!res.ok) return;
+        const data = await res.json();
+        const count = (data.notifications ?? []).filter(
+          (n: { type: string; read: boolean }) => n.type === "GATE_PASS_RECEIVED" && !n.read
+        ).length;
+        if (count > lastNotifCount.current) { lastNotifCount.current = count; fetchPasses(); }
+        else { lastNotifCount.current = count; }
+      } catch { /* ignore */ }
+    }, 10_000);
+    return () => clearInterval(poll);
+  }, [fetchPasses]);
 
   function askGateOut(p: GatePass) {
     const isAfterSales = p.passType === "AFTER_SALES";
@@ -122,7 +269,7 @@ function GatePassListPageInner() {
         ? `Vehicle ${p.vehicle} (${p.gatePassNumber}) will be marked as departed. The Security Officer will be notified to physically confirm Gate OUT at the gate.`
         : isAfterSales
         ? `Vehicle ${p.vehicle} will be marked for ${label}. This will notify the Security Officer at ${p.fromLocation || "the departure location"} to confirm.`
-        : `Gate pass ${p.gatePassNumber} will be marked as Gate Out. This will notify the recipient.`,
+        : `Gate pass ${p.gatePassNumber} will be marked as Gate Out and moved to the next gate step.`,
       confirmLabel: label,
       confirmColor: "#1d4ed8",
     });
@@ -231,7 +378,7 @@ function GatePassListPageInner() {
       <div className="rounded-2xl border overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         {/* Search + filter bar */}
         <div className="flex items-center gap-3 p-4 border-b flex-wrap" style={{ borderColor: "var(--border)" }}>
-          <div className="relative flex-1 min-w-52">
+          <div className="relative flex-1 min-w-0">
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by chassis, GP number..."
               className="w-full border rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
@@ -278,8 +425,8 @@ function GatePassListPageInner() {
             ) : (
               <div className="grid gap-3">
                 {passes.map((p, i) => {
-                  const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
-                  const loc = getCurrentLocation(p);
+                  const sc = getJourneyStageBadge(p);
+                  const loc = getDisplayCurrentLocation(p, liveLocations[p.id]);
                   const subs = p.subPasses ?? [];
                   const isExpanded = expandedId === p.id;
                   const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
@@ -380,15 +527,16 @@ function GatePassListPageInner() {
                           <div className="flex items-start gap-0">
                             {/* MAIN_IN node */}
                             {[
-                              { passSubType: "MAIN_IN", gatePassNumber: p.gatePassNumber, status: p.status, toLocation: p.toLocation, fromLocation: p.fromLocation, departureDate: p.departureDate, isMain: true },
-                              ...subs.map(s => ({ ...s, isMain: false })),
+                              { id: p.id, passSubType: "MAIN_IN", gatePassNumber: p.gatePassNumber, status: p.status, toLocation: p.toLocation, fromLocation: p.fromLocation, departureDate: p.departureDate, isMain: true },
+                              // All sub-passes display under the same parent GP number
+                              ...subs.map(s => ({ ...s, gatePassNumber: p.gatePassNumber, isMain: false })),
                             ].map((step, idx, arr) => {
                               const stc = subTypeCfg[step.passSubType ?? ""] ?? subTypeCfg["MAIN_IN"];
                               const sSc = statusCfg[step.status] ?? statusCfg["PENDING_APPROVAL"];
                               const isDone = ["COMPLETED", "GATE_OUT", "APPROVED"].includes(step.status);
                               const isCurrent = !isDone;
                               return (
-                                <div key={step.gatePassNumber} className="flex items-start flex-1 min-w-0">
+                                <div key={step.id ?? `${p.id}-${step.passSubType ?? "STEP"}-${idx}`} className="flex items-start flex-1 min-w-0">
                                   <div className="flex flex-col items-center gap-1 flex-shrink-0">
                                     {/* Node */}
                                     <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all`}
@@ -448,11 +596,12 @@ function GatePassListPageInner() {
                               {/* Sub-pass entries */}
                               {subs.map((s) => (
                                 <JourneyStep key={s.id}
-                                  subType={s.passSubType ?? ""} gpNo={s.gatePassNumber} status={s.status}
+                                  subType={s.passSubType ?? ""} gpNo={p.gatePassNumber} status={s.status}
                                   from={s.fromLocation} to={s.toLocation} date={s.departureDate}
                                   label={
-                                    s.passSubType === "SUB_OUT"  ? "Vehicle sent to sub-plant" :
-                                    s.passSubType === "SUB_IN"   ? "Vehicle returned from sub-plant" :
+                                    s.passSubType === "SUB_OUT" && s.status === "COMPLETED" ? "Security confirmed Gate IN at sub-location" :
+                                    s.passSubType === "SUB_OUT"  ? "Vehicle sent to sub-location (awaiting Security Gate IN)" :
+                                    s.passSubType === "SUB_IN"   ? "Vehicle returned from sub-location" :
                                     s.passSubType === "MAIN_OUT" ? "Final departure from service center" : ""
                                   }
                                 />
@@ -496,24 +645,22 @@ function GatePassListPageInner() {
                   </td></tr>
                 ) : (
                   passes.map((p, i) => {
-                    const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
+                    const sc = getJourneyStageBadge(p);
                     const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
                     const canCancel  = p.status === "PENDING_APPROVAL";
-                    // LT, CD, and MAIN_OUT go directly to Security — no initiator gate_out needed
-                    // MAIN_IN uses initiator_gate_in (Mark as IN → security confirms)
-                    // For AFTER_SALES: INITIATOR can gate_out their SUB_OUT; ASO can gate_out SUB_OUT_IN
+                    // LT, CD, MAIN_OUT, MAIN_IN, and SUB_OUT all go directly to Security
+                    // ASO can gate_out SUB_OUT_IN (vehicle returning from sub-location)
                     const canGateOut = p.status === "APPROVED" && (
-                      (isInitiator && p.passType === "AFTER_SALES" && p.passSubType === "SUB_OUT")
-                      || (isASO && p.passType === "AFTER_SALES" && p.passSubType === "SUB_OUT_IN")
+                      isASO && p.passType === "AFTER_SALES" && p.passSubType === "SUB_OUT_IN"
                     );
 
-                    // MAIN_IN: initiator marks as IN → security confirms (not initiator gate_in)
-                    const canMarkIn = isInitiator && p.passType === "AFTER_SALES"
-                      && p.passSubType === "MAIN_IN" && p.status === "APPROVED";
+                    const canMarkIn = false; // MAIN_IN goes directly to Security Gate IN
+                    const canEdit = p.status === "DRAFT" && (isInitiator || isASO || session?.user?.role === "SERVICE_ADVISOR");
 
-                    // For AFTER_SALES GATE_OUT: ASO can confirm arrived (gate_in → COMPLETED); MAIN_IN handled by security
+                    // For AFTER_SALES GATE_OUT: ASO can confirm arrived (gate_in → COMPLETED); MAIN_IN and SUB_OUT handled by security
                     const canGateIn = p.passType === "AFTER_SALES" && p.status === "GATE_OUT"
                       && p.passSubType !== "MAIN_IN"
+                      && p.passSubType !== "SUB_OUT"
                       && (isInitiator || isASO);
 
                     const gateOutLabel = p.passType !== "AFTER_SALES" ? "Gate Out"
@@ -542,6 +689,16 @@ function GatePassListPageInner() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                               </svg>
                             </button>
+                            {canEdit && (
+                              <button onClick={() => router.push(`/gate-pass/create?draftId=${p.id}`)}
+                                className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
+                                style={{ background: "#fefce8", borderColor: "#f59e0b", color: "#b45309" }}
+                                title="Complete / Edit this draft pass">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                            )}
                             <button onClick={() => canPrint && router.push(`/gate-pass/${p.id}?print=1`)} disabled={!canPrint}
                               className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                               style={{ background: canPrint ? "var(--surface)" : "var(--surface2)", borderColor: canPrint ? "#10b981" : "var(--border)", color: canPrint ? "#10b981" : "var(--text-muted)", opacity: canPrint ? 1 : 0.4, cursor: canPrint ? "pointer" : "not-allowed" }}
@@ -600,8 +757,8 @@ function GatePassListPageInner() {
                           <p className="font-medium" style={{ color: "var(--text)" }}>{p.vehicle}</p>
                           {p.chassis && <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
                         </td>
-                        <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.toLocation || p.vehicleDetails || "-"}</td>
-                        <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.requestedBy || p.createdBy.name}</td>
+                        <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.toLocation || "-"}</td>
+                        <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.createdBy.name}</td>
                         <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>

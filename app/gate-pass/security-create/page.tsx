@@ -7,6 +7,9 @@ import { motion, AnimatePresence } from "framer-motion";
 type PassType  = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
 type Direction = "IN" | "OUT";
 type AssignTo  = "INITIATOR" | "SERVICE_ADVISOR";
+type PassTypeChoice = PassType | "";
+type DirectionChoice = Direction | "";
+type AssignToChoice = AssignTo | "";
 
 type VehicleOption = {
   id: string;
@@ -21,7 +24,7 @@ type VehicleOption = {
 function VehicleSearch({
   passType, onSelect, onClear, selected, showAddButton,
 }: {
-  passType: PassType;
+  passType: PassTypeChoice;
   onSelect: (v: VehicleOption) => void;
   onClear: () => void;
   selected: VehicleOption | null;
@@ -40,6 +43,10 @@ function VehicleSearch({
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (q: string) => {
+    if (!passType) {
+      setOptions([]);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams({ field: "vehicle", q, limit: "50" });
@@ -297,9 +304,9 @@ export default function SecurityCreatePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [passType,  setPassType]  = useState<PassType>("AFTER_SALES");
-  const [direction, setDirection] = useState<Direction>("OUT");
-  const [assignTo,  setAssignTo]  = useState<AssignTo>("INITIATOR");
+  const [passType,  setPassType]  = useState<PassTypeChoice>("");
+  const [direction, setDirection] = useState<DirectionChoice>("");
+  const [assignTo,  setAssignTo]  = useState<AssignToChoice>("");
 
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleOption | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -321,6 +328,9 @@ export default function SecurityCreatePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!passType) { setError("Pass type is required"); return; }
+    if (!direction) { setError("Gate direction is required"); return; }
+    if (!assignTo) { setError("Please choose who should complete this form"); return; }
     if (!selectedVehicle) { setError("Vehicle registration number is required"); return; }
     setSubmitting(true);
     setError(null);
@@ -355,35 +365,94 @@ export default function SecurityCreatePage() {
     { value: "LOCATION_TRANSFER", label: "Location Transfer", icon: "M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" },
     { value: "CUSTOMER_DELIVERY", label: "Customer Delivery", icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
   ];
+  const completionSteps = [
+    { key: "type", label: "Pass Type", done: !!passType },
+    { key: "direction", label: "Gate Direction", done: !!direction },
+    { key: "owner", label: "Assign Owner", done: !!assignTo },
+    { key: "vehicle", label: "Vehicle", done: !!selectedVehicle },
+  ];
 
   return (
     <div className="max-w-xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Create Gate Pass</h1>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-3"
+          style={{ background: "#eef2ff", color: "#3730a3" }}>
+          <span className="w-2 h-2 rounded-full" style={{ background: "#4f46e5" }} />
+          <span className="text-xs font-bold uppercase tracking-[0.18em]">Security Draft Builder</span>
+        </div>
+        <h1 className="text-3xl font-black tracking-tight" style={{ color: "var(--text)" }}>Create Gate Pass</h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
           Select vehicle — Initiator / Service Advisor will complete the details.
         </p>
       </div>
 
+      <div className="rounded-2xl border p-4 mb-5"
+        style={{ background: "linear-gradient(135deg,#fff7ed,#eff6ff)", borderColor: "#c7d2fe" }}>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-sm font-bold" style={{ color: "#312e81" }}>Fill this in from left to right</p>
+            <p className="text-xs mt-1" style={{ color: "#6366f1" }}>
+              Nothing is preselected now, so each draft is created intentionally.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {completionSteps.map((step, idx) => (
+              <div key={step.key} className="flex items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full"
+                  style={{
+                    background: step.done ? "#dcfce7" : "#ffffffcc",
+                    color: step.done ? "#166534" : "#475569",
+                    border: `1px solid ${step.done ? "#86efac" : "#cbd5e1"}`,
+                  }}>
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black"
+                    style={{ background: step.done ? "#22c55e" : "#e2e8f0", color: step.done ? "#fff" : "#475569" }}>
+                    {step.done ? "✓" : idx + 1}
+                  </span>
+                  <span className="text-xs font-semibold">{step.label}</span>
+                </div>
+                {idx < completionSteps.length - 1 && (
+                  <span className="text-xs font-bold" style={{ color: "#94a3b8" }}>→</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-5">
 
         {/* Pass Type */}
-        <div>
-          <p className="text-sm font-semibold mb-2" style={{ color: "var(--text)" }}>Pass Type</p>
+        <div className="rounded-2xl border p-4"
+          style={{ background: "var(--surface)", borderColor: !passType && error === "Pass type is required" ? "#fca5a5" : "var(--border)" }}>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-sm font-bold" style={{ color: "var(--text)" }}>1. Pass Type</p>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Choose the workflow this vehicle belongs to.</p>
+            </div>
+            {!passType && (
+              <span className="text-[10px] px-2 py-1 rounded-full font-bold"
+                style={{ background: "#fff7ed", color: "#c2410c" }}>
+                Select one
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {passTypeOptions.map(opt => {
               const active = passType === opt.value;
               return (
                 <button key={opt.value} type="button"
                   onClick={() => handlePassTypeChange(opt.value)}
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all"
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl border text-center transition-all"
                   style={active
-                    ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", borderColor: "#2563eb", color: "#fff" }
-                    : { background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text-muted)" }
+                    ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", borderColor: "#2563eb", color: "#fff", boxShadow: "0 12px 30px rgba(37,99,235,0.25)" }
+                    : { background: "linear-gradient(180deg,#ffffff,#f8fafc)", borderColor: "var(--border)", color: "var(--text-muted)" }
                   }>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={opt.icon} />
-                  </svg>
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                    style={{ background: active ? "rgba(255,255,255,0.16)" : "#eef2ff" }}>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={opt.icon} />
+                    </svg>
+                  </div>
                   <span className="text-xs font-bold leading-tight">{opt.label}</span>
                 </button>
               );
@@ -392,26 +461,44 @@ export default function SecurityCreatePage() {
         </div>
 
         {/* Gate Direction */}
-        <div>
-          <p className="text-sm font-semibold mb-2" style={{ color: "var(--text)" }}>Gate Direction</p>
+        <div className="rounded-2xl border p-4"
+          style={{ background: "var(--surface)", borderColor: !direction && error === "Gate direction is required" ? "#fca5a5" : "var(--border)" }}>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-sm font-bold" style={{ color: "var(--text)" }}>2. Gate Direction</p>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Tell the system whether the vehicle is going out or coming in.</p>
+            </div>
+            {!direction && (
+              <span className="text-[10px] px-2 py-1 rounded-full font-bold"
+                style={{ background: "#fff7ed", color: "#c2410c" }}>
+                Select one
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {(["OUT", "IN"] as Direction[]).map(dir => {
               const active = direction === dir;
               const isOut  = dir === "OUT";
               return (
                 <button key={dir} type="button" onClick={() => setDirection(dir)}
-                  className="flex items-center gap-3 px-4 py-3.5 rounded-xl border font-bold text-sm transition-all"
+                  className="flex items-center gap-3 px-4 py-4 rounded-2xl border font-bold text-sm transition-all"
                   style={active
-                    ? { background: isOut ? "linear-gradient(135deg,#1e1b4b,#3730a3)" : "linear-gradient(135deg,#042f2e,#0f766e)", borderColor: isOut ? "#818cf8" : "#2dd4bf", color: "#fff" }
-                    : { background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text-muted)" }
+                    ? { background: isOut ? "linear-gradient(135deg,#1e1b4b,#3730a3)" : "linear-gradient(135deg,#042f2e,#0f766e)", borderColor: isOut ? "#818cf8" : "#2dd4bf", color: "#fff", boxShadow: isOut ? "0 12px 28px rgba(67,56,202,0.28)" : "0 12px 28px rgba(13,148,136,0.22)" }
+                    : { background: "linear-gradient(180deg,#ffffff,#f8fafc)", borderColor: "var(--border)", color: "var(--text-muted)" }
                   }>
-                  <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {isOut
-                      ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-                    }
-                  </svg>
-                  Gate {dir}
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: active ? "rgba(255,255,255,0.14)" : isOut ? "#eef2ff" : "#ecfeff" }}>
+                    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {isOut
+                        ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                      }
+                    </svg>
+                  </div>
+                  <div className="text-left">
+                    <p>Gate {dir}</p>
+                    <p className="text-[11px] font-medium opacity-75">{isOut ? "Vehicle leaving location" : "Vehicle arriving at location"}</p>
+                  </div>
                 </button>
               );
             })}
@@ -419,11 +506,14 @@ export default function SecurityCreatePage() {
         </div>
 
         {/* ── Vehicle Details + Assign To (single card) ── */}
-        <div className="rounded-2xl border p-4 flex flex-col gap-4"
+        <div className="rounded-2xl border p-5 flex flex-col gap-4"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
 
           <div className="flex items-center justify-between">
-            <p className="text-sm font-bold" style={{ color: "var(--text)" }}>Vehicle Details</p>
+            <div>
+              <p className="text-sm font-bold" style={{ color: "var(--text)" }}>3. Vehicle & Owner</p>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Pick the vehicle and the person who should finish the full form.</p>
+            </div>
             {passType === "AFTER_SALES" && (
               <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
                 style={{ background: "#eff6ff", color: "#2563eb" }}>
@@ -454,14 +544,17 @@ export default function SecurityCreatePage() {
                 const active = assignTo === opt.value;
                 return (
                   <button key={opt.value} type="button" onClick={() => setAssignTo(opt.value)}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border text-sm transition-all"
+                    className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border text-sm transition-all"
                     style={active
-                      ? { background: "linear-gradient(135deg,#064e3b,#065f46)", borderColor: "#34d399", color: "#fff" }
-                      : { background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text-muted)" }
+                      ? { background: "linear-gradient(135deg,#064e3b,#065f46)", borderColor: "#34d399", color: "#fff", boxShadow: "0 12px 28px rgba(5,150,105,0.22)" }
+                      : { background: "linear-gradient(180deg,#ffffff,#f8fafc)", borderColor: "var(--border)", color: "var(--text-muted)" }
                     }>
-                    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={opt.icon} />
-                    </svg>
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: active ? "rgba(255,255,255,0.14)" : "#f1f5f9" }}>
+                      <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={opt.icon} />
+                      </svg>
+                    </div>
                     <div className="text-left">
                       <p className="text-xs font-bold leading-tight">{opt.label}</p>
                       <p className="text-[10px] font-normal leading-tight opacity-70">{opt.desc}</p>
@@ -474,14 +567,14 @@ export default function SecurityCreatePage() {
         </div>
 
         {/* Info banner */}
-        <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl border"
-          style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+        <div className="flex items-start gap-3 px-4 py-3.5 rounded-2xl border"
+          style={{ background: "linear-gradient(135deg,#eff6ff,#eef2ff)", borderColor: "#bfdbfe" }}>
           <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-xs" style={{ color: "#1d4ed8" }}>
-            The assigned <strong>{assignTo === "INITIATOR" ? "Initiator" : "Service Advisor"}</strong> will be notified to complete this gate pass.
-            It will appear in your Gate {direction} queue once completed and approved.
+            The selected owner will be notified to complete this gate pass.
+            {direction ? ` It will appear in your Gate ${direction} queue once completed and approved.` : ""}
           </p>
         </div>
 
@@ -506,7 +599,7 @@ export default function SecurityCreatePage() {
 
         <button
           type="submit"
-          disabled={submitting || !selectedVehicle || !!success}
+          disabled={submitting || !selectedVehicle || !passType || !direction || !assignTo || !!success}
           className="w-full py-3 rounded-xl text-white font-bold text-sm transition-all disabled:opacity-50"
           style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
         >

@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation } from "@/lib/location-api";
+
+function ciLocation(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? { equals: normalized, mode: "insensitive" as const } : undefined;
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -49,7 +55,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       });
 
       // Notify Security Officers
-      const securityOfficers = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+      const securityWhere = gatePass.fromLocation
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
+        : { role: "SECURITY_OFFICER" as any };
+      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
           data: securityOfficers.map((s: { id: string }) => ({
@@ -214,7 +223,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Notify Security Officers at toLocation (where the vehicle is arriving)
     const toLoc = gatePass.toLocation as string | null;
     const securityWhere = toLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: toLoc }
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(toLoc) }
       : { role: "SECURITY_OFFICER" as any };
     const securityOfficers = await prisma.user.findMany({ where: securityWhere });
     if (securityOfficers.length > 0) {
@@ -238,19 +247,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     const isMainIn   = gatePass.passSubType === "MAIN_IN";
+    const isSubOut   = gatePass.passSubType === "SUB_OUT";
     const isSubOutIn = gatePass.passSubType === "SUB_OUT_IN";
     const isSubIn    = gatePass.passSubType === "SUB_IN";
     const isLT       = gatePass.passType === "LOCATION_TRANSFER";
 
     // SUB_IN: confirmed at APPROVED (Security B confirms vehicle entered ASO compound)
-    // MAIN_IN: confirmed at INITIATOR_IN (new flow) or GATE_OUT (legacy)
+    // MAIN_IN: confirmed at APPROVED directly (no initiator step) or INITIATOR_IN (legacy) or GATE_OUT (legacy)
+    // SUB_OUT: destination Security confirms Gate IN at GATE_OUT or INITIATOR_OUT status
+    //   (INITIATOR_OUT = Initiator confirmed departure but no source SO processed Gate OUT)
     // Others: confirmed at GATE_OUT
-    const validSubIn     = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
-    const validGateOut   = gatePass.status === "GATE_OUT" && (isMainIn || isSubOutIn || isLT);
-    const validInitiatorIn = gatePass.status === "INITIATOR_IN" && isMainIn;
-    if (!validSubIn && !validGateOut && !validInitiatorIn) {
+    const validSubIn          = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
+    const validApprovedMainIn = isMainIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
+    const validGateOut        = gatePass.status === "GATE_OUT" && (isMainIn || isSubOut || isSubOutIn || isLT);
+    const validInitiatorIn    = gatePass.status === "INITIATOR_IN" && isMainIn;
+    if (!validSubIn && !validApprovedMainIn && !validGateOut && !validInitiatorIn) {
       return NextResponse.json({ error: "Not eligible for Security Gate IN confirmation" }, { status: 400 });
     }
+
+    let liveLocationUpdate: { message: string; currentLocation: { label: string } } | null = null;
+    let liveLocationUpdateError: string | null = null;
 
     const updated = await prisma.gatePass.update({
       where: { id },
@@ -261,16 +277,65 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    const targetLabel = gatePass.toLocation as string | null;
+    if ((isLT || isSubOut || isSubOutIn || validApprovedMainIn || validSubIn) && targetLabel) {
+      try {
+        const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+        let targetLocation = findPlantLocationOption(plantOptions, targetLabel);
+
+        // SAP live options only include locations with vehicles currently parked there.
+        // Fall back to the DB LocationOption table which covers all configured locations.
+        if (!targetLocation) {
+          const dbLocations = await prisma.locationOption.findMany();
+          targetLocation = findPlantLocationOption(
+            dbLocations.map((l) => ({
+              plantCode: l.plantCode,
+              plantDescription: l.plantDescription,
+              storageLocation: l.storageLocation,
+              storageDescription: l.storageDescription,
+            })),
+            targetLabel
+          );
+        }
+
+        if (targetLocation) {
+          liveLocationUpdate = await updateVehiclePlantLocation({
+            identifiers: [
+              gatePass.vehicle,
+              body.receivedChassis,
+              gatePass.chassis,
+            ],
+            destination: targetLocation,
+            // SAP removes vehicles from /plant after a location transfer is processed.
+            // Provide typed fallback identifiers so the update still works.
+            sapFallback: {
+              externalNo: gatePass.vehicle,
+              chassisNo: body.receivedChassis || gatePass.chassis,
+            },
+          });
+        } else {
+          liveLocationUpdateError = `SAP location not found for "${targetLabel}" — vehicle location was not updated in SAP.`;
+          console.warn("[security_gate_in] no matching SAP plant location for:", targetLabel);
+        }
+      } catch (error) {
+        console.error("[security_gate_in] live location update failed:", error);
+        liveLocationUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
+      }
+    }
+
     // Notify pass creator
     await prisma.notification.create({
       data: {
         userId: gatePass.createdById,
         type: "GATE_PASS_RECEIVED",
-        title: isSubOutIn ? "Vehicle Returned — Security Confirmed Gate IN"
-          : isSubIn ? "Vehicle Received at Sub-Location — Security Confirmed"
-          : isLT ? "Vehicle Arrived at Destination — Security Confirmed Gate IN"
+        title: isSubOut  ? "Vehicle Arrived at Sub-Location — Security Confirmed Gate IN"
+          : isSubOutIn ? "Vehicle Returned — Security Confirmed Gate IN"
+          : isSubIn    ? "Vehicle Received at Sub-Location — Security Confirmed"
+          : isLT       ? "Vehicle Arrived at Destination — Security Confirmed Gate IN"
           : "Vehicle Arrived — Security Confirmed Gate IN",
-        message: isSubOutIn
+        message: isSubOut
+          ? `${gatePass.gatePassNumber} — Security Officer at ${gatePass.toLocation ?? "destination"} confirmed vehicle arrived at sub-location via Gate IN.`
+          : isSubOutIn
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle returned to DIMO via Gate IN.`
           : isSubIn
           ? `${gatePass.gatePassNumber} — Security Officer confirmed vehicle has entered the sub-location compound.`
@@ -300,6 +365,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // For SUB_OUT: notify Initiators at the destination location (toLocation) — they receive the vehicle
+    if (isSubOut) {
+      const toLoc = gatePass.toLocation as string | null;
+      if (toLoc) {
+        const destInitiators = await prisma.user.findMany({
+          where: { role: "INITIATOR", defaultLocation: ciLocation(toLoc) },
+        });
+        const destInitiatorsToNotify = destInitiators.filter((u) => u.id !== gatePass.createdById);
+        if (destInitiatorsToNotify.length > 0) {
+          await prisma.notification.createMany({
+            data: destInitiatorsToNotify.map((u) => ({
+              userId: u.id,
+              type: "GATE_PASS_RECEIVED",
+              title: "Vehicle Arrived — Security Confirmed Gate IN",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security Officer confirmed vehicle has arrived at ${toLoc}.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+        }
+      }
+    }
+
     // For SUB_OUT_IN: also notify the Initiator who created the original (parent) pass
     if (isSubOutIn && gatePass.parentPassId) {
       const parentPass = await (prisma.gatePass as any).findUnique({
@@ -319,7 +406,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    return NextResponse.json({ gatePass: updated });
+    return NextResponse.json({
+      gatePass: updated,
+      liveLocationUpdate,
+      liveLocationUpdateError,
+    });
   }
 
   // SECURITY_OFFICER: confirm Gate OUT for any APPROVED pass (or INITIATOR_OUT for SUB_OUT two-step)
@@ -364,7 +455,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Notify SECURITY + INITIATOR at toLocation for Location Transfer
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: toLoc } : {};
+      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
 
       const [destSecurity, destInitiators] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
@@ -405,18 +496,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    // For After Sales SUB_OUT: notify ASOs that vehicle is heading their way
+    // For After Sales SUB_OUT: notify destination Security + Initiators + ASOs
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {
-      const asoUsers = await prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" } });
-      if (asoUsers.length > 0) {
+      const toLoc = gatePass.toLocation as string | null;
+      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+
+      const [destSecurity, destInitiators, asoUsers] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" } }),
+      ]);
+
+      const destUsers = [...destSecurity, ...destInitiators, ...asoUsers];
+      if (destUsers.length > 0) {
         await prisma.notification.createMany({
-          data: asoUsers.map((a: { id: string }) => ({
-            userId: a.id,
-            type: "GATE_PASS_RECEIVED",
-            title: "Vehicle Heading Your Way — Confirm Sub IN on Arrival",
-            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security confirmed Gate OUT. Vehicle is en route to your sub-location. Please confirm arrival.`,
-            gatePassId: gatePass.id,
-          })),
+          data: destUsers.map((u: { id: string }) => {
+            const isSO = destSecurity.some((s: { id: string }) => s.id === u.id);
+            const isInit = destInitiators.some((i: { id: string }) => i.id === u.id);
+            return {
+              userId: u.id,
+              type: "GATE_PASS_RECEIVED",
+              title: isSO
+                ? "Incoming Vehicle — Confirm Gate IN on Arrival"
+                : isInit
+                ? "Vehicle Arriving — Check Vehicle Arrivals"
+                : "Vehicle Heading Your Way — Confirm Sub IN on Arrival",
+              message: isSO
+                ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security confirmed Gate OUT from ${gatePass.fromLocation ?? "source"}. Vehicle en route. Please confirm Gate IN when it arrives.`
+                : isInit
+                ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm.`
+                : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Security confirmed Gate OUT. Vehicle is en route to your sub-location. Please confirm arrival.`,
+              gatePassId: gatePass.id,
+            };
+          }),
         });
       }
     }
@@ -447,26 +559,65 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "This pass must be processed via the correct action" }, { status: 403 });
     }
 
-    // SUB_OUT: two-step — initiator confirms first (INITIATOR_OUT), then security confirms GATE_OUT
+    // SUB_OUT: smart two-step — check if a source SO exists at fromLocation
+    // If YES: INITIATOR_OUT (source SO confirms Gate OUT) → then destination SO confirms Gate IN
+    // If NO:  skip to GATE_OUT directly and notify destination SO + Initiators
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {
-      const updated = await prisma.gatePass.update({
-        where: { id },
-        data: { status: "INITIATOR_OUT" as any },
-      });
-      // Notify Security Officers to confirm physical Gate OUT
-      const securityOfficers = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
-      if (securityOfficers.length > 0) {
+      const fromLoc = gatePass.fromLocation as string | null;
+      const sourceSOs = fromLoc
+        ? await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) } })
+        : [];
+
+      if (sourceSOs.length > 0) {
+        // Source SO exists → two-step: INITIATOR_OUT, only notify source SO
+        const updated = await prisma.gatePass.update({
+          where: { id },
+          data: { status: "INITIATOR_OUT" as any },
+        });
         await prisma.notification.createMany({
-          data: securityOfficers.map((s: { id: string }) => ({
+          data: sourceSOs.map((s: { id: string }) => ({
             userId: s.id,
             type: "GATE_PASS_APPROVED",
             title: "Sub OUT Ready — Confirm Gate Release",
-            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Initiator confirmed vehicle departure. Please confirm Gate OUT at the security gate.`,
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Initiator confirmed departure. Please confirm Gate OUT at the security gate.`,
             gatePassId: gatePass.id,
           })),
         });
+        return NextResponse.json({ gatePass: updated });
+      } else {
+        // No source SO → go directly to GATE_OUT, notify destination SO + Initiators
+        const now = new Date();
+        const updated = await prisma.gatePass.update({
+          where: { id },
+          data: {
+            status: "GATE_OUT",
+            departureDate: now.toISOString().split("T")[0],
+            departureTime: now.toTimeString().slice(0, 5),
+          },
+        });
+        const toLoc = gatePass.toLocation as string | null;
+        const destFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+        const [destSOs, destInitiators] = await Promise.all([
+          prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destFilter } }),
+          prisma.user.findMany({ where: { role: "INITIATOR", ...destFilter } }),
+        ]);
+        const allDest = [...destSOs, ...destInitiators];
+        if (allDest.length > 0) {
+          const destSOIds = new Set(destSOs.map((s: { id: string }) => s.id));
+          await prisma.notification.createMany({
+            data: allDest.map((u: { id: string }) => ({
+              userId: u.id,
+              type: destSOIds.has(u.id) ? "GATE_PASS_APPROVED" : "GATE_PASS_RECEIVED",
+              title: destSOIds.has(u.id) ? "Incoming Vehicle — Confirm Gate IN on Arrival" : "Vehicle Arriving — Check Vehicle Arrivals",
+              message: destSOIds.has(u.id)
+                ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle en route from ${fromLoc ?? "source"}. No source gate security. Please confirm Gate IN on arrival.`
+                : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+        }
+        return NextResponse.json({ gatePass: updated });
       }
-      return NextResponse.json({ gatePass: updated });
     }
 
     const updated = await prisma.gatePass.update({
@@ -573,7 +724,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     } else {
       // Non-AFTER_SALES (LT): notify INITIATORs at toLocation
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: toLoc } : {};
+      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
       const destInitiators = await prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } });
       if (destInitiators.length > 0) {
         await prisma.notification.createMany({
@@ -667,15 +818,46 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Only rejected passes can be resubmitted" }, { status: 400 });
     }
 
-    const { resubmitNote, departureDate, departureTime } = body;
+    const {
+      resubmitNote,
+      // All editable fields — initiator can correct any data before resubmitting
+      vehicle, chassis, make, vehicleColor,
+      toLocation, fromLocation, outReason,
+      departureDate, departureTime, arrivalDate, arrivalTime,
+      transportMode, carrierName, carrierRegNo, companyName,
+      driverName, driverNIC, driverContact,
+      mileage, insurance, garagePlate,
+      requestedBy,
+    } = body;
+
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
         status: "PENDING_APPROVAL",
         resubmitCount: (gatePass.resubmitCount ?? 0) + 1,
         resubmitNote: resubmitNote || null,
-        ...(departureDate ? { departureDate } : {}),
-        ...(departureTime ? { departureTime } : {}),
+        ...(vehicle        ? { vehicle }        : {}),
+        ...(chassis        !== undefined ? { chassis }        : {}),
+        ...(make           !== undefined ? { make }           : {}),
+        ...(vehicleColor   !== undefined ? { vehicleColor }   : {}),
+        ...(toLocation     ? { toLocation }     : {}),
+        ...(fromLocation   !== undefined ? { fromLocation }   : {}),
+        ...(outReason      !== undefined ? { outReason }      : {}),
+        ...(departureDate  ? { departureDate }  : {}),
+        ...(departureTime  ? { departureTime }  : {}),
+        ...(arrivalDate    !== undefined ? { arrivalDate }    : {}),
+        ...(arrivalTime    !== undefined ? { arrivalTime }    : {}),
+        ...(transportMode  !== undefined ? { transportMode }  : {}),
+        ...(carrierName    !== undefined ? { carrierName }    : {}),
+        ...(carrierRegNo   !== undefined ? { carrierRegNo }   : {}),
+        ...(companyName    !== undefined ? { companyName }    : {}),
+        ...(driverName     !== undefined ? { driverName }     : {}),
+        ...(driverNIC      !== undefined ? { driverNIC }      : {}),
+        ...(driverContact  !== undefined ? { driverContact }  : {}),
+        ...(mileage        !== undefined ? { mileage }        : {}),
+        ...(insurance      !== undefined ? { insurance }      : {}),
+        ...(garagePlate    !== undefined ? { garagePlate }    : {}),
+        ...(requestedBy    !== undefined ? { requestedBy }    : {}),
       },
     });
 

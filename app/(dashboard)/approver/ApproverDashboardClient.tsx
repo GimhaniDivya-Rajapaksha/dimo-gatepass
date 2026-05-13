@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 
-type Stats = { pending: number; approved: number; rejected: number; gateOut: number; completed: number; total: number };
+type Stats = { pending: number; cashierReview: number; approved: number; rejected: number; gateOut: number; completed: number; cancelled: number; total: number };
 
 type GatePass = {
   id: string; gatePassNumber: string; passType: string; passSubType: string | null; status: string;
@@ -110,7 +110,7 @@ function StatCard({ label, value, accentColor, icon, loading }: {
 }
 
 export default function ApproverDashboardClient({ user }: Props) {
-  const [stats, setStats] = useState<Stats>({ pending: 0, approved: 0, rejected: 0, gateOut: 0, completed: 0, total: 0 });
+  const [stats, setStats] = useState<Stats>({ pending: 0, cashierReview: 0, approved: 0, rejected: 0, gateOut: 0, completed: 0, cancelled: 0, total: 0 });
   const [statsLoading, setStatsLoading] = useState(true);
   const [queue, setQueue] = useState<GatePass[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);

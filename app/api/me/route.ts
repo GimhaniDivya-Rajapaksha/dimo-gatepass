@@ -14,6 +14,7 @@ export async function GET() {
       id: true,
       name: true,
       role: true,
+      defaultLocation: true,
       approver: { select: { id: true, name: true } },
     },
   });

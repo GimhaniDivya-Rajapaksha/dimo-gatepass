@@ -181,7 +181,6 @@ export default function DatePicker({
           </svg>
         )}
       </button>
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
 
       {/* ── Calendar popup — rendered at fixed position to escape overflow:hidden parents ── */}
       <AnimatePresence>

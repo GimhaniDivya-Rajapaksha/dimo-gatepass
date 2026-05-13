@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
 
     const fromLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
     const vehicleUpper = vehicle.trim().toUpperCase();
+    const draftAssignmentMarker = `[[ASSIGNED_ROLE:${notifyRole}]]`;
 
     // ── Step 1: create the pass with DRAFT status ──
     const gatePass = await (prisma.gatePass as any).create({
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
         vehicleColor: vehicleColor || null,
         fromLocation,
         createdById:  session.user.id,
+        comments:     draftAssignmentMarker,
       },
     });
 

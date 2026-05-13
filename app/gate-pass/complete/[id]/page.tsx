@@ -148,6 +148,7 @@ export default function CompletePassPage() {
     );
   }
 
+  if (error) return <div className="text-center py-24" style={{ color: "#dc2626" }}>{error}</div>;
   if (!pass) return <div className="text-center py-24" style={{ color: "var(--text-muted)" }}>Pass not found</div>;
 
   function validate() {

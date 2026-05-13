@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { signIn, getSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -23,13 +23,28 @@ const STATS = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  const authError = searchParams.get("error");
+  const externalError =
+    authError === "AccountNotProvisioned"
+      ? "Your Azure AD account is valid, but this email is not assigned in the Gate Pass system yet."
+      : authError === "NoAzureEmail"
+        ? "Azure AD did not return an email address for this account."
+        : authError === "AccountProvisioningFailed"
+          ? "Microsoft sign-in succeeded, but we could not create your local Gate Pass account."
+        : authError === "OAuthCallback"
+          ? "Microsoft sign-in callback failed. Check Azure redirect URI, tenant/client values, and client secret."
+        : authError === "AccessDenied"
+          ? "Sign-in was denied for this account."
+          : "";
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setError("");
@@ -57,7 +72,14 @@ export default function LoginPage() {
     else if (role === "CASHIER") router.push("/cashier");
     else if (role === "AREA_SALES_OFFICER") router.push("/aso");
     else if (role === "SECURITY_OFFICER") router.push("/security");
+    else if (role === "SERVICE_ADVISOR") router.push("/initiator");
     else router.push("/");
+  }
+
+  async function handleMicrosoftSignIn() {
+    setLoading(true);
+    setError("");
+    await signIn("azure-ad", { callbackUrl: "/" });
   }
 
   return (
@@ -243,6 +265,7 @@ export default function LoginPage() {
                   placeholder="you@dimo.lk"
                   className="w-full px-4 py-3 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                  suppressHydrationWarning
                 />
               </div>
 
@@ -263,6 +286,7 @@ export default function LoginPage() {
                     placeholder="••••••••••"
                     className="w-full px-4 py-3 pr-12 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                    suppressHydrationWarning
                   />
                   <button
                     type="button"
@@ -284,13 +308,13 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {error && (
+              {(error || externalError) && (
                 <motion.div
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl"
                 >
-                  {error}
+                  {error || externalError}
                 </motion.div>
               )}
 
@@ -313,6 +337,30 @@ export default function LoginPage() {
                 ) : "Sign In"}
               </motion.button>
             </form>
+
+            <div className="my-5 flex items-center gap-3">
+              <div className="h-px flex-1" style={{ background: "var(--border)" }} />
+              <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>or</span>
+              <div className="h-px flex-1" style={{ background: "var(--border)" }} />
+            </div>
+
+            <motion.button
+              type="button"
+              onClick={handleMicrosoftSignIn}
+              disabled={loading}
+              whileHover={{ scale: loading ? 1 : 1.02 }}
+              whileTap={{ scale: loading ? 1 : 0.98 }}
+              className="w-full py-3 rounded-xl font-semibold text-sm border transition-all disabled:opacity-70 flex items-center justify-center gap-3"
+              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#f25022" d="M1 1h10v10H1z" />
+                <path fill="#00a4ef" d="M13 1h10v10H13z" />
+                <path fill="#7fba00" d="M1 13h10v10H1z" />
+                <path fill="#ffb900" d="M13 13h10v10H13z" />
+              </svg>
+              Sign in with Microsoft
+            </motion.button>
 
             {/* Sign up link */}
             <p className="text-center text-sm mt-6" style={{ color: "var(--text-muted)" }}>

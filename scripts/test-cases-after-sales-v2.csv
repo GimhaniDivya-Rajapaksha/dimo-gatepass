@@ -1,0 +1,185 @@
+Test Case ID,Sub ID,Test Case Description,Scenario,Screen,Pre-conditions,Test Steps,Test Data,Expected Result,Actual Result,Status v1.0,Priority,Comments
+AS-TC-001,AS-TC-001-01,Create MAIN_IN with valid mandatory details,Happy path - vehicle checked in for service,Create Gate Pass > Service/Repair > Gate IN,"User logged in as Initiator or Service Advisor. Vehicle exists in lookup. DIMO receiving location exists.","1. Open Create Gate Pass
+2. Select Service / Repair
+3. Keep Gate IN mode
+4. Search and select vehicle
+5. Select at least one job type
+6. Select receiving location
+7. Enter arrival date and arrival time
+8. Submit form","Vehicle: WP-CAB-1234 | Job Type: Repair | Receiving Location: Altair Showroom | Arrival: 2026-04-02 09:30","MAIN_IN pass is created successfully, gate pass number is generated, status becomes APPROVED, and it appears in My Gate Passes / Service-Repair.",,Open,Critical,MAIN_IN is auto-approved in current system logic.
+AS-TC-001,AS-TC-001-02,Validate MAIN_IN vehicle required,Field validation,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator or Service Advisor.,"1. Open Service / Repair Gate IN form
+2. Leave vehicle field blank
+3. Fill all other mandatory fields
+4. Click Submit","Vehicle: blank","Form is blocked. Inline error for vehicle is shown and submission does not continue.",,Open,Critical,
+AS-TC-001,AS-TC-001-03,Validate MAIN_IN job type required,Field validation,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator or Service Advisor.,"1. Open Service / Repair Gate IN form
+2. Select vehicle and location
+3. Do not select any job type
+4. Enter valid arrival date/time
+5. Click Submit","Job Type: none","Form is blocked with validation message indicating at least one job type is required.",,Open,High,
+AS-TC-001,AS-TC-001-04,Validate MAIN_IN receiving location required,Field validation,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator or Service Advisor.,"1. Open Gate IN form
+2. Select vehicle and job type
+3. Leave receiving location blank
+4. Enter valid arrival date/time
+5. Click Submit","Receiving Location: blank","Form is blocked and receiving location field shows required validation.",,Open,High,
+AS-TC-001,AS-TC-001-05,Validate MAIN_IN arrival date cannot be in past,Date validation,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator or Service Advisor.,"1. Fill valid MAIN_IN details
+2. Set arrival date to a past date
+3. Click Submit","Arrival Date: yesterday","Form is blocked with message that arrival date cannot be in the past.",,Open,High,
+AS-TC-001,AS-TC-001-06,Validate MAIN_IN arrival time cannot be in past for current day,Time validation,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator or Service Advisor.,"1. Fill valid MAIN_IN details
+2. Select today's date
+3. Select a time earlier than current time
+4. Click Submit","Arrival Time: 1 hour before current time","Form is blocked with message that arrival time cannot be in the past.",,Open,Medium,Applies when selected date is today.
+AS-TC-001,AS-TC-001-07,Validate DL/NIC old format accepted in transport details,Input standard validation,Create Gate Pass > Service/Repair > Gate IN > Transportation Details,User logged in as Initiator or Service Advisor.,"1. Fill valid MAIN_IN details
+2. Select transport mode Driver or Carrier
+3. Enter old NIC format 123456789V
+4. Enter other mandatory transport fields
+5. Submit","Driver NIC: 123456789V","Form accepts the old NIC format and submission succeeds if all other fields are valid.",,Open,Medium,Current validation accepts 9 digits + V/X or 12 digits.
+AS-TC-001,AS-TC-001-08,Validate invalid DL/NIC format rejected,Input standard validation,Create Gate Pass > Service/Repair > Gate IN > Transportation Details,User logged in as Initiator or Service Advisor.,"1. Fill valid MAIN_IN details
+2. Select transport mode Driver or Carrier
+3. Enter invalid NIC/DL format
+4. Click Submit","Driver NIC: 12345ABC","Form is blocked with invalid NIC format message.",,Open,High,
+AS-TC-001,AS-TC-001-09,Validate transport mode Customer requires customer details,Field validation,Create Gate Pass > Service/Repair > Gate IN > Transportation Details,User logged in as Initiator or Service Advisor.,"1. Fill valid MAIN_IN details
+2. Select transport mode Customer
+3. Leave customer name or contact blank
+4. Submit","Customer Name: blank | Contact: blank","Form is blocked. Required validation is shown for customer details.",,Open,Medium,
+AS-TC-001,AS-TC-001-10,Verify time picker UI does not duplicate AM PM,UI component,Create Gate Pass > Service/Repair > Gate IN,User logged in.,"1. Open arrival time picker
+2. Inspect hour column and period column
+3. Select a time","Time Picker component","AM/PM is shown clearly in one place only and not duplicated beside each selected hour in a confusing way.",,Open,Medium,UI standards check.
+AS-TC-002,AS-TC-002-01,Security confirms MAIN_IN gate in at correct location,Happy path,Gate IN / OUT,MAIN_IN exists in APPROVED state for Security Officer location.,"1. Login as Security Officer for source location
+2. Open Gate IN / OUT queue
+3. Find MAIN_IN pass
+4. Slide to confirm Gate IN","GP from MAIN_IN created by Initiator","Pass status becomes COMPLETED and notification is sent to pass creator.",,Open,Critical,
+AS-TC-002,AS-TC-002-02,MAIN_IN should not appear for wrong security location,Role and location scoping,Gate IN / OUT,MAIN_IN exists for a different location.,"1. Login as Security Officer from another location
+2. Open Gate IN / OUT queue
+3. Search for the pass","MAIN_IN for different branch","Pass is not shown to the wrong security user.",,Open,High,
+AS-TC-002,AS-TC-002-03,Security queue card shows required MAIN_IN details,UI and data visibility,Gate IN / OUT,MAIN_IN exists in APPROVED state.,"1. Open security queue
+2. Inspect MAIN_IN card","Vehicle number | chassis | GP number | location","Card shows correct vehicle and gate pass details needed for gate action without broken or empty labels.",,Open,Medium,
+AS-TC-003,AS-TC-003-01,Search linked pass by MAIN_IN gate pass number for next movement,Happy path,Create Gate Pass > Service/Repair > Create Linked Pass,Completed MAIN_IN exists.,"1. Open Service / Repair linked pass creation
+2. Enter MAIN_IN gate pass number
+3. Click Find","Gate Pass No: GP-xxxx","System finds the linked journey and loads the vehicle card and available next movement options.",,Open,Critical,
+AS-TC-003,AS-TC-003-02,Search linked pass by visible journey number after sub movement,Journey continuity,Create Gate Pass > Service/Repair > Create Linked Pass,An After Sales journey already has SUB_OUT or SUB_IN.,"1. Open linked pass search
+2. Search using the original journey gate pass number
+3. Click Find","Original GP number from MAIN_IN","System resolves the journey correctly and does not lose the chain because of sub-passes.",,Open,High,Validates maintained single visible journey number.
+AS-TC-003,AS-TC-003-03,Invalid linked pass number shows helpful error,Negative path,Create Gate Pass > Service/Repair > Create Linked Pass,User logged in.,"1. Enter invalid or unknown gate pass number
+2. Click Find","GP-9999","System does not continue. It shows a clear error/help text and no stale vehicle data remains.",,Open,High,
+AS-TC-003,AS-TC-003-04,After Sales journey timeline shows stages in correct order,UI component,Gate Pass Detail View,Journey exists with parent and sub-passes.,"1. Open detail view from eye icon
+2. Inspect After Sales Journey section","Journey with MAIN_IN, SUB_OUT, SUB_IN, MAIN_OUT","Timeline order is logical, statuses are readable, and each stage links to the correct movement record.",,Open,Medium,
+AS-TC-004,AS-TC-004-01,Create SUB_OUT from linked MAIN_IN with valid details,Happy path,Create Gate Pass > Service/Repair > Linked Pass,Completed MAIN_IN exists and vehicle is at main location.,"1. Search linked MAIN_IN pass
+2. Select SUB_OUT
+3. Verify current/from location is auto-filled
+4. Select destination location
+5. Enter departure date and time
+6. Submit","To Location: sub-location | Departure: 2026-04-03 10:00","SUB_OUT is created successfully with status APPROVED and appears in After Sales list/journey.",,Open,Critical,
+AS-TC-004,AS-TC-004-02,Validate SUB_OUT destination required,Field validation,Create Gate Pass > Service/Repair > Linked Pass,Linked MAIN_IN found.,"1. Select SUB_OUT
+2. Leave destination location blank
+3. Enter departure date/time
+4. Submit","To Location: blank","System blocks submission and highlights destination location as required.",,Open,High,
+AS-TC-004,AS-TC-004-03,Validate SUB_OUT origin auto-filled and read-only,UI and data integrity,Create Gate Pass > Service/Repair > Linked Pass,Linked MAIN_IN found.,"1. Select SUB_OUT
+2. Inspect From Location field","Linked MAIN_IN current location","From Location is auto-filled from current journey location and user cannot incorrectly override it.",,Open,Medium,
+AS-TC-004,AS-TC-004-04,Validate SUB_OUT departure date cannot be earlier than linked gate pass date,Date rule,Create Gate Pass > Service/Repair > Linked Pass,Linked MAIN_IN exists with later date.,"1. Search linked journey
+2. Select SUB_OUT
+3. Enter departure date earlier than linked pass date
+4. Submit","Linked MAIN_IN Date: 2026-04-01 | SUB_OUT Date: 2026-03-31","Form is blocked with message that departure date cannot be earlier than linked gate pass date.",,Open,High,
+AS-TC-004,AS-TC-004-05,Validate transport details required for SUB_OUT,Field validation,Create Gate Pass > Service/Repair > Linked Pass > Transportation Details,Linked MAIN_IN found.,"1. Select SUB_OUT
+2. Select Carrier or Driver mode
+3. Leave mandatory transport fields blank
+4. Submit","Company / Driver / Contact blank","System blocks submission and shows required field validations for transport details.",,Open,Medium,
+AS-TC-005,AS-TC-005-01,Initiator marks SUB_OUT as departing when source security exists,Happy path,My Gate Passes / Gate Pass Detail,SUB_OUT exists in APPROVED and source security exists at fromLocation.,"1. Login as pass creator
+2. Open SUB_OUT detail or list action
+3. Trigger Gate Out action","Approved SUB_OUT","Status changes to INITIATOR_OUT and source Security Officer is notified for physical gate release.",,Open,Critical,Two-step source security path.
+AS-TC-005,AS-TC-005-02,Security confirms SUB_OUT gate out,Happy path,Gate IN / OUT,SUB_OUT exists in INITIATOR_OUT for source security location.,"1. Login as source Security Officer
+2. Open queue
+3. Find SUB_OUT
+4. Slide Gate OUT","SUB_OUT in INITIATOR_OUT","Status becomes GATE_OUT and destination users receive arrival notifications.",,Open,Critical,
+AS-TC-005,AS-TC-005-03,Destination security confirms SUB_OUT gate in,Happy path,Gate IN / OUT,SUB_OUT exists in GATE_OUT and destination security is at toLocation.,"1. Login as destination Security Officer
+2. Open Gate IN queue
+3. Find SUB_OUT
+4. Slide Gate IN","SUB_OUT at destination","Status becomes COMPLETED and destination initiator/service flow can continue.",,Open,Critical,
+AS-TC-005,AS-TC-005-04,Destination initiator sees arrived SUB_OUT as SUB_IN stage in My Gate Passes,Journey visibility,My Gate Passes,SUB_OUT has been completed at destination.,"1. Login as destination initiator
+2. Open My Gate Passes
+3. Filter Service/Repair","Completed SUB_OUT journey","Journey is visible as current received stage and not lost or duplicated confusingly.",,Open,High,Validates current display behavior requested by business.
+AS-TC-005,AS-TC-005-05,Newly arrived journey appears first in security gate-in queue,List ordering,Gate IN / OUT,Multiple passes exist including newly arrived one.,"1. Open destination security queue
+2. Compare ordering of items","Multiple SUB_OUT arrivals","Newest relevant arrival appears first in the gate-in list.",,Open,Medium,
+AS-TC-006,AS-TC-006-01,Create SUB_IN after vehicle reached sub-location,Happy path,Create Gate Pass > Service/Repair > Linked Pass,SUB_OUT for journey already completed at destination.,"1. Search journey by gate pass number
+2. Select SUB_IN
+3. Verify current location context
+4. Enter valid departure date/time
+5. Submit","Linked GP number | Departure date after SUB_OUT","SUB_IN is created successfully with status APPROVED.",,Open,Critical,
+AS-TC-006,AS-TC-006-02,Validate SUB_IN cannot be created before SUB_OUT arrival is completed,Flow control,Create Gate Pass > Service/Repair > Linked Pass,SUB_OUT exists but destination gate-in not completed.,"1. Search journey
+2. Check available movement options","SUB_OUT not yet completed","SUB_IN option is locked or blocked with a clear reason until prerequisite stage is complete.",,Open,High,
+AS-TC-006,AS-TC-006-03,Security confirms SUB_IN at sub-location,Happy path,Gate IN / OUT,SUB_IN exists in APPROVED state for destination security location.,"1. Login as Security Officer at sub-location
+2. Open Gate IN queue
+3. Find SUB_IN
+4. Slide Gate IN","Approved SUB_IN","Status becomes COMPLETED and relevant initiator is notified that vehicle entered the sub-location compound.",,Open,Critical,
+AS-TC-006,AS-TC-006-04,Validate SUB_IN departure date cannot be earlier than linked MAIN_IN,Date rule,Create Gate Pass > Service/Repair > Linked Pass,Journey exists with MAIN_IN date.,"1. Search linked journey
+2. Select SUB_IN
+3. Set departure date before MAIN_IN date
+4. Submit","MAIN_IN Date: 2026-04-01 | SUB_IN Date: 2026-03-31","System blocks submission with linked date validation error.",,Open,High,
+AS-TC-007,AS-TC-007-01,Create MAIN_OUT with immediate payment orders,Happy path - cashier path,Create Gate Pass > Service/Repair > Linked Pass,SUB_IN or valid final journey state exists and SAP orders are immediate only.,"1. Search linked journey
+2. Select MAIN_OUT
+3. Confirm SAP payment panel
+4. Enter departure date/time
+5. Submit","SAP orders: immediate only","MAIN_OUT is created and routed to CASHIER_REVIEW. Cashier is notified. Approver selection is not required.",,Open,Critical,
+AS-TC-007,AS-TC-007-02,Create MAIN_OUT with credit orders requiring approver,Happy path - parallel approval path,Create Gate Pass > Service/Repair > Linked Pass,Valid journey exists and SAP returns credit orders.,"1. Search linked journey
+2. Select MAIN_OUT
+3. Review credit orders panel
+4. Select approver
+5. Submit","SAP orders: credit or mixed","MAIN_OUT is created. Status routes to CASHIER_REVIEW or PENDING_APPROVAL as designed, and approver is required for credit orders.",,Open,Critical,
+AS-TC-007,AS-TC-007-03,Validate MAIN_OUT approver required for credit orders,Field validation,Create Gate Pass > Service/Repair > Linked Pass > MAIN_OUT,SAP returns credit orders.,"1. Open MAIN_OUT flow
+2. Leave approver blank
+3. Submit","Credit orders present | Approver blank","Submission is blocked with validation that approver is required for credit orders.",,Open,High,
+AS-TC-007,AS-TC-007-04,Validate MAIN_OUT hides transportation section,UI rule,Create Gate Pass > Service/Repair > Linked Pass > MAIN_OUT,Journey found.,"1. Select MAIN_OUT
+2. Inspect form sections","MAIN_OUT form","Transportation Details and Additional Details are hidden for MAIN_OUT as per current workflow rule.",,Open,Medium,
+AS-TC-007,AS-TC-007-05,Validate MAIN_OUT visible journey number stays same as MAIN_IN,Journey consistency,Create Gate Pass / My Gate Passes / Detail View,Existing After Sales journey available.,"1. Note MAIN_IN visible gate pass number
+2. Create MAIN_OUT
+3. Open list and detail views","MAIN_IN GP number and MAIN_OUT record","Visible journey number remains same as original MAIN_IN number across the flow.",,Open,High,
+AS-TC-008,AS-TC-008-01,Cashier reviews MAIN_OUT immediate orders and proceeds,Happy path,Cashier Review > Service/Repair,MAIN_OUT exists in CASHIER_REVIEW with immediate orders pending.,"1. Login as Cashier
+2. Open Order Review
+3. Open MAIN_OUT using Review/View Orders
+4. Review order details
+5. Click Proceed and confirm","MAIN_OUT with immediate orders","Cashier portion is completed, status updates correctly, and initiator/security notifications are triggered according to remaining approval path.",,Open,Critical,
+AS-TC-008,AS-TC-008-02,Cashier view shows service order details correctly,UI and data visibility,Cashier Review > Service/Repair,MAIN_OUT exists in cashier queue.,"1. Open cashier modal/page
+2. Inspect orders list, statuses, payment terms","Order IDs | statuses | pay terms","Cashier can clearly view orders, payment terms, and next action. No broken labels or missing order summary.",,Open,Medium,
+AS-TC-008,AS-TC-008-03,MAIN_OUT with no immediate work should not stay with cashier unnecessarily,Workflow routing,Cashier Review / Approver Queue,MAIN_OUT has only credit or no orders requiring approver path.,"1. Create MAIN_OUT with no immediate orders
+2. Check cashier queue
+3. Check approver queue","Credit-only or no-order MAIN_OUT","Pass does not create unnecessary cashier work; route follows configured business logic.",,Open,High,
+AS-TC-009,AS-TC-009-01,Approver approves credit portion of MAIN_OUT,Happy path,Pending Requests / Gate Pass Detail,MAIN_OUT has credit orders pending approver review.,"1. Login as Approver
+2. Open pending After Sales request
+3. Review order/payment details
+4. Approve","MAIN_OUT with credit pending","Credit approval is recorded. If cashier is already done, pass becomes APPROVED; otherwise it remains waiting for cashier.",,Open,Critical,
+AS-TC-009,AS-TC-009-02,Approver rejects MAIN_OUT with reason,Negative path,Pending Requests / Gate Pass Detail,MAIN_OUT pending approval exists.,"1. Open pending MAIN_OUT
+2. Click Reject
+3. Enter rejection reason
+4. Confirm","Rejection Reason: Missing document","Pass becomes REJECTED and creator receives rejection notification with reason.",,Open,High,
+AS-TC-009,AS-TC-009-03,Approver queue includes MAIN_OUT credit items still waiting during cashier review,Queue logic,Pending Requests,MAIN_OUT has status CASHIER_REVIEW with credit not yet approved.,"1. Login as Approver
+2. Open pending requests
+3. Filter After Sales","MAIN_OUT in CASHIER_REVIEW with hasCredit=true and creditApproved=false","Pass is visible to approver even while cashier review is running in parallel.",,Open,High,
+AS-TC-010,AS-TC-010-01,Security confirms final MAIN_OUT gate out after all clearances,Happy path final release,Gate IN / OUT,MAIN_OUT is APPROVED after cashier/approver completion.,"1. Login as Security Officer
+2. Open queue
+3. Find final MAIN_OUT
+4. Slide Gate OUT","Approved MAIN_OUT","Status changes to GATE_OUT or final release state as designed and downstream users are notified.",,Open,Critical,
+AS-TC-010,AS-TC-010-02,Completed status shown only after final MAIN_OUT release completes,Status logic,My Gate Passes / Gate Pass Detail,Journey exists before final release.,"1. Open journey before MAIN_OUT gate release
+2. Note current status
+3. Complete final release
+4. Refresh list","Journey at MAIN_IN / SUB_OUT / SUB_IN / awaiting MAIN_OUT","Journey does not show Completed too early. Completed appears only at the true final stage.",,Open,Critical,
+AS-TC-010,AS-TC-010-03,After Sales list collapses journey into a single row by visible gate pass number,UI behavior,My Gate Passes / Gate Passes List,Journey has multiple underlying movement records.,"1. Open Service/Repair list
+2. Search by journey gate pass number","Journey with MAIN_IN + SUB_OUT + SUB_IN + MAIN_OUT","List shows one logical journey row instead of confusing duplicate rows for the same visible gate pass number.",,Open,High,
+AS-TC-011,AS-TC-011-01,Detail page shows only relevant data and hides empty sections,UI cleanliness,Gate Pass Detail / Print View,After Sales pass exists with partial data.,"1. Open eye icon detail view
+2. Open print view
+3. Check Delivery, Transportation, Additional sections","Pass with some optional fields blank","Only related fields are shown. Empty sections are hidden. Duplicate or unwanted fields are not displayed.",,Open,Medium,
+AS-TC-011,AS-TC-011-02,Print view contains journey number, dates, time, and approval actor labels clearly,Print output quality,Gate Pass Detail > Print,Printable pass exists.,"1. Open print icon view
+2. Inspect summary section","Printable MAIN_OUT or MAIN_IN","Print view includes gate pass number, departure/arrival details where applicable, and readable approval/cashier labels without truncation.",,Open,Medium,
+AS-TC-011,AS-TC-011-03,Sidebar and notification bell reflect new After Sales actions,Notification visibility,Dashboard / Sidebar / Notification Bell,User has unread After Sales notifications.,"1. Trigger flow events such as MAIN_IN create, SUB_OUT arrival, MAIN_OUT approval
+2. Check notification bell and relevant menu pages","Unread notifications for actor","Unread count updates and notifications show meaningful titles/messages for the actor's pending action.",,Open,Medium,Validate notification visibility rather than exact styling only.
+AS-TC-011,AS-TC-011-04,Role-based pages reject unauthorized access,Access control,Direct URL access,Test users for Initiator, Security Officer, Cashier, Approver, Service Advisor exist.,"1. Try to open cashier page as Initiator
+2. Try to open approver page as Security
+3. Try to open security gate queue as Cashier","Users with wrong roles","Unauthorized users are redirected or blocked from restricted flow pages.",,Open,High,
+AS-TC-012,AS-TC-012-01,Rejected After Sales pass can be resubmitted by creator,Resubmission flow,Gate Pass Detail / Rejected queue,After Sales pass is in REJECTED status and belongs to current creator.,"1. Login as creator
+2. Open rejected pass
+3. Enter resubmission note
+4. Update allowed fields
+5. Resubmit","Rejected MAIN_OUT or MAIN_IN","Pass returns to pending review state and approver receives resubmission notification.",,Open,High,Current code supports resubmit note and date/time update; broader edit scope can be validated separately if enhanced later.
+AS-TC-012,AS-TC-012-02,Creator cannot resubmit someone else's rejected pass,Authorization,Direct URL / Gate Pass Detail,Rejected pass exists for another creator.,"1. Login as different initiator
+2. Attempt to resubmit another user's rejected pass","Rejected pass owned by another user","System blocks action with forbidden/unauthorized behavior.",,Open,High,
+AS-TC-012,AS-TC-012-03,Service Advisor can access After Sales creation and pending forms,Role workflow,Create Gate Pass / Pending Forms,Service Advisor user exists.,"1. Login as Service Advisor
+2. Open Create Gate Pass
+3. Open Pending Forms","Service Advisor account","Service Advisor can access allowed After Sales creation flow and see assigned draft/pending forms relevant to their role.",,Open,Medium,Service Advisor shares initiator-style create flow in current implementation.

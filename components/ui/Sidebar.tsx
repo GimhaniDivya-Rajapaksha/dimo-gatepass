@@ -53,7 +53,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
         .then(r => r.json())
         .then(d => setDraftCount(d.total ?? 0))
         .catch(() => {});
-    }, 30_000);
+    }, 60_000);
     return () => clearInterval(id);
   }, [role]);
 
@@ -190,6 +190,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
             title="Sign out"
             className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:bg-red-500/15 hover:text-red-500"
             style={{ background: c.btnBg, color: c.btnColor }}
+            suppressHydrationWarning
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

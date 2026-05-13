@@ -94,14 +94,14 @@ export async function PATCH(req: NextRequest) {
     const creditApprovedDone = updatedPass?.creditApproved === true || updatedPass?.hasCredit === false;
 
     let newStatus: string;
-    let gatePassRecord: { gatePassNumber: string; vehicle: string; createdById: string } | null = null;
+    let gatePassRecord: { gatePassNumber: string; vehicle: string; createdById: string; fromLocation: string | null } | null = null;
 
     if (creditApprovedDone) {
       // Both done → APPROVED → Security Officer
       gatePassRecord = await prisma.gatePass.update({
         where: { id: gatePassId },
         data: { status: "APPROVED", paymentType: detectedPaymentType } as any,
-        select: { gatePassNumber: true, vehicle: true, createdById: true },
+        select: { gatePassNumber: true, vehicle: true, createdById: true, fromLocation: true },
       });
       newStatus = "APPROVED";
 
@@ -117,7 +117,10 @@ export async function PATCH(req: NextRequest) {
       });
 
       // Notify Security Officers
-      const securityOfficers = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+      const securityWhere = gatePassRecord?.fromLocation
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePassRecord.fromLocation }
+        : { role: "SECURITY_OFFICER" as any };
+      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
           data: securityOfficers.map((s: { id: string }) => ({
@@ -133,7 +136,7 @@ export async function PATCH(req: NextRequest) {
       // Cashier done but credit approval still pending
       gatePassRecord = await (prisma.gatePass as any).findUnique({
         where: { id: gatePassId },
-        select: { gatePassNumber: true, vehicle: true, createdById: true },
+        select: { gatePassNumber: true, vehicle: true, createdById: true, fromLocation: true },
       });
       newStatus = "CASHIER_REVIEW"; // stays, waiting for approver
 

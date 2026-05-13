@@ -4,6 +4,39 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail } from "@/lib/email";
 
+function ciEquals(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? { equals: normalized, mode: "insensitive" as const } : undefined;
+}
+
+function withJourneyNumber<T extends { passType?: string | null; gatePassNumber: string; parentPass?: { gatePassNumber: string } | null }>(pass: T): T {
+  if (pass.passType === "AFTER_SALES" && pass.parentPass?.gatePassNumber) {
+    return { ...pass, gatePassNumber: pass.parentPass.gatePassNumber };
+  }
+  return pass;
+}
+
+async function findApproversForLocation(location: string | null, selectedApproverName?: string) {
+  const baseWhere = location
+    ? { role: "APPROVER" as const, defaultLocation: location }
+    : { role: "APPROVER" as const };
+
+  if (selectedApproverName?.trim()) {
+    const exact = await prisma.user.findMany({
+      where: {
+        ...baseWhere,
+        name: { equals: selectedApproverName.trim(), mode: "insensitive" },
+      },
+    });
+    if (exact.length > 0) return exact;
+  }
+
+  const sameLocation = await prisma.user.findMany({ where: baseWhere });
+  if (sameLocation.length > 0) return sameLocation;
+
+  return prisma.user.findMany({ where: { role: "APPROVER" } });
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,24 +54,32 @@ export async function GET(req: NextRequest) {
 
   if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
     if (status === "DRAFT") {
-      // DRAFT passes are created by security officers — all Initiators/SAs can see and complete them
-      where.AND = [{ status: "DRAFT" }];
-    } else if (status === "GATE_OUT" && role === "INITIATOR") {
-      // Vehicle arrivals: show own GATE_OUT passes + any pass heading to their location
+      // Security-created drafts are assigned to a role and should only appear
+      // in that role's Pending Forms queue.
+      where.AND = [
+        { status: "DRAFT" },
+        { comments: { contains: `[[ASSIGNED_ROLE:${role}]]` } },
+      ];
+    } else if (role === "INITIATOR") {
+      // INITIATOR sees own passes AND sub-passes linked to their main passes
       const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
-      if (myLocation) orClauses.push({ toLocation: myLocation });
-      where.AND = [{ OR: orClauses }];
-    } else if (role === "INITIATOR") {
-      // INITIATOR sees own passes AND sub-passes linked to their main passes
+      // Also show incoming After Sales SUB_OUT passes that have already been
+      // confirmed at this initiator's location, so the destination team can
+      // track the received vehicle in "My Gate Passes".
+      if (myLocation) {
+        orClauses.push({
+          passType: "AFTER_SALES",
+          passSubType: "SUB_OUT",
+          toLocation: ciEquals(myLocation),
+          status: "COMPLETED",
+        });
+      }
       where.AND = [{
-        OR: [
-          { createdById: session.user.id },
-          { parentPass: { createdById: session.user.id } },
-        ]
+        OR: orClauses,
       }];
     }
     // SERVICE_ADVISOR (non-DRAFT): sees all passes (fall through)
@@ -55,17 +96,34 @@ export async function GET(req: NextRequest) {
       ];
       // Also show AFTER_SALES passes heading to / from this ASO's location (e.g. SUB_OUT from Initiator)
       if (asoLocation) {
-        orClauses.push({ passType: "AFTER_SALES", toLocation: asoLocation });
-        orClauses.push({ passType: "AFTER_SALES", fromLocation: asoLocation });
+        orClauses.push({ passType: "AFTER_SALES", toLocation: ciEquals(asoLocation) });
+        orClauses.push({ passType: "AFTER_SALES", fromLocation: ciEquals(asoLocation) });
       }
       where.AND = [{ OR: orClauses }];
+    }
+  } else if (role === "SECURITY_OFFICER") {
+    if (status === "DRAFT") {
+      // Security-created drafts should only be visible to the same officer
+      // who created them, otherwise the dashboard pulls every draft in the system.
+      where.AND = [
+        { status: "DRAFT" },
+        { createdById: session.user.id },
+      ];
     }
   }
   // APPROVER and ADMIN see all
 
-  // toLocation filter (used by Vehicles Incoming to scope to this location)
+  // toLocation / fromLocation filters (used by Security page and Vehicle Arrivals to scope by gate location)
+  // locationPlant variants do a startsWith match — one security officer covers all sub-locations in a plant.
   const toLocationFilter = searchParams.get("toLocation");
-  if (toLocationFilter) where.toLocation = toLocationFilter;
+  const toLocationPlant  = searchParams.get("toLocationPlant");
+  if (toLocationPlant)  where.toLocation   = { startsWith: toLocationPlant,  mode: "insensitive" };
+  else if (toLocationFilter) where.toLocation = ciEquals(toLocationFilter);
+
+  const fromLocationFilter = searchParams.get("fromLocation");
+  const fromLocationPlant  = searchParams.get("fromLocationPlant");
+  if (fromLocationPlant)  where.fromLocation = { startsWith: fromLocationPlant, mode: "insensitive" };
+  else if (fromLocationFilter) where.fromLocation = ciEquals(fromLocationFilter);
 
   if (passType) where.passType = passType;
 
@@ -113,6 +171,7 @@ export async function GET(req: NextRequest) {
   if (search) {
     where.OR = [
       { gatePassNumber: { contains: search, mode: "insensitive" } },
+      { parentPass: { gatePassNumber: { contains: search, mode: "insensitive" } } },
       { vehicle: { contains: search, mode: "insensitive" } },
       { chassis: { contains: search, mode: "insensitive" } },
       { requestedBy: { contains: search, mode: "insensitive" } },
@@ -128,24 +187,43 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [total, passes] = await Promise.all([
-      prisma.gatePass.count({ where: where as any }),
-      prisma.gatePass.findMany({
-        where,
-        include: {
-          createdBy: { select: { id: true, name: true, email: true } },
-          approvedBy: { select: { id: true, name: true } },
-          parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
-          ...(passType === "AFTER_SALES" && parentOnly ? {
-          subPasses: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, toLocation: true, fromLocation: true, createdAt: true, departureDate: true }, orderBy: { createdAt: "asc" } }
-        } : {}),
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      } as any),
-    ]);
-    return NextResponse.json({ passes, total, page, totalPages: Math.ceil(total / limit) });
+    // Run these sequentially to avoid exhausting tiny pooled connection limits
+    // during dev and high-concurrency dashboard loads.
+    const total = await prisma.gatePass.count({ where: where as any });
+    const passes = await prisma.gatePass.findMany({
+      where,
+      include: {
+        createdBy: { select: { id: true, name: true, email: true } },
+        approvedBy: { select: { id: true, name: true } },
+        parentPass: { select: { id: true, gatePassNumber: true, passSubType: true, status: true, vehicle: true } },
+        ...(passType === "AFTER_SALES" && parentOnly
+          ? {
+              subPasses: {
+                select: {
+                  id: true,
+                  gatePassNumber: true,
+                  passSubType: true,
+                  status: true,
+                  toLocation: true,
+                  fromLocation: true,
+                  createdAt: true,
+                  departureDate: true,
+                },
+                orderBy: { createdAt: "asc" },
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+    } as any);
+    return NextResponse.json({
+      passes: passes.map((pass) => withJourneyNumber(pass)),
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error("[GET /api/gate-pass] Error:", err);
     return NextResponse.json({ error: String(err), passes: [], total: 0, page: 1, totalPages: 1 }, { status: 500 });
@@ -155,7 +233,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
   const session = await getServerSession(authOptions);
-  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR"];
+  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
   if (!session || !allowedRoles.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -235,6 +313,8 @@ export async function POST(req: NextRequest) {
   // No SAP data / unknown  → Approver (PENDING_APPROVAL, safe default)
   if (body.passType === "CUSTOMER_DELIVERY") {
     const immediateTerms = ["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"];
+    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
+    const approverLocation = (createData.fromLocation as string | null) ?? null;
 
     try {
       const { fetchSapOrders } = await import("@/lib/sap");
@@ -264,8 +344,8 @@ export async function POST(req: NextRequest) {
           return t !== "" && !immediateTerms.includes(t);
         });
 
-        if (hasImmediate) {
-          // Immediate payment (or mixed) → Cashier; immediate always takes priority
+        if (hasImmediate && !hasCredit) {
+          // Immediate-only payment → Cashier
           await prisma.gatePass.update({
             where: { id: gatePass.id },
             data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
@@ -284,26 +364,155 @@ export async function POST(req: NextRequest) {
             });
           }
           return NextResponse.json({ gatePass }, { status: 201 });
-        } else if (hasCredit) {
-          // Only credit orders → Approver
+        } else if (hasCredit && !hasImmediate) {
+          // Credit-only orders → same-location Approver
           await prisma.gatePass.update({
             where: { id: gatePass.id },
             data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
           });
           gatePass.status = "PENDING_APPROVAL";
+          const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+          if (approvers.length > 0) {
+            await prisma.notification.createMany({
+              data: approvers.map((a) => ({
+                userId: a.id,
+                type: "GATE_PASS_SUBMITTED",
+                title: "Customer Delivery Approval Required",
+                message: `${gatePassNumber} (${gatePass.vehicle}) — credit terms detected. Please review this request.`,
+                gatePassId: gatePass.id,
+              })),
+            });
+          }
+          return NextResponse.json({ gatePass }, { status: 201 });
+        } else if (hasImmediate && hasCredit) {
+          // Mixed → cashier + approver in parallel
+          await prisma.gatePass.update({
+            where: { id: gatePass.id },
+            data: {
+              status: "CASHIER_REVIEW",
+              paymentType: "MIXED",
+              hasImmediate: true,
+              hasCredit: true,
+              cashierCleared: false,
+              creditApproved: false,
+            },
+          });
+          gatePass.status = "CASHIER_REVIEW";
+          const [cashiers, approvers] = await Promise.all([
+            prisma.user.findMany({ where: { role: "CASHIER" as any } }),
+            findApproversForLocation(approverLocation, selectedApproverName),
+          ]);
+          if (cashiers.length > 0) {
+            await prisma.notification.createMany({
+              data: cashiers.map((c) => ({
+                userId: c.id,
+                type: "CASHIER_REVIEW_REQUIRED",
+                title: "CD Payment Clearance Required",
+                message: `${gatePassNumber} (${gatePass.vehicle}) — immediate-payment orders need cashier review.`,
+                gatePassId: gatePass.id,
+              })),
+            });
+          }
+          if (approvers.length > 0) {
+            await prisma.notification.createMany({
+              data: approvers.map((a) => ({
+                userId: a.id,
+                type: "GATE_PASS_SUBMITTED",
+                title: "Customer Delivery Approval Required",
+                message: `${gatePassNumber} (${gatePass.vehicle}) — credit terms detected. Please review in parallel with cashier.`,
+                gatePassId: gatePass.id,
+              })),
+            });
+          }
+          return NextResponse.json({ gatePass }, { status: 201 });
         }
+      } else {
+        // No SAP orders → approver in same location
+        await prisma.gatePass.update({
+          where: { id: gatePass.id },
+          data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
+        });
+        gatePass.status = "PENDING_APPROVAL";
+        const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+        if (approvers.length > 0) {
+          await prisma.notification.createMany({
+            data: approvers.map((a) => ({
+              userId: a.id,
+              type: "GATE_PASS_SUBMITTED",
+              title: "Customer Delivery Approval Required",
+              message: `${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+        }
+        return NextResponse.json({ gatePass }, { status: 201 });
       }
     } catch (err) {
       console.error("[CD] SAP fetch error:", err);
-      // Non-fatal — status stays PENDING_APPROVAL, Approver will decide
+      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+      if (approvers.length > 0) {
+        await prisma.notification.createMany({
+          data: approvers.map((a) => ({
+            userId: a.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "Customer Delivery Approval Required",
+            message: `${gatePassNumber} (${gatePass.vehicle}) — SAP order lookup failed. Please review manually.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+      return NextResponse.json({ gatePass }, { status: 201 });
     }
-    // Fall through to standard Approver notification below
+  }
+
+  // MAIN_IN created: notify Security Officers at fromLocation (initiator's DIMO location — vehicle arriving for service)
+  if (body.passType === "AFTER_SALES" && body.passSubType === "MAIN_IN") {
+    const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const secWhere = fromLoc
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    if (secOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Incoming Service Vehicle — Confirm Gate IN",
+          message: `${gatePassNumber} (${gatePass.vehicle}) — After Sales Gate IN created. Please confirm vehicle entry at the gate.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+    return NextResponse.json({ gatePass }, { status: 201 });
+  }
+
+  // SUB_OUT created: notify Security Officers at fromLocation (vehicle leaving DIMO to sub-location)
+  if (body.passType === "AFTER_SALES" && body.passSubType === "SUB_OUT") {
+    const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const secWhere = fromLoc
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    if (secOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Sub OUT Ready — Confirm Gate Release",
+          message: `${gatePassNumber} (${gatePass.vehicle}) — Sub OUT pass created. Vehicle ready to depart to ${gatePass.toLocation ?? "sub-location"}. Please confirm Gate OUT.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+    return NextResponse.json({ gatePass }, { status: 201 });
   }
 
   // MAIN_OUT: auto-fetch SAP orders at creation, detect payment types, notify CASHIER + APPROVER in parallel
   if (isAfterSalesMainOut) {
     await prisma.$executeRaw`UPDATE "GatePass" SET status = 'CASHIER_REVIEW'::"GatePassStatus" WHERE id = ${gatePass.id}`;
     gatePass.status = "CASHIER_REVIEW";
+    const approverLocation = (createData.fromLocation as string | null) ?? null;
+    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
 
     // Auto-fetch SAP orders at creation time
     let hasImmediate = false;
@@ -350,8 +559,8 @@ export async function POST(req: NextRequest) {
       "paymentType" = ${detectedPaymentType}
       WHERE id = ${gatePass.id}`;
 
-    // Notify Cashier if has immediate orders (or no orders at all — cashier to verify)
-    if (hasImmediate || (!hasImmediate && !hasCredit)) {
+    // Immediate-only → cashier. No-orders / credit-only → approver. Mixed → both.
+    if (hasImmediate) {
       const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
       if (cashiers.length > 0) {
         await prisma.notification.createMany({
@@ -366,16 +575,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Notify Approver if has credit orders (IN PARALLEL with cashier)
+    if (!hasImmediate && hasCredit) {
+      await prisma.gatePass.update({
+        where: { id: gatePass.id },
+        data: { status: "PENDING_APPROVAL" },
+      });
+      gatePass.status = "PENDING_APPROVAL";
+    }
+
+    if (!hasImmediate && !hasCredit) {
+      await prisma.gatePass.update({
+        where: { id: gatePass.id },
+        data: { status: "PENDING_APPROVAL", hasCredit: true, creditApproved: false, paymentType: "CREDIT" },
+      });
+      gatePass.status = "PENDING_APPROVAL";
+      hasCredit = true;
+    }
+
+    // Notify Approver if credit-like review is needed (credit or no SAP orders)
     if (hasCredit) {
-      const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
             userId: a.id,
             type: "GATE_PASS_SUBMITTED",
             title: "Credit Payment — Approval Required",
-            message: `${gatePassNumber} (${gatePass.vehicle}) — credit payment orders detected. Your approval is needed in parallel with cashier review.`,
+            message: `${gatePassNumber} (${gatePass.vehicle}) — ${hasImmediate ? "credit payment orders detected. Your approval is needed in parallel with cashier review." : "approval is required before release."}`,
             gatePassId: gatePass.id,
           })),
         });

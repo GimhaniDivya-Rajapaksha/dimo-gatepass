@@ -86,7 +86,7 @@ export default function RejectedPassesPage() {
         <div className="space-y-3">
           {passes.map((p, i) => (
             <motion.div key={p.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-              onClick={() => router.push(`/gate-pass/${p.id}`)}
+              onClick={() => router.push(`/gate-pass/create?rejectedId=${p.id}`)}
               className="rounded-2xl border p-5 cursor-pointer transition-all hover:shadow-md"
               style={{ background: "var(--surface)", borderColor: "#fca5a5" }}>
               <div className="flex items-start gap-4">
@@ -126,9 +126,9 @@ export default function RejectedPassesPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2 flex-shrink-0">
                   <button
-                    onClick={(e) => { e.stopPropagation(); router.push(`/gate-pass/${p.id}`); }}
+                    onClick={(e) => { e.stopPropagation(); router.push(`/gate-pass/create?rejectedId=${p.id}`); }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-white"
-                    style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                    style={{ background: "linear-gradient(135deg,#ef4444,#dc2626)" }}>
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>

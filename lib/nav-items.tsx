@@ -90,6 +90,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   CASHIER: [
     { label: "Dashboard", href: "/cashier", icon: <DashboardIcon /> },
     { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
+    { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
@@ -120,7 +121,6 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
   ],
   SECURITY_OFFICER: [
-    { label: "Dashboard",    href: "/security",                      icon: <DashboardIcon /> },
     { label: "Gate IN / OUT", href: "/gate-pass/security-gate-out", icon: <BoxIcon /> },
     { label: "Create Pass",  href: "/gate-pass/security-create",    icon: <ListIcon /> },
   ],

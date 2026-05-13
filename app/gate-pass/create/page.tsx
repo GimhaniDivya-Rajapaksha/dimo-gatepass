@@ -2,12 +2,12 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import TimePicker from "@/components/ui/TimePicker";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
-type LocationType = "DEALER" | "DIMO" | "PROMOTION" | "FINANCE";
+type LocationType = "DEALER" | "DIMO" | "PROMOTION" | "FINANCE" | "OTHER";
 type TransportMode = "CARRIER" | "DRIVER" | "CUSTOMER" | "OTHER";
 type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
 type LookupOption = { id: string; value: string; label: string; [key: string]: string };
@@ -44,6 +44,23 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
   const [open, setOpen] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Escape") { setOpen(false); return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (options && options.length > 0 && onSelect) {
+        // Select the first (most relevant) result
+        if (blurTimer.current) clearTimeout(blurTimer.current);
+        onSelect(options[0]);
+        setOpen(false);
+      } else if (!options || options.length === 0) {
+        // No results yet — trigger the lookup
+        onFocus?.();
+        setOpen(true);
+      }
+    }
+  }
+
   return (
     <div className="relative">
       <input
@@ -59,6 +76,7 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         onBlur={() => {
           blurTimer.current = setTimeout(() => setOpen(false), 200);
         }}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className="w-full border rounded-xl px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
         style={{ background: "var(--surface2)", borderColor: error ? "#f87171" : "var(--border)", color: "var(--text)" }}
@@ -69,9 +87,18 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
         </svg>
       ) : (
-        <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setOpen(o => !o)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-black/5 transition-colors"
+          tabIndex={-1}
+          aria-label="Toggle results"
+        >
+          <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
       )}
       {open && (
         <div className="absolute z-30 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
@@ -197,9 +224,9 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
           {/* Column header + ADD */}
           <div className="flex items-center border-b px-3 py-2 gap-2" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
             <span className="flex-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Plant Name</span>
-            <span className="w-32 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Location</span>
+            <span className="w-24 text-xs font-semibold uppercase tracking-wide text-right" style={{ color: "var(--text-muted)" }}>Location</span>
             <button type="button" onClick={() => { setShowAdd(s => !s); setAddError(""); setAddPlant(""); setAddLocation(""); setPlantDropOpen(false); }}
-              className="text-xs px-3 py-1 rounded-lg text-white font-bold" style={{ background: "#16a34a" }}>
+              className="text-xs px-3 py-1 rounded-lg text-white font-bold flex-shrink-0" style={{ background: "#16a34a", minWidth: "52px" }}>
               ADD
             </button>
           </div>
@@ -289,7 +316,8 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
                 style={{ borderColor: "var(--border)", color: "var(--text)", background: displayText === o.storageDescription ? "rgba(37,99,235,0.08)" : undefined }}
               >
                 <span className="flex-1 font-medium text-left truncate">{o.plantDescription}</span>
-                <span className="w-32 text-right text-xs flex-shrink-0 pr-1" style={{ color: "var(--text-muted)" }}>{o.storageDescription}</span>
+                <span className="w-24 text-right text-xs flex-shrink-0 pr-1" style={{ color: "var(--text-muted)" }}>{o.storageDescription}</span>
+                <div style={{ minWidth: "52px" }} />
               </button>
             ))}
           </div>
@@ -345,6 +373,49 @@ function TextInput({ value, onChange, placeholder, error, type = "text", numeric
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-bold mb-5" style={{ color: "var(--accent)" }}>{children}</h2>;
+}
+
+function LockedVehicleField({
+  label,
+  vehicle,
+  details,
+}: {
+  label: string;
+  vehicle: string;
+  details?: { chassisNo?: string | null; model?: string | null; make?: string | null; colourFamily?: string | null; colour?: string | null; currentLocation?: string | null } | null;
+}) {
+  return (
+    <Field label={label} required>
+      <div className="rounded-xl border px-4 py-3" style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-black font-mono tracking-widest" style={{ color: "#1d4ed8" }}>{vehicle}</p>
+            <p className="text-xs mt-1" style={{ color: "#2563eb" }}>Vehicle number is locked for this security-created draft.</p>
+          </div>
+          <span className="text-[10px] px-2 py-1 rounded-full font-bold flex-shrink-0" style={{ background: "#dbeafe", color: "#1d4ed8" }}>
+            LOCKED
+          </span>
+        </div>
+        {details && (
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
+            {[
+              { label: "Chassis No", val: details.chassisNo },
+              { label: "Model", val: details.model },
+              { label: "Make", val: details.make },
+              { label: "Colour Family", val: details.colourFamily },
+              { label: "Colour", val: details.colour },
+              { label: "Current Location", val: details.currentLocation },
+            ].filter((item) => item.val).map((item) => (
+              <div key={item.label}>
+                <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>{item.label}</p>
+                <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{item.val}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Field>
+  );
 }
 
 /* ─── Add Vehicle Modal ─────────────────────────────────────────────── */
@@ -561,12 +632,18 @@ function AddVehicleModal({ onClose, onAdd }: {
 /* ─── Main Page ─────────────────────────────────────────────────────── */
 export default function CreateGatePassPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session, status } = useSession();
+  const draftId = searchParams.get("draftId");
+  const rejectedId = searchParams.get("rejectedId");
+  const isDraftMode = !!draftId;
+  const isRejectEditMode = !!rejectedId;
   const [passType, setPassType] = useState<PassType>("LOCATION_TRANSFER");
   const [locationType, setLocationType] = useState<LocationType | "">("");
   const [transportMode, setTransportMode] = useState<TransportMode>("CARRIER");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [addVehicleTarget, setAddVehicleTarget] = useState<"lt" | "cd" | "sr">("lt");
@@ -584,6 +661,7 @@ export default function CreateGatePassPage() {
   const [selectedSrVehicleDetail, setSelectedSrVehicleDetail] = useState<{
     vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
   } | null>(null);
+  const [srVehicleHasSearched, setSrVehicleHasSearched] = useState(false);
 
   const [lookupOptions, setLookupOptions] = useState<LookupState>({
     location: [], outReason: [], vehicle: [],
@@ -620,6 +698,10 @@ export default function CreateGatePassPage() {
   });
   const [srVehicleTab, setSrVehicleTab] = useState<"add" | "general">("add");
   const [showSrBulkUpload, setShowSrBulkUpload] = useState(false);
+  const [srBulkRows, setSrBulkRows] = useState<Array<Record<string, string>>>([]);
+  const [srBulkFileError, setSrBulkFileError] = useState("");
+  const [srBulkSubmitting, setSrBulkSubmitting] = useState(false);
+  const [srBulkResults, setSrBulkResults] = useState<Array<{ vehicleNo: string; status: "success" | "error"; gatePassNumber?: string; error?: string }>>([]);
   const [srParts, setSrParts] = useState<{ id: string; partName: string; partId: string }[]>([]);
   const [showAddPart, setShowAddPart] = useState(false);
   const [editPartId, setEditPartId] = useState<string | null>(null);
@@ -628,6 +710,12 @@ export default function CreateGatePassPage() {
   const [showAddCarrier, setShowAddCarrier] = useState(false);
   const [newCarrierName, setNewCarrierName] = useState("");
   const [newCarrierReg, setNewCarrierReg] = useState("");
+
+  // Job multi-select for After Sales / SR
+  const [srJobTypes, setSrJobTypes] = useState<string[]>([]);
+  const SR_JOB_OPTIONS = ["Routine Service", "Repair", "Inspection", "Body Work", "Electrical", "AC Service", "Warranty Repair", "PDI", "Other"];
+  const toggleSrJob = (job: string) =>
+    setSrJobTypes(prev => prev.includes(job) ? prev.filter(j => j !== job) : [...prev, job]);
 
   // After Sales (within SR tab) state
   const [srMode, setSrMode] = useState<"in" | "out">("in");
@@ -653,9 +741,205 @@ export default function CreateGatePassPage() {
   const [cdSapLoaded, setCdSapLoaded] = useState(false);
 
   useEffect(() => {
-    const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR"];
+    const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
+
+  useEffect(() => {
+    if (!isDraftMode || status !== "authenticated" || !draftId) return;
+    let active = true;
+
+    async function loadDraft() {
+      setDraftLoading(true);
+      try {
+        const res = await fetch(`/api/gate-pass/${draftId}`);
+        const data = await res.json();
+        const pass = data.gatePass ?? data;
+        if (!res.ok || pass.status !== "DRAFT") {
+          router.replace("/gate-pass?status=DRAFT");
+          return;
+        }
+        if (!active) return;
+
+        setPassType(pass.passType);
+
+        if (pass.passType === "LOCATION_TRANSFER") {
+          setLt((prev) => ({
+            ...prev,
+            vehicle: pass.vehicle ?? "",
+            fromLocation: pass.fromLocation ?? "",
+            toLocation: pass.toLocation ?? "",
+            outReason: pass.outReason ?? "",
+          }));
+          const currentLocation = pass.fromLocation ?? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "");
+          if (!active) return;
+          setSelectedVehicleDetail({
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+            currentLocation: currentLocation ?? undefined,
+          });
+        } else if (pass.passType === "CUSTOMER_DELIVERY") {
+          setCd((prev) => ({ ...prev, vehicle: pass.vehicle ?? "" }));
+          setSelectedCdVehicleDetail({
+            vehicleNo: pass.vehicle ?? "",
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+          });
+        } else if (pass.passType === "AFTER_SALES") {
+          setSrMode(pass.gateDirection === "OUT" ? "out" : "in");
+          setS("vehicle", pass.vehicle ?? "");
+          setS("receivingLocation", pass.toLocation ?? "");
+          setS("serviceJobNo", pass.serviceJobNo ?? "");
+          setSelectedSrVehicleDetail({
+            vehicleNo: pass.vehicle ?? "",
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+          });
+          setAsFoundPass({
+            id: pass.id,
+            vehicle: pass.vehicle,
+            chassis: pass.chassis,
+            make: pass.make,
+            vehicleColor: pass.vehicleColor,
+            serviceJobNo: pass.serviceJobNo,
+          });
+          setAsFromLocation(pass.fromLocation ?? ((session?.user as { defaultLocation?: string | null })?.defaultLocation ?? ""));
+          setAsToLocation(pass.toLocation ?? "");
+          setAsSubType(pass.gateDirection === "OUT" ? "MAIN_OUT" : "SUB_OUT");
+        }
+      } catch {
+        if (active) setErrors((prev) => ({ ...prev, form: "Failed to load draft gate pass" }));
+      } finally {
+        if (active) setDraftLoading(false);
+      }
+    }
+
+    void loadDraft();
+    return () => { active = false; };
+  }, [draftId, isDraftMode, router, session, status]);
+
+  // Load REJECTED pass for editing and resubmitting
+  useEffect(() => {
+    if (!isRejectEditMode || status !== "authenticated" || !rejectedId) return;
+    let active = true;
+
+    async function loadRejected() {
+      setDraftLoading(true);
+      try {
+        const res = await fetch(`/api/gate-pass/${rejectedId}`);
+        const data = await res.json();
+        const pass = data.gatePass ?? data;
+        if (!res.ok || pass.status !== "REJECTED") {
+          router.replace("/gate-pass?status=REJECTED");
+          return;
+        }
+        if (!active) return;
+
+        setPassType(pass.passType);
+
+        if (pass.passType === "LOCATION_TRANSFER") {
+          setLocationType(pass.toLocation?.includes("Promo") ? "PROMOTION" : pass.toLocation?.includes("Finan") ? "FINANCE" : "DIMO");
+          setTransportMode(pass.transportMode || "CARRIER");
+          setLt(prev => ({
+            ...prev,
+            vehicle: pass.vehicle ?? "",
+            fromLocation: pass.fromLocation ?? "",
+            toLocation: pass.toLocation ?? "",
+            outReason: pass.outReason ?? "",
+            approver: pass.approvedBy?.name ?? prev.approver,
+            departureDate: pass.departureDate ?? "",
+            departureTime: pass.departureTime ?? "",
+            arrivalDate: pass.arrivalDate ?? "",
+            arrivalTime: pass.arrivalTime ?? "",
+            companyName: pass.companyName ?? "",
+            carrierRegNo: pass.carrierRegNo ?? "",
+            driverName: pass.driverName ?? "",
+            driverNIC: pass.driverNIC ?? "",
+            contactNo: pass.driverContact ?? "",
+            mileage: pass.mileage ?? "",
+            insurance: pass.insurance ?? "",
+            garagePlate: pass.garagePlate ?? "",
+          }));
+          setSelectedVehicleDetail({
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+            currentLocation: pass.fromLocation ?? undefined,
+          });
+        } else if (pass.passType === "CUSTOMER_DELIVERY") {
+          setTransportMode(pass.transportMode || "CARRIER");
+          setCd(prev => ({
+            ...prev,
+            vehicle: pass.vehicle ?? "",
+            departureDate: pass.departureDate ?? "",
+            departureTime: pass.departureTime ?? "",
+            companyName: pass.companyName ?? "",
+            carrierRegNo: pass.carrierRegNo ?? "",
+            driverName: pass.driverName ?? "",
+            driverNIC: pass.driverNIC ?? "",
+            contactNo: pass.driverContact ?? "",
+            mileage: pass.mileage ?? "",
+            insurance: pass.insurance ?? "",
+            garagePlate: pass.garagePlate ?? "",
+          }));
+          setSelectedCdVehicleDetail({
+            vehicleNo: pass.vehicle ?? "",
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+          });
+        } else if (pass.passType === "AFTER_SALES") {
+          setSrMode(pass.gateDirection === "OUT" ? "out" : "in");
+          setTransportMode(pass.transportMode || "CARRIER");
+          setS("vehicle", pass.vehicle ?? "");
+          setS("receivingLocation", pass.toLocation ?? "");
+          setS("serviceJobNo", pass.serviceJobNo ?? "");
+          setS("arrivalDate", pass.arrivalDate ?? "");
+          setS("arrivalTime", pass.arrivalTime ?? "");
+          setS("companyName", pass.companyName ?? "");
+          setS("carrierRegNo", pass.carrierRegNo ?? "");
+          setS("driverName", pass.driverName ?? "");
+          setS("driverNIC", pass.driverNIC ?? "");
+          setS("contactNo", pass.driverContact ?? "");
+          setS("mileage", pass.mileage ?? "");
+          setS("insurance", pass.insurance ?? "");
+          setS("garagePlate", pass.garagePlate ?? "");
+          setSelectedSrVehicleDetail({
+            vehicleNo: pass.vehicle ?? "",
+            chassisNo: pass.chassis ?? "",
+            model: "",
+            make: pass.make ?? "",
+            colourFamily: "",
+            colour: pass.vehicleColor ?? "",
+          });
+          setAsFromLocation(pass.fromLocation ?? "");
+          setAsToLocation(pass.toLocation ?? "");
+          setAsSubType(pass.passSubType ?? "SUB_OUT");
+        }
+      } catch {
+        if (active) setErrors(prev => ({ ...prev, form: "Failed to load rejected gate pass" }));
+      } finally {
+        if (active) setDraftLoading(false);
+      }
+    }
+
+    void loadRejected();
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectedId, isRejectEditMode, router, session, status]);
 
   // For ASO: auto-select After Sales tab and force srMode to "out"
   useEffect(() => {
@@ -769,7 +1053,19 @@ export default function CreateGatePassPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asSubType, asFoundPass]);
 
-  if (status === "loading") return null;
+  // Auto-assign mainOutApprover when SAP orders load and an approver is already assigned to this user
+  useEffect(() => {
+    if (!assignedApprover || mainOutApprover) return;
+    const immTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+    const hasCreditOrders = sapPreviewOrders.some(o => {
+      const t = (o.payTerm || "").toLowerCase().trim();
+      return t !== "" && !immTerms.includes(t);
+    });
+    if (hasCreditOrders) setMainOutApprover(assignedApprover.name);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sapPreviewOrders, assignedApprover]);
+
+  if (status === "loading" || draftLoading) return null;
 
   const setL = (k: keyof typeof lt, v: string) => {
     setLt((p) => ({ ...p, [k]: v }));
@@ -788,18 +1084,68 @@ export default function CreateGatePassPage() {
 
   const isLtLike = passType === "LOCATION_TRANSFER";
   const isSr = passType === "AFTER_SALES";
+  const linkedAfterSalesMinDate = asFoundPass?.departureDate || asFoundPass?.arrivalDate || today;
 
-  // Determine vehicle's current location from most recent completed gate pass
-  const fetchVehicleCurrentLocation = async (vehicleNo: string): Promise<string | undefined> => {
-    if (!vehicleNo.trim()) return undefined;
+  // Determine vehicle's current location from the live plant API first, then fall back.
+  const fetchVehicleCurrentLocation = async (vehicleNo: string, chassisNo?: string): Promise<string | undefined> => {
+    const normalizedVehicleNo = vehicleNo.trim();
+    const normalizedChassisNo = chassisNo?.trim() ?? "";
+    if (!normalizedVehicleNo && !normalizedChassisNo) return undefined;
     try {
-      const res = await fetch(`/api/gate-pass/by-vehicle?vehicleNo=${encodeURIComponent(vehicleNo)}`);
+      const liveParams = new URLSearchParams();
+      if (normalizedVehicleNo) liveParams.set("vehicleNo", normalizedVehicleNo);
+      if (normalizedChassisNo) liveParams.set("chassisNo", normalizedChassisNo);
+      const liveRes = await fetch(`/api/vehicle-report?${liveParams.toString()}`);
+      const liveData = await liveRes.json();
+      const liveLocation = liveData.currentPlantLocation
+        ? [
+            liveData.currentPlantLocation.plantDescription,
+            liveData.currentPlantLocation.storageDescription,
+          ]
+            .filter(Boolean)
+            .join(" - ")
+        : liveData.currentLocation;
+
+      if (typeof liveLocation === "string" && liveLocation.trim()) {
+        // When SAP places the vehicle at a Finance/Promo storage, it only records the
+        // generic plant (e.g. "Weliweriya DM Logistics - Finan.institute"). The specific
+        // institution (e.g. "HNB") lives only in the DB via gate pass toLocation. So for
+        // Finance/Promo slocs, look up the most recent COMPLETED pass whose toLocation
+        // starts with the same plant description and return that richer label instead.
+        const storageDesc = liveData.currentPlantLocation?.storageDescription ?? "";
+        const plantDesc = liveData.currentPlantLocation?.plantDescription ?? "";
+        const isFinancePromo = /(finan|finance|leasing|lease|bank|loan|credit|promo|promotion|campaign|event)/i.test(storageDesc);
+
+        if (isFinancePromo && plantDesc) {
+          try {
+            const fallbackKey = normalizedVehicleNo || normalizedChassisNo;
+            const hRes = await fetch(`/api/gate-pass/by-vehicle?vehicleNo=${encodeURIComponent(fallbackKey)}`);
+            const hData = await hRes.json();
+            const passes: { status: string; toLocation: string | null }[] = hData.passes ?? [];
+            const matched = passes.find(
+              (p) =>
+                p.status === "COMPLETED" &&
+                p.toLocation &&
+                p.toLocation.includes(" - ") &&
+                p.toLocation.toLowerCase().startsWith(plantDesc.toLowerCase())
+            );
+            if (matched?.toLocation) return matched.toLocation;
+          } catch {
+            // fall through and return the SAP location
+          }
+        }
+
+        return liveLocation;
+      }
+
+      const fallbackKey = normalizedVehicleNo || normalizedChassisNo;
+      const res = await fetch(`/api/gate-pass/by-vehicle?vehicleNo=${encodeURIComponent(fallbackKey)}`);
       const d = await res.json();
       const passes: { status: string; toLocation: string | null }[] = d.passes ?? [];
-      // Most recent COMPLETED → vehicle arrived at toLocation
-      const completed = passes.find((p) => p.status === "COMPLETED" && p.toLocation);
+      // Most recent COMPLETED -> vehicle arrived at toLocation
+      // Only trust locations in full "PlantDescription - StorageDescription" format
+      const completed = passes.find((p) => p.status === "COMPLETED" && p.toLocation && p.toLocation.includes(" - "));
       if (completed?.toLocation) return completed.toLocation;
-      // Fall back to user's default location
       return session?.user?.defaultLocation ?? undefined;
     } catch {
       return session?.user?.defaultLocation ?? undefined;
@@ -842,13 +1188,28 @@ export default function CreateGatePassPage() {
         }
       }
 
-      // Step 3: only accept MAIN_IN or SUB_IN as the "root" gate-in pass
-      const found = candidate && (candidate.passSubType === "MAIN_IN" || candidate.passSubType === "SUB_IN") ? candidate : null;
+      // Step 3: accept the visible After Sales journey row as well.
+      // The UI may currently show the journey at SUB_OUT / GATE IN stage,
+      // but users still search by the same maintained GP number.
+      const found = candidate && (
+        candidate.passSubType === "MAIN_IN" ||
+        candidate.passSubType === "SUB_IN" ||
+        candidate.passSubType === "SUB_OUT" ||
+        candidate.passSubType === "MAIN_OUT"
+      ) ? candidate : null;
 
       setAsFoundPass(found || null);
       setAsToLocation("");
-      if (found?.toLocation) setAsFromLocation(found.toLocation);
-      else setAsFromLocation("");
+      // For MAIN_IN: vehicle is at the service center (fromLocation)
+      // For SUB_OUT after destination Gate IN: vehicle is now at the sub-location (toLocation)
+      // For SUB_IN / MAIN_OUT: vehicle is already on the later leg, use the relevant current location
+      if (found?.passSubType === "MAIN_IN") {
+        setAsFromLocation(found.fromLocation || (session?.user as { defaultLocation?: string | null })?.defaultLocation || "");
+      } else if (found?.passSubType === "SUB_OUT") {
+        setAsFromLocation(found.toLocation || "");
+      } else {
+        setAsFromLocation(found?.toLocation || "");
+      }
 
       if (found) {
         const subs = found.subPasses ?? [];
@@ -872,6 +1233,230 @@ export default function CreateGatePassPage() {
     else setC(k as keyof typeof cd, v);
   };
 
+  const srBulkTemplateHeaders = [
+    "vehicleNo",
+    "chassisNo",
+    "make",
+    "model",
+    "colour",
+    "onBy",
+    "serviceJobNo",
+    "jobTypes",
+    "customerName",
+    "customerContact",
+    "receivingLocation",
+    "arrivalDate",
+    "arrivalTime",
+    "transportMode",
+    "companyName",
+    "carrierRegNo",
+    "driverNIC",
+    "driverName",
+    "contactNo",
+    "mileage",
+    "insurance",
+    "garagePlate",
+    "parts",
+  ] as const;
+
+  const srBulkTemplateSample = [
+    "CAB-1234",
+    "LC1234567890",
+    "Toyota",
+    "Corolla",
+    "White",
+    "John Perera",
+    "SV30-0169298",
+    "Routine Service|Inspection",
+    "John Perera",
+    "0771234567",
+    "Kandy Branch - Vehicle Park-1",
+    "2026-04-02",
+    "10:30",
+    "CARRIER",
+    "ABC Carriers",
+    "WP-CAR-1234",
+    "123456789V",
+    "Saman Silva",
+    "0712345678",
+    "15400",
+    "Covered by company insurance",
+    "TRADE-25",
+    "Oil Filter|OF-001;Air Filter|AF-002",
+  ];
+
+  const getSrBulkTemplateCsv = () => `${srBulkTemplateHeaders.join(",")}\n${srBulkTemplateSample.join(",")}`;
+
+  const parseCsvLine = (line: string) => {
+    const values: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === "," && !inQuotes) {
+        values.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+
+    values.push(current.trim());
+    return values.map((value) => value.replace(/^"|"$/g, ""));
+  };
+
+  const applySrBulkUploadRow = (rawRow: string[]) => {
+    const row = Object.fromEntries(srBulkTemplateHeaders.map((header, index) => [header, rawRow[index] ?? ""])) as Record<(typeof srBulkTemplateHeaders)[number], string>;
+
+    const normalizedTransportMode = row.transportMode.trim().toUpperCase();
+    const nextTransportMode = (["CARRIER", "DRIVER", "CUSTOMER", "OTHER"] as const).includes(normalizedTransportMode as TransportMode)
+      ? (normalizedTransportMode as TransportMode)
+      : "CARRIER";
+
+    setS("vehicle", row.vehicleNo);
+    setS("onBy", row.onBy);
+    setS("serviceJobNo", row.serviceJobNo);
+    setS("customerName", row.customerName);
+    setS("customerContact", row.customerContact);
+    setS("receivingLocation", row.receivingLocation);
+    setS("arrivalDate", row.arrivalDate);
+    setS("arrivalTime", row.arrivalTime);
+    setS("companyName", row.companyName);
+    setS("carrierRegNo", row.carrierRegNo);
+    setS("driverNIC", row.driverNIC);
+    setS("driverName", row.driverName);
+    setS("contactNo", row.contactNo);
+    setS("mileage", row.mileage);
+    setS("insurance", row.insurance);
+    setS("garagePlate", row.garagePlate);
+
+    setSelectedSrVehicleDetail({
+      vehicleNo: row.vehicleNo,
+      chassisNo: row.chassisNo,
+      make: row.make,
+      model: row.model,
+      colourFamily: row.colour,
+      colour: row.colour,
+    });
+    setSrVehicleHasSearched(!!row.vehicleNo.trim());
+    setTransportMode(nextTransportMode);
+
+    setSrJobTypes(
+      row.jobTypes
+        .split("|")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
+
+    setSrParts(
+      row.parts
+        .split(";")
+        .map((value, index) => {
+          const [partName, partId] = value.split("|").map((item) => item.trim());
+          if (!partName) return null;
+          return {
+            id: `bulk-part-${index + 1}`,
+            partName,
+            partId: partId ?? "",
+          };
+        })
+        .filter((value): value is { id: string; partName: string; partId: string } => value !== null)
+    );
+
+    setSrVehicleTab("add");
+    setErrors((prev) => {
+      const next = { ...prev };
+      [
+        "vehicle",
+        "jobType",
+        "receivingLocation",
+        "arrivalDate",
+        "arrivalTime",
+        "companyName",
+        "carrierRegNo",
+        "driverNIC",
+        "driverName",
+        "contactNo",
+      ].forEach((key) => delete next[key]);
+      return next;
+    });
+  };
+
+  const handleBulkCreate = async () => {
+    setSrBulkSubmitting(true);
+    setSrBulkResults([]);
+    const results: Array<{ vehicleNo: string; status: "success" | "error"; gatePassNumber?: string; error?: string }> = [];
+    for (const row of srBulkRows) {
+      const contactVal = row.customerContact?.trim() ?? "";
+      if (contactVal && !/^0[0-9]{9}$/.test(contactVal)) {
+        results.push({ vehicleNo: row.vehicleNo || `Row ${results.length + 1}`, status: "error", error: `Invalid contact number "${contactVal}" — must be 10 digits starting with 0 (e.g. 0771234567)` });
+        setSrBulkResults([...results]);
+        continue;
+      }
+      const normalizedMode = row.transportMode?.trim().toUpperCase();
+      const rowTransportMode: TransportMode = (["CARRIER", "DRIVER", "CUSTOMER", "OTHER"] as const).includes(normalizedMode as TransportMode)
+        ? (normalizedMode as TransportMode)
+        : "CARRIER";
+      const parts = (row.parts || "").split(";").map((p, i) => {
+        const [partName = "", partId = ""] = p.split("|");
+        return { id: String(i), partName: partName.trim(), partId: partId.trim() };
+      }).filter((p) => p.partName);
+      const payload = {
+        passType: "AFTER_SALES",
+        passSubType: "MAIN_IN",
+        vehicle: row.vehicleNo,
+        chassis: row.chassisNo || null,
+        make: row.make || null,
+        vehicleColor: row.colour || null,
+        requestedBy: row.customerName || null,
+        approver: sr.approver || null,
+        outReason: row.jobTypes.split("|").filter(Boolean).join(", ") || null,
+        toLocation: row.receivingLocation || null,
+        arrivalDate: row.arrivalDate || null,
+        arrivalTime: row.arrivalTime || null,
+        departureDate: row.arrivalDate || null,
+        departureTime: row.arrivalTime || null,
+        serviceJobNo: row.serviceJobNo || null,
+        transportMode: rowTransportMode,
+        companyName: row.companyName || null,
+        carrierRegNo: row.carrierRegNo || null,
+        driverName: row.driverName || null,
+        driverNIC: row.driverNIC || null,
+        driverContact: row.contactNo || null,
+        mileage: row.mileage || null,
+        insurance: row.insurance || null,
+        garagePlate: row.garagePlate || null,
+        comments: parts.length > 0 ? JSON.stringify(parts.map((p) => `${p.partName} (${p.partId})`)) : null,
+      };
+      try {
+        const res = await fetch("/api/gate-pass", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          results.push({ vehicleNo: row.vehicleNo, status: "error", error: d.error || "Failed" });
+        } else {
+          const d = await res.json();
+          results.push({ vehicleNo: row.vehicleNo, status: "success", gatePassNumber: d.gatePassNumber });
+        }
+      } catch (err) {
+        results.push({ vehicleNo: row.vehicleNo, status: "error", error: String(err) });
+      }
+      setSrBulkResults([...results]);
+    }
+    setSrBulkSubmitting(false);
+  };
+
   const validate = () => {
     const e: Record<string, string> = {};
 
@@ -890,8 +1475,18 @@ export default function CreateGatePassPage() {
       return dt < now;
     };
 
+    const immediateTerms = ["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"];
+    const activeCdOrders = cdSapOrders.filter(o => o.orderId);
+    const cdHasImmediate = activeCdOrders.some((o) => immediateTerms.includes(((o.payTerm || "").toLowerCase().trim())));
+    const cdHasCredit = activeCdOrders.some((o) => {
+      const t = (o.payTerm || "").toLowerCase().trim();
+      return t !== "" && !immediateTerms.includes(t);
+    });
+    const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
+
     if (isLtLike) {
       if (!lt.toLocation) e.toLocation = "Destination location is required";
+      else if (selectedVehicleDetail?.currentLocation && lt.toLocation === selectedVehicleDetail.currentLocation) e.toLocation = "To Location cannot be the same as the vehicle's current location";
       if (!lt.outReason) e.outReason = "Reason for going out is required";
       if (!lt.vehicle) e.vehicle = "Vehicle is required";
       if (!lt.approver) e.approver = "Approver is required";
@@ -899,20 +1494,36 @@ export default function CreateGatePassPage() {
       else if (parseDate(lt.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
       if (!lt.departureTime) e.departureTime = "Departure time is required";
       else if (!e.departureDate && isPastDateTime(lt.departureDate, lt.departureTime)) e.departureTime = "Departure time cannot be in the past";
+      if (!lt.arrivalDate) e.arrivalDate = "Expected arrival date is required";
+      if (lt.arrivalDate && lt.arrivalTime && lt.departureDate && lt.departureTime &&
+          lt.arrivalDate === lt.departureDate && lt.arrivalTime <= lt.departureTime) {
+        e.arrivalTime = "Arrival time must be after the departure time";
+      }
     } else if (isSr && srMode === "out") {
       if (!asFoundPass) e.asGateIn = "Please find a valid Gate IN pass first";
       if (!asToLocation && !["MAIN_OUT"].includes(asSubType)) e.asToLocation = "Destination location is required";
       if (!asFromLocation && !["MAIN_OUT"].includes(asSubType)) e.asFromLocation = "Origin location is required";
       if (asSubType === "MAIN_OUT" && !mainOutApprover && sapPreviewOrders.some(o => { const t = (o.payTerm || "").toLowerCase().trim(); return t !== "" && !["immediate","zc01","payment immediate","cash","pay immediately w/o deduction"].includes(t); })) e.mainOutApprover = "Select an approver for credit orders";
       if (!cd.departureDate) e.departureDate = "Departure date is required";
-      else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
+      else if (parseDate(cd.departureDate) < parseDate(linkedAfterSalesMinDate)) {
+        e.departureDate = `Departure date cannot be earlier than the linked gate pass date (${linkedAfterSalesMinDate})`;
+      }
       if (!cd.departureTime) e.departureTime = "Departure time is required";
       else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
-      // Note: Transport Details section is hidden for After Sales out — no carrier validation needed here
+      else if (!e.departureDate && !e.departureTime) {
+        // Same date as MAIN_IN → departure time must be >= MAIN_IN time
+        const mainInTime = asFoundPass?.departureTime || asFoundPass?.arrivalTime;
+        if (mainInTime && parseDate(cd.departureDate).getTime() === parseDate(linkedAfterSalesMinDate).getTime()) {
+          const toMins = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+          if (toMins(cd.departureTime) < toMins(mainInTime)) {
+            e.departureTime = `Time cannot be before the Gate IN time (${mainInTime})`;
+          }
+        }
+      }
     } else if (isSr) {
       if (!sr.vehicle) e.vehicle = "Vehicle is required";
-      if (!sr.approver) e.approver = "Approver is required";
-      if (!sr.jobType) e.jobType = "Job type is required";
+      if (sr.customerContact.trim() && !/^0[0-9]{9}$/.test(sr.customerContact.trim())) e.customerContact = "Enter a valid 10-digit Sri Lankan number (e.g. 0771234567)";
+      if (srJobTypes.length === 0) e.jobType = "At least one job type is required";
       if (!sr.receivingLocation) e.receivingLocation = "Receiving location is required";
       if (!sr.arrivalDate) e.arrivalDate = "Arrival date is required";
       else if (parseDate(sr.arrivalDate) < today) e.arrivalDate = "Arrival date cannot be in the past";
@@ -920,21 +1531,32 @@ export default function CreateGatePassPage() {
       else if (!e.arrivalDate && isPastDateTime(sr.arrivalDate, sr.arrivalTime)) e.arrivalTime = "Arrival time cannot be in the past";
     } else {
       if (!cd.vehicle) e.vehicle = "Vehicle is required";
-      if (!cd.approver) e.approver = "Approver is required";
+      if (customerDeliveryNeedsApprover && !cd.approver) e.approver = "Approver is required";
       if (!cd.departureDate) e.departureDate = "Departure date is required";
       else if (parseDate(cd.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
       if (!cd.departureTime) e.departureTime = "Departure time is required";
       else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
     }
 
-    // Carrier validation (non-After-Sales-out)
-    if (transportMode === "CARRIER" && !(isSr && srMode === "out")) {
+    const needsTransportDetails = !(isSr && srMode === "out" && asSubType === "MAIN_OUT");
+
+    // Carrier / Driver / Other transport validation
+    if (needsTransportDetails && (transportMode === "CARRIER" || transportMode === "DRIVER" || transportMode === "OTHER")) {
       const src = isLtLike ? lt : isSr ? sr : cd;
-      if (!src.companyName) e.companyName = "Carrier company name is required";
-      if (!src.driverNIC) e.driverNIC = "Driver NIC is required";
+      if (transportMode === "CARRIER" && !src.companyName) e.companyName = "Carrier company name is required";
+      if (transportMode === "CARRIER" && !src.carrierRegNo) e.carrierRegNo = "Carrier registration number is required";
+      if (!src.driverNIC) e.driverNIC = "Driver NIC / DL No is required";
       else if (!validNIC(src.driverNIC)) e.driverNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
       if (!src.driverName) e.driverName = "Driver name is required";
-      if (src.contactNo && !validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
+      if (!src.contactNo) e.contactNo = "Driver contact number is required";
+      else if (!validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
+    }
+
+    if (needsTransportDetails && transportMode === "CUSTOMER") {
+      const src = isLtLike ? lt : isSr ? sr : cd;
+      if (!src.driverName) e.driverName = "Customer name is required";
+      if (!src.contactNo) e.contactNo = "Customer contact number is required";
+      else if (!validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
     }
 
     return e;
@@ -957,8 +1579,133 @@ export default function CreateGatePassPage() {
     const cdCarrierMileage = { companyName: cd.companyName, carrierRegNo: cd.carrierRegNo, driverName: cd.driverName, driverNIC: cd.driverNIC, driverContact: cd.contactNo, mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate };
     const srCarrierMileage = { companyName: sr.companyName, carrierRegNo: sr.carrierRegNo, driverName: sr.driverName, driverNIC: sr.driverNIC, driverContact: sr.contactNo, mileage: sr.mileage, insurance: sr.insurance, garagePlate: sr.garagePlate };
 
+    if (isDraftMode && draftId) {
+      const draftPayload = isLtLike
+        ? {
+            toLocation: lt.toLocation || null,
+            fromLocation: lt.fromLocation || null,
+            departureDate: lt.departureDate || null,
+            departureTime: lt.departureTime || null,
+            approver: lt.approver || null,
+            outReason: lt.outReason || null,
+            comments: null,
+            ...ltCarrierMileage,
+          }
+        : isSr && srMode === "out"
+        ? {
+            toLocation: asToLocation || null,
+            fromLocation: asFromLocation || null,
+            departureDate: cd.departureDate || null,
+            departureTime: cd.departureTime || null,
+            approver: mainOutApprover || sr.approver || null,
+            outReason: null,
+            comments: srParts.length > 0 ? JSON.stringify(srParts.map(p => `${p.partName} (${p.partId})`)) : null,
+            passSubType: asSubType,
+            serviceJobNo: asFoundPass?.serviceJobNo ?? null,
+            ...srCarrierMileage,
+          }
+        : isSr
+        ? {
+            toLocation: sr.receivingLocation || null,
+            fromLocation: lt.fromLocation || null,
+            departureDate: sr.serviceDate || sr.arrivalDate || null,
+            departureTime: sr.arrivalTime || null,
+            arrivalDate: sr.arrivalDate || null,
+            arrivalTime: sr.arrivalTime || null,
+            approver: sr.approver || null,
+            outReason: srJobTypes.join(", ") || null,
+            comments: srParts.length > 0 ? JSON.stringify(srParts.map(p => `${p.partName} (${p.partId})`)) : null,
+            passSubType: "MAIN_IN",
+            serviceJobNo: sr.serviceJobNo || null,
+            requestedBy: sr.customerName || null,
+            ...srCarrierMileage,
+          }
+        : {
+            departureDate: cd.departureDate || null,
+            departureTime: cd.departureTime || null,
+            approver: cd.approver || null,
+            comments: null,
+            ...cdCarrierMileage,
+          };
+
+      try {
+        const res = await fetch(`/api/gate-pass/${draftId}/complete`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(draftPayload),
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+        setSubmitted(true);
+        setTimeout(() => router.push("/gate-pass"), 2000);
+      } catch (err) {
+        setLoading(false);
+        setErrors({ form: String(err) });
+      }
+      return;
+    }
+
+    // Resubmit rejected pass — update all fields and set back to PENDING_APPROVAL
+    if (isRejectEditMode && rejectedId) {
+      // Vehicle & chassis are locked on resubmit — only editable fields sent
+      const resubmitPayload = isLtLike
+        ? {
+            toLocation: lt.toLocation || undefined,
+            fromLocation: lt.fromLocation || undefined,
+            outReason: lt.outReason || null,
+            departureDate: lt.departureDate || undefined,
+            departureTime: lt.departureTime || undefined,
+            arrivalDate: lt.arrivalDate || null,
+            arrivalTime: lt.arrivalTime || null,
+            transportMode,
+            ...ltCarrierMileage,
+          }
+        : isSr && srMode === "out"
+        ? {
+            toLocation: asToLocation || undefined,
+            fromLocation: asFromLocation || undefined,
+            departureDate: cd.departureDate || undefined,
+            departureTime: cd.departureTime || undefined,
+            transportMode,
+            ...srCarrierMileage,
+          }
+        : isSr
+        ? {
+            toLocation: sr.receivingLocation || undefined,
+            fromLocation: asFromLocation || undefined,
+            departureDate: sr.serviceDate || sr.arrivalDate || undefined,
+            departureTime: sr.arrivalTime || undefined,
+            arrivalDate: sr.arrivalDate || null,
+            arrivalTime: sr.arrivalTime || null,
+            transportMode,
+            requestedBy: sr.customerName || null,
+            ...srCarrierMileage,
+          }
+        : {
+            departureDate: cd.departureDate || undefined,
+            departureTime: cd.departureTime || undefined,
+            transportMode,
+            ...cdCarrierMileage,
+          };
+
+      try {
+        const res = await fetch(`/api/gate-pass/${rejectedId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "resubmit", ...resubmitPayload }),
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to resubmit"); }
+        setSubmitted(true);
+        setTimeout(() => router.push("/gate-pass"), 2000);
+      } catch (err) {
+        setLoading(false);
+        setErrors({ form: String(err) });
+      }
+      return;
+    }
+
     // After Sales gate-out pass
     if (isSr && srMode === "out") {
+      const isMainOut = asSubType === "MAIN_OUT";
       const asPayload = {
         passType: "AFTER_SALES",
         passSubType: asSubType,
@@ -974,8 +1721,8 @@ export default function CreateGatePassPage() {
         approver: asSubType === "MAIN_OUT" ? mainOutApprover || null : (asFoundPass?.approver || sr.approver || null),
         departureDate: cd.departureDate,
         departureTime: cd.departureTime,
-        transportMode,
-        ...srCarrierMileage,
+        transportMode: isMainOut ? null : transportMode,
+        ...(isMainOut ? {} : srCarrierMileage),
       };
       try {
         const res = await fetch("/api/gate-pass", {
@@ -1021,7 +1768,7 @@ export default function CreateGatePassPage() {
           vehicleColor: selectedSrVehicleDetail?.colour || null,
           requestedBy: sr.customerName || null,
           approver: sr.approver,
-          outReason: sr.jobType,
+          outReason: srJobTypes.join(", "),
           toLocation: sr.receivingLocation,
           arrivalDate: sr.arrivalDate || null,
           arrivalTime: sr.arrivalTime || null,
@@ -1136,19 +1883,29 @@ export default function CreateGatePassPage() {
       {/* Page Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold" style={{ color: "var(--text)" }}>
-          <span className="font-normal">Create</span> Gate Pass
+          <span className="font-normal">{isDraftMode ? "Complete" : isRejectEditMode ? "Edit & Resubmit" : "Create"}</span> Gate Pass
         </h1>
+        {isDraftMode && (
+          <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+            Security created this draft. Complete the normal form below. The vehicle number is locked.
+          </p>
+        )}
+        {isRejectEditMode && (
+          <p className="text-sm mt-1 font-medium" style={{ color: "#ef4444" }}>
+            This pass was rejected. Edit any details below and resubmit for approval.
+          </p>
+        )}
       </div>
 
-      {/* Type Toggle — hidden for ASO (always After Sales) */}
-      <div className={`flex flex-wrap gap-3 mb-6 ${session?.user?.role === "AREA_SALES_OFFICER" ? "hidden" : ""}`}>
+      {/* Type Toggle — ASO sees Location Transfer + After Sales only (no Customer Delivery) */}
+      <div className="flex flex-wrap gap-3 mb-6">
         {([
           { type: "LOCATION_TRANSFER", label: "Location Transfer", icon: (
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 448 512">
+              <path d="M128 40c0-22.1 17.9-40 40-40s40 17.9 40 40V188.2c8.5-7.6 19.7-12.2 32-12.2c20.6 0 38.2 13 45 31.2C295.5 199.4 307.4 192 320.8 192c19.1 0 35.7 11.1 43.7 27.3C371.7 213.7 381.4 208 392 208c22.1 0 40 17.9 40 40V352c0 70.7-57.3 128-128 128H254.6c-40.4 0-79.1-16.1-107.8-44.7L76.6 365.3c-15.9-15.8-15.9-41.5 0-57.4s41.5-15.9 57.4 0l24 23.8V40zM0 272c0-17.7 14.3-32 32-32H96c17.7 0 32 14.3 32 32V480c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32V272z"/>
             </svg>
           )},
-          { type: "CUSTOMER_DELIVERY", label: "Customer Delivery", icon: (
+          { type: "CUSTOMER_DELIVERY", label: "Customer Delivery", asoHidden: true, icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
             </svg>
@@ -1158,17 +1915,20 @@ export default function CreateGatePassPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
             </svg>
           )},
-        ] as { type: PassType; label: string; icon: React.ReactNode }[]).map(({ type: t, label, icon }) => (
+        ] as { type: PassType; label: string; icon: React.ReactNode; asoHidden?: boolean }[])
+        .filter(({ asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER"))
+        .map(({ type: t, label, icon }) => (
           <motion.button
             key={t}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => { setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setLocationType(""); setSrMode("in"); }}
+            onClick={() => { if (isDraftMode || isRejectEditMode) return; setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); setLocationType(""); setSrMode("in"); }}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
             style={passType === t
               ? { background: "linear-gradient(135deg, #1a4f9e, #2563eb)", color: "#fff", border: "none" }
               : { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" }
             }
+            disabled={isDraftMode || isRejectEditMode}
           >
             {icon}
             {label}
@@ -1200,7 +1960,7 @@ export default function CreateGatePassPage() {
                   <button
                     key={v}
                     type="button"
-                    onClick={() => { setSrMode(v); setErrors({}); setAsFoundPass(null); setAsVehiclePasses([]); setAsGateInSearch(""); setAsVehicleSearch(""); }}
+                    onClick={() => { setSrMode(v); setErrors({}); setAsFoundPass(null); setAsVehiclePasses([]); setAsGateInSearch(""); setAsVehicleSearch(""); setSrVehicleHasSearched(false); }}
                     className="rounded-2xl border-2 p-4 text-left transition-all"
                     style={{
                       borderColor: srMode === v ? "#2563eb" : "var(--border)",
@@ -1231,88 +1991,194 @@ export default function CreateGatePassPage() {
 
               {/* SR Bulk Upload Modal */}
               <AnimatePresence>
-                {showSrBulkUpload && (() => {
-                  let parsed: { vehicleNo: string; chassisNo: string }[] = [];
-                  let fileError = "";
-                  const downloadTpl = () => {
-                    const csv = "vehicleNo,chassisNo\nCAB-1234,LC1234567890\nXYZ-5678,CH67890123";
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a"); a.href = url; a.download = "service-vehicle-template.csv"; a.click();
-                    URL.revokeObjectURL(url);
-                  };
-                  return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                        className="w-full max-w-lg rounded-2xl border p-6 shadow-2xl mx-4"
-                        style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-bold" style={{ color: "var(--text)" }}>Bulk Upload Vehicles</h3>
-                          <button type="button" onClick={() => setShowSrBulkUpload(false)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
+                {showSrBulkUpload && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                      className="w-full rounded-2xl border p-6 shadow-2xl mx-4"
+                      style={{ background: "var(--surface)", borderColor: "var(--border)", maxWidth: srBulkRows.length > 0 ? "56rem" : "32rem" }}>
+
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold" style={{ color: "var(--text)" }}>
+                          {srBulkResults.length > 0
+                            ? "Bulk Upload Results"
+                            : srBulkRows.length > 0
+                            ? `${srBulkRows.length} Vehicle${srBulkRows.length > 1 ? "s" : ""} Ready`
+                            : "Bulk Upload Vehicles"}
+                        </h3>
+                        {!srBulkSubmitting && (
+                          <button type="button" onClick={() => { setShowSrBulkUpload(false); setSrBulkRows([]); setSrBulkResults([]); setSrBulkFileError(""); }}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                           </button>
-                        </div>
-                        <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
-                          <p className="font-semibold mb-1" style={{ color: "var(--text)" }}>CSV Format:</p>
-                          <code className="font-mono">vehicleNo,chassisNo</code>
-                        </div>
-                        <button type="button" onClick={downloadTpl} className="flex items-center gap-2 text-sm mb-4 hover:underline" style={{ color: "var(--accent)" }}>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                          Download Template CSV
-                        </button>
-                        <label className="flex flex-col items-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer hover:border-blue-400" style={{ borderColor: "var(--border)" }}>
-                          <svg className="w-8 h-8" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                          <p className="text-sm font-medium" style={{ color: "var(--text)" }}>Click to upload CSV</p>
-                          <input type="file" accept=".csv" className="hidden" onChange={(e) => {
-                            const f = e.target.files?.[0]; if (!f) return;
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                              const text = (ev.target?.result as string) ?? "";
-                              const lines = text.split(/\r?\n/).filter(Boolean);
-                              if (lines.length < 2) { fileError = "No data rows"; return; }
-                              parsed = lines.slice(1).map(l => { const c = l.split(",").map(x => x.trim().replace(/^"|"$/g, "")); return { vehicleNo: c[0] ?? "", chassisNo: c[1] ?? "" }; }).filter(r => r.vehicleNo);
-                              if (parsed.length > 0) {
-                                setS("vehicle", parsed[0].vehicleNo);
-                                setSelectedSrVehicleDetail({ vehicleNo: parsed[0].vehicleNo, chassisNo: parsed[0].chassisNo, model: "", make: "", colourFamily: "", colour: "" });
-                                setShowSrBulkUpload(false);
-                              }
-                            };
-                            reader.readAsText(f);
-                          }} />
-                        </label>
-                        {fileError && <p className="text-red-500 text-xs mt-2">{fileError}</p>}
-                      </motion.div>
-                    </div>
-                  );
-                })()}
+                        )}
+                      </div>
+
+                      {/* Phase 1: Upload */}
+                      {srBulkRows.length === 0 && srBulkResults.length === 0 && (
+                        <>
+                          <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                            <p className="font-semibold mb-1" style={{ color: "var(--text)" }}>CSV Format:</p>
+                            <code className="font-mono break-all">{srBulkTemplateHeaders.join(",")}</code>
+                            <p className="mt-2">Each row creates one gate pass. Approver is taken from the form above.</p>
+                          </div>
+                          <button type="button" onClick={() => {
+                            const csv = getSrBulkTemplateCsv();
+                            const blob = new Blob([csv], { type: "text/csv" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a"); a.href = url; a.download = "service-vehicle-template.csv"; a.click();
+                            URL.revokeObjectURL(url);
+                          }} className="flex items-center gap-2 text-sm mb-4 hover:underline" style={{ color: "var(--accent)" }}>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            Download Template CSV
+                          </button>
+                          <label className="flex flex-col items-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer hover:border-blue-400" style={{ borderColor: "var(--border)" }}>
+                            <svg className="w-8 h-8" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                            <p className="text-sm font-medium" style={{ color: "var(--text)" }}>Click to upload CSV</p>
+                            <input type="file" accept=".csv" className="hidden" onChange={(e) => {
+                              const f = e.target.files?.[0]; if (!f) return;
+                              setSrBulkFileError("");
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const text = (ev.target?.result as string) ?? "";
+                                const lines = text.split(/\r?\n/).filter(Boolean);
+                                if (lines.length < 2) { setSrBulkFileError("No data rows found in file"); return; }
+                                const parsed = lines.slice(1).map((line) => parseCsvLine(line)).filter((row) => row.some((cell) => cell.trim()));
+                                if (parsed.length === 0) { setSrBulkFileError("No valid data rows"); return; }
+                                setSrBulkRows(parsed.map((row) => Object.fromEntries(srBulkTemplateHeaders.map((h, i) => [h, row[i] ?? ""]))));
+                              };
+                              reader.readAsText(f);
+                            }} />
+                          </label>
+                          {srBulkFileError && <p className="text-red-500 text-xs mt-2">{srBulkFileError}</p>}
+                        </>
+                      )}
+
+                      {/* Phase 2: Preview Table */}
+                      {srBulkRows.length > 0 && srBulkResults.length === 0 && (
+                        <>
+                          <div className="overflow-auto rounded-xl border mb-4" style={{ borderColor: "var(--border)", maxHeight: "22rem" }}>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                                  <th className="px-3 py-2 text-left font-semibold">#</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Vehicle No</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Chassis</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Make / Model</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Service Job</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Jobs</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Contact</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Location</th>
+                                  <th className="px-3 py-2 text-left font-semibold">Arrival</th>
+                                  <th className="px-3 py-2"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {srBulkRows.map((row, idx) => {
+                                  const contactVal = row.customerContact?.trim() ?? "";
+                                  const contactInvalid = contactVal !== "" && !/^0[0-9]{9}$/.test(contactVal);
+                                  return (
+                                  <tr key={idx} className="border-t" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+                                    <td className="px-3 py-2" style={{ color: "var(--text-muted)" }}>{idx + 1}</td>
+                                    <td className="px-3 py-2 font-mono font-semibold">{row.vehicleNo || "—"}</td>
+                                    <td className="px-3 py-2 font-mono">{row.chassisNo || "—"}</td>
+                                    <td className="px-3 py-2">{[row.make, row.model].filter(Boolean).join(" / ") || "—"}</td>
+                                    <td className="px-3 py-2">{row.serviceJobNo || "—"}</td>
+                                    <td className="px-3 py-2">{row.jobTypes?.replace(/\|/g, ", ") || "—"}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      {contactVal ? (
+                                        <span style={{ color: contactInvalid ? "#dc2626" : "inherit" }}>
+                                          {contactVal}
+                                          {contactInvalid && (
+                                            <span title="Invalid Sri Lankan number (must be 10 digits starting with 0)" style={{ marginLeft: 4, color: "#dc2626", fontWeight: 700 }}>⚠</span>
+                                          )}
+                                        </span>
+                                      ) : "—"}
+                                    </td>
+                                    <td className="px-3 py-2">{row.receivingLocation || "—"}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap">{[row.arrivalDate, row.arrivalTime].filter(Boolean).join(" ") || "—"}</td>
+                                    <td className="px-3 py-2">
+                                      <button type="button" onClick={() => setSrBulkRows((prev) => prev.filter((_, i) => i !== idx))}
+                                        className="text-red-400 hover:text-red-600 p-1 rounded">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {srBulkRows.some((r) => r.customerContact?.trim() && !/^0[0-9]{9}$/.test(r.customerContact.trim())) && (
+                            <p className="text-xs mb-3 px-1" style={{ color: "#dc2626" }}>
+                              ⚠ Some rows have invalid contact numbers (must be 10 digits starting with 0). Those rows will be skipped.
+                            </p>
+                          )}
+                          <div className="flex items-center justify-between gap-3">
+                            <button type="button" onClick={() => { setSrBulkRows([]); setSrBulkFileError(""); }}
+                              className="px-4 py-2.5 rounded-xl border text-sm font-medium" style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+                              Upload Different File
+                            </button>
+                            <button type="button" onClick={handleBulkCreate}
+                              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                              style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                              Create {srBulkRows.length} Gate Pass{srBulkRows.length > 1 ? "es" : ""}
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Phase 3: Submitting / Results */}
+                      {(srBulkSubmitting || srBulkResults.length > 0) && (
+                        <>
+                          <div className="space-y-2 mb-4 max-h-80 overflow-auto">
+                            {srBulkRows.map((row, idx) => {
+                              const result = srBulkResults[idx];
+                              return (
+                                <div key={idx} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                                  <span className="font-mono font-semibold flex-1" style={{ color: "var(--text)" }}>{row.vehicleNo || `Row ${idx + 1}`}</span>
+                                  {!result ? (
+                                    idx === srBulkResults.length ? (
+                                      <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--accent)" }}>
+                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                        Creating…
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>Waiting</span>
+                                    )
+                                  ) : result.status === "success" ? (
+                                    <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-semibold">
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                                      {result.gatePassNumber}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-red-500">{result.error}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {!srBulkSubmitting && (
+                            <div className="flex justify-end">
+                              <button type="button" onClick={() => { setShowSrBulkUpload(false); setSrBulkRows([]); setSrBulkResults([]); router.push("/gate-pass"); }}
+                                className="px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                                style={{ background: "linear-gradient(135deg,#10b981,#059669)" }}>
+                                Done — View Gate Passes
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                    </motion.div>
+                  </div>
+                )}
               </AnimatePresence>
 
               {/* SR: Vehicle Details */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Vehicle Details</SectionTitle>
-
-                {/* Row 1: Approver fields — hidden for ASO on auto-approved pass types */}
-                {!(session?.user?.role === "AREA_SALES_OFFICER" && asSubType !== "MAIN_OUT") && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-                  <Field label="Approver Id" required error={errors.approver}>
-                    {assignedApprover ? (
-                      <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <span className="font-medium text-xs truncate">{assignedApprover.name}</span>
-                        <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                      </div>
-                    ) : (
-                      <SearchInput value={sr.approver} onChange={(v) => { setS("approver", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver)} placeholder="Search approver" error={errors.approver} options={lookupOptions.approver} />
-                    )}
-                  </Field>
-                  <Field label="Approver 2 (optional)">
-                    <SearchInput value={sr.approver2} onChange={(v) => { setS("approver2", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver2)} placeholder="Search approver" options={lookupOptions.approver} />
-                  </Field>
-                </div>
-                )}
 
                 {/* Add Vehicle / General sub-tabs */}
                 <div className="flex gap-0 mb-4 border-b" style={{ borderColor: "var(--border)" }}>
@@ -1331,17 +2197,44 @@ export default function CreateGatePassPage() {
 
                 {srVehicleTab === "add" ? (
                   <>
+                    {/* Bulk Upload + Template — top of tab */}
+                    {!isDraftMode && (
+                      <div className="flex flex-wrap items-center gap-2 mb-4">
+                        <button type="button" onClick={() => setShowSrBulkUpload(true)}
+                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
+                          style={{ background: "#5a9216" }}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                          Bulk Upload
+                        </button>
+                        <button type="button" onClick={() => {
+                          const csv = getSrBulkTemplateCsv();
+                          const blob = new Blob([csv], { type: "text/csv" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a"); a.href = url; a.download = "service-vehicle-template.csv"; a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                          className="flex items-center gap-1.5 text-sm hover:underline"
+                          style={{ color: "var(--accent)" }}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          Download Bulk Upload Template
+                        </button>
+                      </div>
+                    )}
+
                     {/* Vehicle Details search */}
+                    {isDraftMode ? (
+                      <LockedVehicleField label="Vehicle Details" vehicle={sr.vehicle} details={selectedSrVehicleDetail} />
+                    ) : (
                     <Field label="Vehicle Details" required error={errors.vehicle} className="mb-3">
                       <div className="relative">
                         <SearchInput
                           value={sr.vehicle}
-                          onChange={(v) => { setS("vehicle", v); void fetchLookup("vehicle", v); if (selectedSrVehicleDetail && v !== sr.vehicle) setSelectedSrVehicleDetail(null); }}
-                          onFocus={() => void fetchLookup("vehicle", "")}
+                          onChange={(v) => { setS("vehicle", v); setSrVehicleHasSearched(v.trim().length > 0); void fetchLookup("vehicle", v); if (selectedSrVehicleDetail && v !== sr.vehicle) setSelectedSrVehicleDetail(null); }}
+                          onFocus={() => { if (sr.vehicle.trim()) { setSrVehicleHasSearched(true); void fetchLookup("vehicle", sr.vehicle); } }}
                           placeholder="Search by vehicle no or chassis no"
                           error={errors.vehicle}
                           options={lookupOptions.vehicle}
-                          onSelect={(o) => { setS("vehicle", o.value); setSelectedSrVehicleDetail({ vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" }); }}
+                          onSelect={(o) => { setS("vehicle", o.value); setSrVehicleHasSearched(true); setSelectedSrVehicleDetail({ vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" }); }}
                           renderOption={(o) => (
                             <div className="flex items-center gap-3 w-full py-0.5">
                               <div className="flex-1 min-w-0">
@@ -1353,7 +2246,7 @@ export default function CreateGatePassPage() {
                           )}
                         />
                         {sr.vehicle && (
-                          <button type="button" onClick={() => { setS("vehicle", ""); setSelectedSrVehicleDetail(null); }}
+                          <button type="button" onClick={() => { setS("vehicle", ""); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); }}
                             className="absolute right-9 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200"
                             style={{ color: "var(--text-muted)" }}>
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1372,11 +2265,17 @@ export default function CreateGatePassPage() {
                         </div>
                       )}
                     </Field>
+                    )}
 
-                    {/* On/by field */}
-                    <Field label="On/by" className="mb-3">
-                      <TextInput value={sr.onBy} onChange={(v) => setS("onBy", v)} placeholder="e.g. customer name or contact" />
-                    </Field>
+                    {/* Customer Name + Contact */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                      <Field label="Customer Name">
+                        <TextInput value={sr.customerName} onChange={(v) => setS("customerName", v)} placeholder="e.g. Saman Perera" />
+                      </Field>
+                      <Field label="Customer Contact" error={errors.customerContact}>
+                        <TextInput value={sr.customerContact} onChange={(v) => { setS("customerContact", v); setErrors(p => { const n = {...p}; delete n.customerContact; return n; }); }} placeholder="e.g. 0771234567" />
+                      </Field>
+                    </div>
 
                     {/* Service Job Number */}
                     <Field label="Service Job No." className="mb-3">
@@ -1387,52 +2286,49 @@ export default function CreateGatePassPage() {
                       />
                     </Field>
 
-                    {/* Job type */}
-                    <Field label="Job" required error={errors.jobType} className="mb-4">
-                      <select value={sr.jobType} onChange={(e) => setS("jobType", e.target.value)}
-                        className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
-                        style={{ background: "var(--surface2)", borderColor: errors.jobType ? "#f87171" : "var(--border)", color: sr.jobType ? "var(--text)" : "var(--text-muted)" }}>
-                        <option value="">Enter job type…</option>
-                        <option value="Routine Service">Routine Service</option>
-                        <option value="Repair">Repair</option>
-                        <option value="Inspection">Inspection</option>
-                        <option value="Body Work">Body Work</option>
-                        <option value="Electrical">Electrical</option>
-                        <option value="AC Service">AC Service</option>
-                        <option value="Warranty Repair">Warranty Repair</option>
-                        <option value="PDI">PDI (Pre-Delivery Inspection)</option>
-                        <option value="Other">Other</option>
-                      </select>
+                    {/* Job type — multi-select chips */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                        Job<span className="text-red-500 ml-0.5">*</span>
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {SR_JOB_OPTIONS.map((job) => {
+                          const sel = srJobTypes.includes(job);
+                          return (
+                            <button key={job} type="button" onClick={() => toggleSrJob(job)}
+                              className="px-3 py-1.5 rounded-xl text-sm font-medium border transition-all"
+                              style={{ background: sel ? "#2563eb" : "var(--surface2)", color: sel ? "#fff" : "var(--text)", borderColor: sel ? "#2563eb" : (errors.jobType ? "#f87171" : "var(--border)") }}>
+                              {job === "PDI" ? "PDI (Pre-Delivery Inspection)" : job}
+                            </button>
+                          );
+                        })}
+                      </div>
                       {errors.jobType && <p className="text-red-500 text-xs mt-1">{errors.jobType}</p>}
-                    </Field>
+                    </div>
 
                     {/* Action buttons row */}
+                    {!isDraftMode && (
                     <div className="flex flex-wrap items-center gap-2">
                       <button type="button" onClick={() => { setAddVehicleTarget("sr"); setShowAddVehicle(true); }}
-                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
+                        disabled={!sr.vehicle.trim() || !srVehicleHasSearched || lookupOptions.vehicle.length > 0 || !!selectedSrVehicleDetail}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
                         ADD Vehicle
                       </button>
-                      <button type="button" onClick={() => setShowSrBulkUpload(true)}
-                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-sm font-semibold"
-                        style={{ background: "#5a9216" }}>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                        Bulk Upload
-                      </button>
-                      <button type="button" onClick={() => {
-                        const csv = "vehicleNo,chassisNo\nCAB-1234,LC1234567890\nXYZ-5678,CH67890123";
-                        const blob = new Blob([csv], { type: "text/csv" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a"); a.href = url; a.download = "service-vehicle-template.csv"; a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                        className="flex items-center gap-1.5 text-sm hover:underline"
-                        style={{ color: "var(--accent)" }}>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        Download Bulk Upload Template
-                      </button>
+                      <p className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>
+                        {!sr.vehicle.trim()
+                          ? "Search vehicle details first."
+                          : selectedSrVehicleDetail
+                          ? "Vehicle found in SAP/DB."
+                          : !srVehicleHasSearched
+                          ? "Search SAP + DB before adding."
+                          : lookupOptions.vehicle.length > 0
+                          ? "Matching vehicles found in SAP/DB."
+                          : "No match in SAP + DB. You can add it now."}
+                      </p>
                     </div>
+                    )}
                   </>
                 ) : (
                   /* General tab — customer details + vehicle parts + job */
@@ -1554,27 +2450,25 @@ export default function CreateGatePassPage() {
                       </div>
                     </div>
 
-                    {/* Job type search */}
-                    <Field label="Job" required error={errors.jobType}>
-                      <SearchInput
-                        value={sr.jobType}
-                        onChange={(v) => setS("jobType", v)}
-                        placeholder="Search job type"
-                        options={[
-                          { id: "1", value: "Routine Service", label: "Routine Service" },
-                          { id: "2", value: "Repair", label: "Repair" },
-                          { id: "3", value: "Inspection", label: "Inspection" },
-                          { id: "4", value: "Body Work", label: "Body Work" },
-                          { id: "5", value: "Electrical", label: "Electrical" },
-                          { id: "6", value: "AC Service", label: "AC Service" },
-                          { id: "7", value: "Warranty Repair", label: "Warranty Repair" },
-                          { id: "8", value: "PDI", label: "PDI (Pre-Delivery Inspection)" },
-                          { id: "9", value: "Other", label: "Other" },
-                        ].filter(o => !sr.jobType || o.label.toLowerCase().includes(sr.jobType.toLowerCase()))}
-                        onSelect={(o) => setS("jobType", o.value)}
-                      />
+                    {/* Job type — multi-select chips */}
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                        Job<span className="text-red-500 ml-0.5">*</span>
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {SR_JOB_OPTIONS.map((job) => {
+                          const sel = srJobTypes.includes(job);
+                          return (
+                            <button key={job} type="button" onClick={() => toggleSrJob(job)}
+                              className="px-3 py-1.5 rounded-xl text-sm font-medium border transition-all"
+                              style={{ background: sel ? "#2563eb" : "var(--surface2)", color: sel ? "#fff" : "var(--text)", borderColor: sel ? "#2563eb" : (errors.jobType ? "#f87171" : "var(--border)") }}>
+                              {job === "PDI" ? "PDI (Pre-Delivery Inspection)" : job}
+                            </button>
+                          );
+                        })}
+                      </div>
                       {errors.jobType && <p className="text-red-500 text-xs mt-1">{errors.jobType}</p>}
-                    </Field>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1608,6 +2502,29 @@ export default function CreateGatePassPage() {
 
               {srMode === "out" && (
                 <>
+                  {/* Row 1: Approver fields — hidden for MAIN_IN and for ASO on auto-approved pass types */}
+                  {!(session?.user?.role === "AREA_SALES_OFFICER" && asSubType !== "MAIN_OUT") && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                      <Field label="Approver Id" required error={errors.approver}>
+                        {assignedApprover ? (
+                          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            <span className="font-medium text-xs truncate">{assignedApprover.name}</span>
+                            <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
+                          </div>
+                        ) : (
+                          <SearchInput value={sr.approver} onChange={(v) => { setS("approver", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver)} placeholder="Search approver" error={errors.approver} options={lookupOptions.approver} />
+                        )}
+                      </Field>
+                      <Field label="Approver 2 (optional)">
+                        <SearchInput value={sr.approver2} onChange={(v) => { setS("approver2", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver2)} placeholder="Search approver" options={lookupOptions.approver} />
+                      </Field>
+                    </div>
+                  )}
+
                   {/* ASO: Prominent pass-type selector shown before all steps */}
                   {session?.user?.role === "AREA_SALES_OFFICER" && (
                     <div className="rounded-2xl border p-5 mb-5" style={{ background: "var(--surface)", borderColor: "#3b82f644", boxShadow: "var(--card-shadow)" }}>
@@ -1627,13 +2544,6 @@ export default function CreateGatePassPage() {
                             desc: "Vehicle leaving your location",
                             dot: "#3b82f6", bg: "#eff6ff", color: "#1d4ed8",
                             icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>,
-                          },
-                          {
-                            value: "SUB_IN" as const,
-                            label: "Sub Gate IN",
-                            desc: "Vehicle arriving to your location",
-                            dot: "#22c55e", bg: "#f0fdf4", color: "#15803d",
-                            icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" /></svg>,
                           },
                           {
                             value: "SUB_OUT_IN" as const,
@@ -1890,21 +2800,22 @@ export default function CreateGatePassPage() {
                         const lastAnySub = sortedSubs[0];
                         // Most recent sub that is still active (not completed/cancelled)
                         const lastActiveSub = sortedSubs.find((sp: any) => !["COMPLETED", "CANCELLED"].includes(sp.status));
-                        // MAIN IN must be COMPLETED (recipient marked as IN) to unlock next steps
-                        const mainInConfirmed = asFoundPass.status === "COMPLETED";
+                        // MAIN IN confirmed when Security gated it IN (COMPLETED or GATE_OUT = sub-pass journey in progress)
+                        const mainInConfirmed = ["COMPLETED", "GATE_OUT"].includes(asFoundPass.status);
                         // For warning message: whether MAIN IN is at least approved (just not yet confirmed)
                         const mainInApprovedOrBetter = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(asFoundPass.status);
-                        // Vehicle confirmed out = SUB_OUT has reached GATE_OUT (security confirmed) or COMPLETED
-                        const vehicleConfirmedOut = lastAnySub?.passSubType === "SUB_OUT" &&
-                          ["GATE_OUT", "COMPLETED"].includes(lastAnySub?.status);
+                        // Vehicle is currently away = there is an active SUB_OUT in transit (GATE_OUT) or at sub-location (no return trip completed yet)
+                        // A COMPLETED SUB_OUT does NOT mean vehicle is away — it could be the return trip back to DIMO
+                        const vehicleInTransit = lastActiveSub?.passSubType === "SUB_OUT" && lastActiveSub?.status === "GATE_OUT";
+                        const vehicleAtSubLocation = lastAnySub?.passSubType === "SUB_OUT" && lastAnySub?.status === "COMPLETED" &&
+                          sortedSubs.filter((sp: any) => ["SUB_OUT", "SUB_IN", "SUB_OUT_IN"].includes(sp.passSubType) && sp.status === "COMPLETED").length % 2 !== 0;
+                        const vehicleConfirmedOut = vehicleInTransit || vehicleAtSubLocation;
                         // Active sub blocks = active sub that isn't a GATE_OUT SUB_OUT ("vehicle is outside" state)
                         const activeSubBlocks = !!lastActiveSub &&
                           !(lastActiveSub.passSubType === "SUB_OUT" && lastActiveSub.status === "GATE_OUT");
                         // SUB OUT: available when MAIN IN confirmed AND no active sub AND vehicle not already confirmed out
                         const subOutLocked = !mainInConfirmed || activeSubBlocks || vehicleConfirmedOut;
-                        // SUB IN: only available when vehicle is confirmed out (SUB_OUT COMPLETED by recipient)
-                        const subInLocked = !mainInConfirmed || !vehicleConfirmedOut;
-                        // MAIN OUT: same condition as SUB OUT
+                        // MAIN OUT: available when MAIN IN confirmed AND no active sub AND vehicle is back at DIMO
                         const mainOutLocked = !mainInConfirmed || activeSubBlocks || vehicleConfirmedOut;
 
                         const notApprovedReason = !mainInApprovedOrBetter
@@ -1941,21 +2852,8 @@ export default function CreateGatePassPage() {
                                       </svg>
                                     ),
                                     locked: subOutLocked,
-                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is at another plant — complete Sub Gate IN first" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
+                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is still at another plant" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
                                     bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6",
-                                  },
-                                  {
-                                    value: "SUB_IN" as const,
-                                    label: "Sub Gate IN",
-                                    desc: "Vehicle returning from another plant",
-                                    icon: (
-                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" />
-                                      </svg>
-                                    ),
-                                    locked: subInLocked,
-                                    lockReason: !mainInConfirmed ? notApprovedReason : activeSubBlocks ? "Waiting for Sub Gate OUT to be confirmed by recipient" : "Create & confirm Sub Gate OUT first",
-                                    bg: "#fffbeb", color: "#92400e", dot: "#f59e0b",
                                   },
                                   {
                                     value: "MAIN_OUT" as const,
@@ -1967,7 +2865,7 @@ export default function CreateGatePassPage() {
                                       </svg>
                                     ),
                                     locked: mainOutLocked,
-                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is at another plant — complete Sub Gate IN first" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
+                                    lockReason: !mainInConfirmed ? notApprovedReason : vehicleConfirmedOut ? "Vehicle is still at another plant" : activeSubBlocks ? "Sub-pass in progress" : notApprovedReason,
                                     bg: "#fdf4ff", color: "#6b21a8", dot: "#a855f7",
                                   },
                                 ]).map(({ value: v, label, desc, icon, locked, lockReason, bg, color, dot }) => {
@@ -2040,10 +2938,10 @@ export default function CreateGatePassPage() {
                                   onChange={(v) => { setAsToLocation(v); setErrors(p => { const n = {...p}; delete n.asToLocation; return n; }); }}
                                   placeholder="Select destination"
                                   error={errors.asToLocation}
-                                  options={dimoLocations.filter(o =>
+                                  options={(dimoLocations.length > 0 ? dimoLocations : lookupOptions.location).filter(o =>
                                     !asToLocation || o.label?.toLowerCase().includes(asToLocation.toLowerCase()) || o.value?.toLowerCase().includes(asToLocation.toLowerCase())
                                   )}
-                                  onSelect={(o) => { setAsToLocation(o.storageDescription || o.label || o.value); setErrors(p => { const n = {...p}; delete n.asToLocation; return n; }); }}
+                                  onSelect={(o) => { setAsToLocation(o.value || o.label || ""); setErrors(p => { const n = {...p}; delete n.asToLocation; return n; }); }}
                                   renderOption={(o) => (
                                     <div className="py-0.5">
                                       <p className="font-medium text-sm" style={{ color: "var(--text)" }}>{o.storageDescription || o.label}</p>
@@ -2123,7 +3021,7 @@ export default function CreateGatePassPage() {
                                             </thead>
                                             <tbody>
                                               {creditOrders.map((o, idx) => (
-                                                <tr key={o.orderId} style={{ background: idx % 2 === 0 ? "#eff6ff" : "#dbeafe30", borderBottom: "1px solid #bfdbfe" }}>
+                                                <tr key={`${o.orderId}-${idx}`} style={{ background: idx % 2 === 0 ? "#eff6ff" : "#dbeafe30", borderBottom: "1px solid #bfdbfe" }}>
                                                   <td className="px-3 py-2" style={{ color: "#3b82f6" }}>{idx + 1}</td>
                                                   <td className="px-3 py-2 font-mono font-bold" style={{ color: "#1e40af" }}>{o.orderId}</td>
                                                   <td className="px-3 py-2">
@@ -2147,17 +3045,28 @@ export default function CreateGatePassPage() {
                                           <label className="block text-xs font-bold mb-1.5 uppercase tracking-wide" style={{ color: "#1e40af" }}>
                                             Select Approver <span style={{ color: "#dc2626" }}>*</span>
                                           </label>
-                                          <select
-                                            value={mainOutApprover}
-                                            onChange={(e) => { setMainOutApprover(e.target.value); setErrors(p => { const n = {...p}; delete n.mainOutApprover; return n; }); }}
-                                            className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                            style={{ background: "white", borderColor: errors.mainOutApprover ? "#f87171" : "#bfdbfe", color: mainOutApprover ? "var(--text)" : "#94a3b8" }}
-                                          >
-                                            <option value="">— Select approver for credit orders —</option>
-                                            {lookupOptions.approver.map((o) => (
-                                              <option key={o.id ?? o.value} value={o.label ?? o.value}>{o.label ?? o.value}</option>
-                                            ))}
-                                          </select>
+                                          {assignedApprover ? (
+                                            <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                                              style={{ background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" }}>
+                                              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                              </svg>
+                                              <span className="font-semibold truncate">{assignedApprover.name}</span>
+                                              <span className="text-xs ml-1" style={{ color: "#3b82f6" }}>(auto-assigned)</span>
+                                            </div>
+                                          ) : (
+                                            <select
+                                              value={mainOutApprover}
+                                              onChange={(e) => { setMainOutApprover(e.target.value); setErrors(p => { const n = {...p}; delete n.mainOutApprover; return n; }); }}
+                                              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                              style={{ background: "white", borderColor: errors.mainOutApprover ? "#f87171" : "#bfdbfe", color: mainOutApprover ? "var(--text)" : "#94a3b8" }}
+                                            >
+                                              <option value="">— Select approver for credit orders —</option>
+                                              {lookupOptions.approver.map((o) => (
+                                                <option key={o.id ?? o.value} value={o.label ?? o.value}>{o.label ?? o.value}</option>
+                                              ))}
+                                            </select>
+                                          )}
                                           {errors.mainOutApprover && (
                                             <p className="text-xs mt-1 font-medium" style={{ color: "#dc2626" }}>{errors.mainOutApprover}</p>
                                           )}
@@ -2192,7 +3101,7 @@ export default function CreateGatePassPage() {
                             })()}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <Field label="Departure Date" required error={errors.departureDate}>
-                                <DatePicker value={cd.departureDate} onChange={(v) => setC("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
+                                <DatePicker value={cd.departureDate} onChange={(v) => setC("departureDate", v)} min={linkedAfterSalesMinDate} error={errors.departureDate} placeholder="Pick departure date" />
                               </Field>
                               <Field label="Departure Time" required error={errors.departureTime}>
                                 <TimePicker value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} date={cd.departureDate} />
@@ -2225,114 +3134,13 @@ export default function CreateGatePassPage() {
           ) : isLtLike ? (
             <motion.div key="lt" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.2 }}>
 
-              {/* Location Type Radio + To Location */}
+              {/* Vehicle Selection — shown first so To Location can be filtered by Matnr */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                <SectionTitle>Location Details</SectionTitle>
-
-                {/* Location Type Radio Buttons */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-2" style={{ color: "var(--text)" }}>Location Type</label>
-                  <div className="flex flex-wrap gap-4">
-                    {([
-                      { value: "", label: "All" },
-                      { value: "DEALER", label: "Dealer" },
-                      { value: "DIMO", label: "DIMO" },
-                      { value: "PROMOTION", label: "Promotion" },
-                      { value: "FINANCE", label: "Finance Institution" },
-                    ] as { value: LocationType | ""; label: string }[]).map(({ value: v, label: lbl }) => (
-                      <label key={v || "all"} className="flex items-center gap-2 cursor-pointer">
-                        <div
-                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); }}
-                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
-                          style={{ borderColor: locationType === v ? "#2563eb" : "var(--border)" }}
-                        >
-                          {locationType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
-                        </div>
-                        <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{lbl}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {(locationType === "PROMOTION" || locationType === "FINANCE") ? (
-                  /* ── 2-column: read-only plant (left) + picker (right) ── */
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Left: read-only Plant Name */}
-                    <div>
-                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Plant Name</label>
-                      <div className="border rounded-xl px-4 py-2.5 text-sm min-h-[42px] flex items-center"
-                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: selectedLocationDetail ? "var(--text)" : "var(--text-muted)" }}>
-                        {selectedLocationDetail?.plantDescription || <span className="italic opacity-60">Auto-filled on selection</span>}
-                      </div>
-                    </div>
-                    {/* Right: Location picker */}
-                    <div>
-                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location <span className="text-red-500">*</span></label>
-                      <TwoColumnLocationPicker
-                        value={lt.toLocation}
-                        displayValue={selectedLocationDetail?.storageDescription}
-                        locationType={locationType}
-                        error={errors.toLocation}
-                        onSelect={(o) => {
-                          setL("toLocation", o.value);
-                          setSelectedLocationDetail({ plantCode: o.plantCode ?? "", plantDescription: o.plantDescription ?? "", storageLocation: o.storageLocation ?? "", storageDescription: o.storageDescription ?? "" });
-                        }}
-                        onNewLocation={(o) => {
-                          setL("toLocation", o.value);
-                          setSelectedLocationDetail({ plantCode: o.plantCode ?? "", plantDescription: o.plantDescription ?? "", storageLocation: o.storageLocation ?? "", storageDescription: o.storageDescription ?? "" });
-                        }}
-                      />
-                      {errors.toLocation && <p className="text-red-500 text-xs mt-1">{errors.toLocation}</p>}
-                    </div>
-                  </div>
+                <SectionTitle>Vehicle</SectionTitle>
+                {isDraftMode || isRejectEditMode ? (
+                  <LockedVehicleField label="Vehicle" vehicle={lt.vehicle} details={selectedVehicleDetail} />
                 ) : (
-                  <Field label="To Location" required error={errors.toLocation}>
-                    <SearchInput
-                      value={lt.toLocation}
-                      onChange={(v) => { setL("toLocation", v); setSelectedLocationDetail(null); void fetchLookup("location", v, locationType || undefined); }}
-                      onFocus={() => { if (lookupOptions.location.length === 0) void fetchLookup("location", lt.toLocation, locationType || undefined); }}
-                      placeholder="Search location"
-                      error={errors.toLocation}
-                      loading={locationLoading}
-                      options={lookupOptions.location}
-                      onSelect={(o) => {
-                        setSelectedLocationDetail({
-                          plantCode: o.plantCode ?? "",
-                          plantDescription: o.plantDescription ?? "",
-                          storageLocation: o.storageLocation ?? "",
-                          storageDescription: o.storageDescription ?? "",
-                        });
-                      }}
-                    />
-                    {selectedLocationDetail && (
-                      <div className="mt-2 rounded-xl px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1.5"
-                        style={{ background: "var(--surface-2, #f0f4ff)", border: "1px solid var(--border)", color: "var(--text-muted, #6b7280)" }}>
-                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Plant:</span> {selectedLocationDetail.plantCode} – {selectedLocationDetail.plantDescription}</span>
-                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Sloc:</span> {selectedLocationDetail.storageLocation}</span>
-                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Description:</span> {selectedLocationDetail.storageDescription}</span>
-                      </div>
-                    )}
-                  </Field>
-                )}
-              </div>
-
-              {/* Vehicle Details */}
-              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                <SectionTitle>Vehicle Details</SectionTitle>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Out Reason" required error={errors.outReason}>
-                    <SearchInput
-                      value={lt.outReason}
-                      onChange={(v) => { setL("outReason", v); void fetchLookup("outReason", v); }}
-                      onFocus={() => void fetchLookup("outReason", lt.outReason)}
-                      placeholder="Search out reason"
-                      error={errors.outReason}
-                      options={lookupOptions.outReason}
-                    />
-                  </Field>
-
-                  {/* Vehicle with Add New + format hint */}
-                  <Field label="Vehicle" required error={errors.vehicle} className="md:col-span-2">
+                  <Field label="Vehicle" required error={errors.vehicle}>
                     <div className="flex gap-2">
                       <div className="flex-1 relative">
                         <SearchInput
@@ -2340,8 +3148,10 @@ export default function CreateGatePassPage() {
                           onChange={(v) => {
                             setL("vehicle", v);
                             void fetchLookup("vehicle", v);
-                            // Clear detail card if user types something different from selection
-                            if (selectedVehicleDetail && v !== lt.vehicle) setSelectedVehicleDetail(null);
+                            if (selectedVehicleDetail && v !== lt.vehicle) {
+                              setSelectedVehicleDetail(null);
+                              setErrors(p => { const n = { ...p }; delete n.toLocation; return n; });
+                            }
                           }}
                           onFocus={() => void fetchLookup("vehicle", "")}
                           placeholder="Search by vehicle no or chassis no"
@@ -2357,8 +3167,9 @@ export default function CreateGatePassPage() {
                               colour:       o.colour       ?? "",
                             };
                             setSelectedVehicleDetail(detail);
-                            // Auto-detect vehicle's current location
-                            void fetchVehicleCurrentLocation(o.value).then((loc) => {
+                            setL("toLocation", "");
+                            setSelectedLocationDetail(null);
+                            void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
                               if (loc) {
                                 setL("fromLocation", loc);
                                 setSelectedVehicleDetail({ ...detail, currentLocation: loc });
@@ -2379,11 +3190,14 @@ export default function CreateGatePassPage() {
                             </div>
                           )}
                         />
-                        {/* Clear button */}
                         {lt.vehicle && (
                           <button
                             type="button"
-                            onClick={() => { setL("vehicle", ""); setSelectedVehicleDetail(null); void fetchLookup("vehicle", ""); }}
+                            onClick={() => {
+                              setL("vehicle", "");
+                              setSelectedVehicleDetail(null);
+                              void fetchLookup("vehicle", "");
+                            }}
                             className="absolute right-9 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
                             style={{ color: "var(--text-muted)" }}
                             title="Clear vehicle"
@@ -2395,11 +3209,9 @@ export default function CreateGatePassPage() {
                         )}
                       </div>
                     </div>
-                    {/* Vehicle detail card */}
                     {selectedVehicleDetail && (
                       <div className="mt-3 rounded-xl border px-4 py-3"
                         style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
-                        {/* Current Location — prominent row at top */}
                         <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
                           <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -2432,6 +3244,137 @@ export default function CreateGatePassPage() {
                         </div>
                       </div>
                     )}
+                  </Field>
+                )}
+              </div>
+
+              {/* Location Details — shown only after a vehicle is chosen from the dropdown (not while typing) */}
+              {(!!selectedVehicleDetail || isDraftMode || isRejectEditMode) && (
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Location Details</SectionTitle>
+
+                {/* Location Type Radio Buttons */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2" style={{ color: "var(--text)" }}>Location Type</label>
+                  <div className="flex flex-wrap gap-4">
+                    {([
+                      { value: "OTHER", label: "Other" },
+                      { value: "DEALER", label: "Dealer" },
+                      { value: "DIMO", label: "DIMO", asoHidden: true },
+                      { value: "PROMOTION", label: "Promotion" },
+                      { value: "FINANCE", label: "Finance Institution" },
+                    ] as { value: LocationType | ""; label: string; asoHidden?: boolean }[])
+                    .filter(({ asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER"))
+                    .map(({ value: v, label: lbl }) => (
+                      <label key={v || "other"} className="flex items-center gap-2 cursor-pointer">
+                        <div
+                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); }}
+                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                          style={{ borderColor: locationType === v ? "#2563eb" : "var(--border)" }}
+                        >
+                          {locationType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                        </div>
+                        <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{lbl}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {(locationType === "PROMOTION" || locationType === "FINANCE") ? (
+                  /* ── 2-column: read-only plant (left) + picker (right) ── */
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Plant Name</label>
+                      <div className="border rounded-xl px-4 py-2.5 text-sm min-h-[42px] flex items-center"
+                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: selectedLocationDetail ? "var(--text)" : "var(--text-muted)" }}>
+                        {selectedLocationDetail?.plantDescription || <span className="italic opacity-60">Auto-filled on selection</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location <span className="text-red-500">*</span></label>
+                      <TwoColumnLocationPicker
+                        value={lt.toLocation}
+                        displayValue={selectedLocationDetail?.storageDescription}
+                        locationType={locationType}
+                        error={errors.toLocation}
+                        onSelect={(o) => {
+                          setL("toLocation", o.value);
+                          setSelectedLocationDetail({ plantCode: o.plantCode ?? "", plantDescription: o.plantDescription ?? "", storageLocation: o.storageLocation ?? "", storageDescription: o.storageDescription ?? "" });
+                          if (selectedVehicleDetail?.currentLocation && o.value === selectedVehicleDetail.currentLocation) {
+                            setErrors(p => ({ ...p, toLocation: "To Location cannot be the same as the vehicle's current location" }));
+                          } else {
+                            setErrors(p => { const n = { ...p }; delete n.toLocation; return n; });
+                          }
+                        }}
+                        onNewLocation={(o) => {
+                          setL("toLocation", o.value);
+                          setSelectedLocationDetail({ plantCode: o.plantCode ?? "", plantDescription: o.plantDescription ?? "", storageLocation: o.storageLocation ?? "", storageDescription: o.storageDescription ?? "" });
+                        }}
+                      />
+                      {errors.toLocation && <p className="text-red-500 text-xs mt-1">{errors.toLocation}</p>}
+                    </div>
+                  </div>
+                ) : locationType === "OTHER" ? (
+                  <Field label="To Location" required error={errors.toLocation}>
+                    <TextInput
+                      value={lt.toLocation}
+                      onChange={(v) => { setL("toLocation", v); setSelectedLocationDetail(null); }}
+                      placeholder="Enter destination location"
+                      error={errors.toLocation}
+                    />
+                  </Field>
+                ) : (
+                  <Field label="To Location" required error={errors.toLocation}>
+                    <SearchInput
+                      value={lt.toLocation}
+                      onChange={(v) => {
+                        setL("toLocation", v);
+                        setSelectedLocationDetail(null);
+                        void fetchLookup("location", v, locationType || undefined);
+                      }}
+                      onFocus={() => {
+                        if (lookupOptions.location.length === 0) void fetchLookup("location", lt.toLocation, locationType || undefined);
+                      }}
+                      placeholder="Search location"
+                      error={errors.toLocation}
+                      loading={locationLoading}
+                      options={lookupOptions.location}
+                      onSelect={(o) => {
+                        setL("toLocation", o.value);
+                        setSelectedLocationDetail({
+                          plantCode: o.plantCode ?? "",
+                          plantDescription: o.plantDescription ?? "",
+                          storageLocation: o.storageLocation ?? "",
+                          storageDescription: o.storageDescription ?? "",
+                        });
+                      }}
+                    />
+                    {selectedLocationDetail && (
+                      <div className="mt-2 rounded-xl px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1.5"
+                        style={{ background: "var(--surface-2, #f0f4ff)", border: "1px solid var(--border)", color: "var(--text-muted, #6b7280)" }}>
+                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Plant:</span> {selectedLocationDetail.plantCode} – {selectedLocationDetail.plantDescription}</span>
+                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Sloc:</span> {selectedLocationDetail.storageLocation}</span>
+                        <span><span className="font-semibold" style={{ color: "var(--text)" }}>Description:</span> {selectedLocationDetail.storageDescription}</span>
+                      </div>
+                    )}
+                  </Field>
+                )}
+              </div>
+              )}
+
+              {/* Trip Details */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Trip Details</SectionTitle>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="Out Reason" required error={errors.outReason}>
+                    <SearchInput
+                      value={lt.outReason}
+                      onChange={(v) => { setL("outReason", v); void fetchLookup("outReason", v); }}
+                      onFocus={() => void fetchLookup("outReason", lt.outReason)}
+                      placeholder="Search out reason"
+                      error={errors.outReason}
+                      options={lookupOptions.outReason}
+                    />
                   </Field>
 
                   <Field label="Approver" required error={errors.approver} className="md:col-span-2">
@@ -2468,9 +3411,7 @@ export default function CreateGatePassPage() {
                   <Field label="Estimated Departure Time" required error={errors.departureTime}>
                     <TimePicker value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} date={lt.departureDate} />
                   </Field>
-                  <Field label="Reason" className="md:col-span-2">
-                    <SearchInput value={lt.reasonToOut} onChange={(v) => setL("reasonToOut", v)} placeholder="Search reason to out" />
-                  </Field>
+
                 </div>
               </div>
 
@@ -2478,11 +3419,11 @@ export default function CreateGatePassPage() {
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Gate In — Expected Arrival</SectionTitle>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Expected Arrival Date">
-                    <DatePicker value={lt.arrivalDate} onChange={(v) => setL("arrivalDate", v)} min={lt.departureDate || today} placeholder="Pick arrival date" />
+                  <Field label="Expected Arrival Date" required error={errors.arrivalDate}>
+                    <DatePicker value={lt.arrivalDate} onChange={(v) => { setL("arrivalDate", v); setErrors(p => { const n = { ...p }; delete n.arrivalDate; return n; }); }} min={lt.departureDate || today} placeholder="Pick arrival date" error={errors.arrivalDate} />
                   </Field>
-                  <Field label="Expected Arrival Time">
-                    <TimePicker value={lt.arrivalTime} onChange={(v) => setL("arrivalTime", v)} date={lt.arrivalDate} />
+                  <Field label="Expected Arrival Time" error={errors.arrivalTime}>
+                    <TimePicker value={lt.arrivalTime} onChange={(v) => { setL("arrivalTime", v); setErrors(p => { const n = { ...p }; delete n.arrivalTime; return n; }); }} date={lt.arrivalDate} error={errors.arrivalTime} minTime={lt.arrivalDate && lt.arrivalDate === lt.departureDate && lt.departureTime ? lt.departureTime : undefined} />
                   </Field>
                 </div>
               </div>
@@ -2496,6 +3437,9 @@ export default function CreateGatePassPage() {
                     <SectionTitle>Vehicle Details</SectionTitle>
                     <div className="grid grid-cols-1 gap-4">
 
+                      {isDraftMode || isRejectEditMode ? (
+                        <LockedVehicleField label="Vehicle" vehicle={cd.vehicle} details={selectedCdVehicleDetail} />
+                      ) : (
                       <Field label="Vehicle" required error={errors.vehicle} className="md:col-span-2">
                         <div className="flex gap-2">
                           <div className="flex-1 relative">
@@ -2561,6 +3505,7 @@ export default function CreateGatePassPage() {
                           </div>
                         )}
                       </Field>
+                      )}
                     </div>
                   </div>
 
@@ -2650,30 +3595,35 @@ export default function CreateGatePassPage() {
                   )}
 
                   {/* Approver — Customer Delivery */}
-                  <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                    <SectionTitle>Approver</SectionTitle>
-                    <Field label="Approver" required error={errors.approver}>
-                      {assignedApprover ? (
-                        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                          </svg>
-                          <span className="font-medium">{assignedApprover.name}</span>
-                          <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                        </div>
-                      ) : (
-                        <SearchInput
-                          value={cd.approver}
-                          onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
-                          onFocus={() => void fetchLookup("approver", cd.approver)}
-                          placeholder="Search approver"
-                          error={errors.approver}
-                          options={lookupOptions.approver}
-                        />
-                      )}
-                    </Field>
-                  </div>
+                  {(cdSapLoading || !selectedCdVehicleDetail || !cdSapLoaded || cdSapOrders.length === 0 || cdSapOrders.some((o) => {
+                    const t = (o.payTerm || "").toLowerCase().trim();
+                    return t !== "" && !["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"].includes(t);
+                  })) && (
+                    <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                      <SectionTitle>Approver</SectionTitle>
+                      <Field label="Approver" required error={errors.approver}>
+                        {assignedApprover ? (
+                          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            <span className="font-medium">{assignedApprover.name}</span>
+                            <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
+                          </div>
+                        ) : (
+                          <SearchInput
+                            value={cd.approver}
+                            onChange={(v) => { setC("approver", v); void fetchLookup("approver", v); }}
+                            onFocus={() => void fetchLookup("approver", cd.approver)}
+                            placeholder="Search approver"
+                            error={errors.approver}
+                            options={lookupOptions.approver}
+                          />
+                        )}
+                      </Field>
+                    </div>
+                  )}
 
                   {/* Gate Out */}
                   <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
@@ -2692,9 +3642,9 @@ export default function CreateGatePassPage() {
           )}
         </AnimatePresence>
 
-        {/* Transportation Details + Additional Details — hidden for SR OUT */}
-        {!(isSr && srMode === "out") && (
-          <>
+        {/* Transportation Details + Additional Details */}
+        {!(isSr && srMode === "out" && asSubType === "MAIN_OUT") && (
+        <>
             <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           <SectionTitle>Transportation Details</SectionTitle>
 
@@ -2779,13 +3729,14 @@ export default function CreateGatePassPage() {
                         options={lookupOptions.companyName}
                       />
                     </Field>
-                    <Field label="Carrier Registration No">
+                    <Field label="Carrier Registration No" required error={errors.carrierRegNo}>
                       <SearchInput
                         value={carrierFields.carrierRegNo}
                         onChange={(v) => { setCarrier("carrierRegNo", v); void fetchLookup("carrierRegNo", v); }}
                         onFocus={() => void fetchLookup("carrierRegNo", carrierFields.carrierRegNo)}
                         onSelect={(o) => { setCarrier("carrierRegNo", o.value); if (o.companyName) setCarrier("companyName", o.companyName); }}
                         placeholder="Search carrier registration no"
+                        error={errors.carrierRegNo}
                         options={lookupOptions.carrierRegNo}
                       />
                     </Field>
@@ -2798,14 +3749,14 @@ export default function CreateGatePassPage() {
                 <>
                   <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Driver Details</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="DL / NIC No" required={transportMode === "CARRIER"} error={errors.driverNIC}>
+                    <Field label="DL / NIC No" required error={errors.driverNIC}>
                       <TextInput value={carrierFields.driverNIC} onChange={(v) => setCarrier("driverNIC", v)} placeholder="e.g. 123456789V or 200012345678" nicOnly maxLength={12} error={errors.driverNIC} />
                     </Field>
-                    <Field label="Driver Name" required={transportMode === "CARRIER"} error={errors.driverName}>
+                    <Field label="Driver Name" required error={errors.driverName}>
                       <TextInput value={carrierFields.driverName} onChange={(v) => setCarrier("driverName", v)} placeholder="Enter driver name" error={errors.driverName} />
                     </Field>
-                    <Field label="Contact No">
-                      <TextInput value={carrierFields.contactNo} onChange={(v) => setCarrier("contactNo", v)} placeholder="Enter driver contact no" numericOnly maxLength={10} />
+                    <Field label="Contact No" required error={errors.contactNo}>
+                      <TextInput value={carrierFields.contactNo} onChange={(v) => setCarrier("contactNo", v)} placeholder="Enter driver contact no" numericOnly maxLength={10} error={errors.contactNo} />
                     </Field>
                   </div>
                 </>
@@ -2816,11 +3767,11 @@ export default function CreateGatePassPage() {
                 <>
                   <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Customer Details</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Customer Name">
-                      <TextInput value={carrierFields.driverName} onChange={(v) => setCarrier("driverName", v)} placeholder="Enter customer name" />
+                    <Field label="Customer Name" required error={errors.driverName}>
+                      <TextInput value={carrierFields.driverName} onChange={(v) => setCarrier("driverName", v)} placeholder="Enter customer name" error={errors.driverName} />
                     </Field>
-                    <Field label="Contact No">
-                      <TextInput value={carrierFields.contactNo} onChange={(v) => setCarrier("contactNo", v)} placeholder="Enter customer contact no" numericOnly maxLength={10} />
+                    <Field label="Contact No" required error={errors.contactNo}>
+                      <TextInput value={carrierFields.contactNo} onChange={(v) => setCarrier("contactNo", v)} placeholder="Enter customer contact no" numericOnly maxLength={10} error={errors.contactNo} />
                     </Field>
                   </div>
                 </>
@@ -2830,8 +3781,8 @@ export default function CreateGatePassPage() {
           </AnimatePresence>
             </div>
 
-            {/* Mileage / Additional Details — hidden for Service/Repair */}
-            {!isSr && (
+            {/* Mileage / Additional Details — hidden for After Sales IN (srMode "in") */}
+            {!(isSr && srMode === "in") && (
             <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           <SectionTitle>{isLtLike ? "Mileage Details" : "Additional Details"}</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2895,7 +3846,7 @@ export default function CreateGatePassPage() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
             )}
-            {loading ? "Submitting..." : "Submit"}
+            {loading ? "Submitting..." : isRejectEditMode ? "Resubmit for Approval" : "Submit"}
           </motion.button>
         </div>
       </form>

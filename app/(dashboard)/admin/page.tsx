@@ -41,21 +41,21 @@ type User = {
 };
 
 const ROLES = [
-  "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN",
+  "INITIATOR", "APPROVER", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR",
 ];
 const ROLE_LABELS: Record<string, string> = {
-  INITIATOR: "Initiator", APPROVER: "Approver", RECIPIENT: "Recipient",
+  INITIATOR: "Initiator", APPROVER: "Approver",
   ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
   SECURITY_OFFICER: "Security Officer", SERVICE_ADVISOR: "Service Advisor",
 };
 const roleColors: Record<string, string> = {
-  INITIATOR: "#2563eb", APPROVER: "#7c3aed", RECIPIENT: "#059669",
+  INITIATOR: "#2563eb", APPROVER: "#7c3aed",
   ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
   SECURITY_OFFICER: "#0f766e", SERVICE_ADVISOR: "#ea580c",
 };
 const roleBg: Record<string, string> = {
-  INITIATOR: "#eff6ff", APPROVER: "#f5f3ff", RECIPIENT: "#ecfdf5",
+  INITIATOR: "#eff6ff", APPROVER: "#f5f3ff",
   ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
   SECURITY_OFFICER: "#f0fdfa", SERVICE_ADVISOR: "#fff7ed",
 };
@@ -68,7 +68,6 @@ const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
   CASHIER:            ["location"],
   AREA_SALES_OFFICER: ["location", "brand"],
   SERVICE_ADVISOR:    ["location", "brand"],
-  RECIPIENT:          ["location", "brand"],
   ADMIN:              [],
 };
 
@@ -100,6 +99,9 @@ function AssignAttributesModal({
   if (fields.length === 0) return null;
 
   const handleSave = async () => {
+    // Validate mandatory fields per role
+    if (fields.includes("location") && !location.trim()) { setError("Location is required for this role."); return; }
+    if (fields.includes("brand") && !brand.trim()) { setError("Brand is required for this role."); return; }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/assign-attributes", {
@@ -162,13 +164,14 @@ function AssignAttributesModal({
                 Location <span className="text-red-500">*</span>
               </label>
               <select
-                value={location} onChange={e => setLocation(e.target.value)}
+                value={location} onChange={e => { setLocation(e.target.value); setError(""); }}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                style={{ background: "var(--surface2)", borderColor: !location.trim() ? "#f87171" : "var(--border)", color: "var(--text)" }}
               >
                 <option value="">— Select location —</option>
                 {locations.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
+              {!location.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
             </div>
           )}
 
@@ -180,7 +183,8 @@ function AssignAttributesModal({
                   <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>
                 )}
               </label>
-              <BrandSelector value={brand} onChange={setBrand} multi={MULTI_BRAND_ROLES.includes(role)} />
+              <BrandSelector value={brand} onChange={v => { setBrand(v); setError(""); }} multi={MULTI_BRAND_ROLES.includes(role)} />
+              {!brand.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
             </div>
           )}
 
@@ -256,6 +260,12 @@ function AddUserModal({ onClose, onCreated, approvers }: {
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
       setError("Name, email and password are required"); return;
     }
+    if (fields.includes("location") && !form.defaultLocation.trim()) {
+      setError(`Location is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
+    }
+    if (fields.includes("brand") && !form.brand.trim()) {
+      setError(`Brand is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
+    }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/create-user", {
@@ -278,7 +288,15 @@ function AddUserModal({ onClose, onCreated, approvers }: {
           }),
         });
       }
-      onCreated(data);
+      onCreated({
+        ...data,
+        defaultLocation: form.defaultLocation || null,
+        brand: form.brand || null,
+        approverId: form.approverId || null,
+        approver: form.approverId
+          ? (approvers.find(a => a.id === form.approverId) ?? null)
+          : null,
+      });
       onClose();
     } catch {
       setError("Failed to create user. Try again.");
@@ -344,24 +362,28 @@ function AddUserModal({ onClose, onCreated, approvers }: {
 
           {fields.includes("location") && (
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location</label>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Location <span className="text-red-500">*</span>
+              </label>
               <select value={form.defaultLocation} onChange={e => set("defaultLocation", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                style={{ background: "var(--surface2)", borderColor: !form.defaultLocation.trim() ? "#f87171" : "var(--border)", color: "var(--text)" }}>
                 <option value="">— Select location —</option>
                 {locations.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
+              {!form.defaultLocation.trim() && <p className="text-red-500 text-xs mt-1">Required for {ROLE_LABELS[selectedRole] || selectedRole}</p>}
             </div>
           )}
           {fields.includes("brand") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Brand
+                Brand <span className="text-red-500">*</span>
                 {MULTI_BRAND_ROLES.includes(selectedRole) && (
                   <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>
                 )}
               </label>
               <BrandSelector value={form.brand} onChange={v => set("brand", v)} multi={MULTI_BRAND_ROLES.includes(selectedRole)} />
+              {!form.brand.trim() && <p className="text-red-500 text-xs mt-1">Required for {ROLE_LABELS[selectedRole] || selectedRole}</p>}
             </div>
           )}
           {fields.includes("approver") && approvers.length > 0 && (
@@ -399,18 +421,35 @@ function AddUserModal({ onClose, onCreated, approvers }: {
 
 /* ─── Bulk Upload Modal ───────────────────────────────────────────── */
 function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [parsed, setParsed] = useState<{ name: string; email: string; password: string; role: string; approverEmail: string }[]>([]);
+  const [parsed, setParsed] = useState<{ name: string; email: string; password: string; role: string; approverEmail: string; defaultLocation: string; brand: string }[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<{ name: string; status: string; error?: string }[]>([]);
+  const [results, setResults] = useState<{ name: string; status: string; error?: string; skipped?: string[] }[]>([]);
+  const [refLocations, setRefLocations] = useState<string[]>([]);
+  const [refApprovers, setRefApprovers] = useState<{ name: string; email: string }[]>([]);
+  const [showRef, setShowRef] = useState(false);
 
-  const downloadTemplate = () => {
-    const csv = "name,email,password,role,approverEmail\nMalmi Perera,malmi@dimo.lk,password123,INITIATOR,approver@dimo.lk\nKamal Silva,kamal@dimo.lk,password123,APPROVER,";
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "user-upload-template.csv"; a.click();
-    URL.revokeObjectURL(url);
+  useEffect(() => {
+    fetch("/api/admin/locations").then(r => r.json()).then(d => setRefLocations(d.locations ?? [])).catch(() => {});
+    fetch("/api/admin/users").then(r => r.json()).then(d => setRefApprovers((Array.isArray(d) ? d : []).filter((u: { role: string }) => u.role === "APPROVER").map((u: { name: string; email: string }) => ({ name: u.name, email: u.email })))).catch(() => {});
+  }, []);
+
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const downloadTemplate = async () => {
+    setTemplateLoading(true);
+    try {
+      const res = await fetch("/api/admin/user-template");
+      if (!res.ok) { setError(`Template error: ${(await res.json()).error ?? res.status}`); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "user-upload-template.xlsx"; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(`Download failed: ${e}`);
+    } finally {
+      setTemplateLoading(false);
+    }
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -424,7 +463,7 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
       if (lines.length < 2) { setError("No data rows found"); return; }
       const rows = lines.slice(1).map(line => {
         const cols = line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
-        return { name: cols[0] ?? "", email: cols[1] ?? "", password: cols[2] ?? "", role: cols[3] ?? "", approverEmail: cols[4] ?? "" };
+        return { name: cols[0] ?? "", email: cols[1] ?? "", password: cols[2] ?? "", role: cols[3] ?? "", approverEmail: cols[4] ?? "", defaultLocation: cols[5] ?? "", brand: cols[6] ?? "" };
       }).filter(r => r.email);
       if (rows.length === 0) { setError("No valid rows found"); return; }
       setParsed(rows); setError("");
@@ -460,14 +499,85 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
         </div>
         {results.length === 0 ? (
           <>
-            <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+            <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
               <p className="font-semibold mb-1" style={{ color: "var(--text)" }}>CSV Columns (header row required):</p>
-              <code className="font-mono">name, email, password, role, approverEmail</code><br />
+              <code className="font-mono">name, email, password, role, approverEmail, defaultLocation, brand</code><br />
               <code className="font-mono opacity-70 text-[10px]">Roles: {ROLES.join(" | ")}</code>
             </div>
-            <button onClick={downloadTemplate} className="flex items-center gap-2 text-sm mb-4 hover:underline" style={{ color: "var(--accent)" }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              Download Template CSV
+
+            {/* Reference values */}
+            <div className="mb-3 rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
+              <button type="button" onClick={() => setShowRef(v => !v)}
+                className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold"
+                style={{ background: "var(--surface2)", color: "var(--text)" }}>
+                <span>📋 Reference values (Location · Brand · Approver)</span>
+                <svg className="w-3.5 h-3.5 transition-transform" style={{ transform: showRef ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showRef && (
+                <div className="px-3 py-3 grid grid-cols-1 gap-4 text-xs" style={{ background: "var(--surface)" }}>
+
+                  {/* Locations */}
+                  <div>
+                    <p className="font-semibold mb-1.5" style={{ color: "var(--text)" }}>Locations <span className="font-normal" style={{ color: "var(--text-muted)" }}>(copy exact value into CSV)</span></p>
+                    <div className="max-h-32 overflow-y-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+                      {refLocations.length === 0 ? (
+                        <p className="px-3 py-2" style={{ color: "var(--text-muted)" }}>Loading…</p>
+                      ) : refLocations.map(loc => (
+                        <div key={loc} className="flex items-center justify-between px-3 py-1.5 border-b last:border-0" style={{ borderColor: "var(--border)" }}>
+                          <span style={{ color: "var(--text)" }}>{loc}</span>
+                          <button type="button" onClick={() => navigator.clipboard.writeText(loc)}
+                            className="text-blue-500 hover:text-blue-700 text-[10px] font-semibold ml-2 flex-shrink-0">Copy</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Brands */}
+                  <div>
+                    <p className="font-semibold mb-1.5" style={{ color: "var(--text)" }}>Brands</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {BRANDS.map(b => (
+                        <button key={b} type="button" onClick={() => navigator.clipboard.writeText(b)}
+                          className="px-2.5 py-1 rounded-lg border text-[11px] font-semibold hover:opacity-80"
+                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                          {b} <span className="text-blue-500 ml-1">Copy</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Approvers */}
+                  <div>
+                    <p className="font-semibold mb-1.5" style={{ color: "var(--text)" }}>Approvers <span className="font-normal" style={{ color: "var(--text-muted)" }}>(use their email in approverEmail column)</span></p>
+                    <div className="max-h-32 overflow-y-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+                      {refApprovers.length === 0 ? (
+                        <p className="px-3 py-2" style={{ color: "var(--text-muted)" }}>No approvers found</p>
+                      ) : refApprovers.map(a => (
+                        <div key={a.email} className="flex items-center justify-between px-3 py-1.5 border-b last:border-0" style={{ borderColor: "var(--border)" }}>
+                          <div>
+                            <p style={{ color: "var(--text)" }}>{a.name}</p>
+                            <p style={{ color: "var(--text-muted)" }}>{a.email}</p>
+                          </div>
+                          <button type="button" onClick={() => navigator.clipboard.writeText(a.email)}
+                            className="text-blue-500 hover:text-blue-700 text-[10px] font-semibold ml-2 flex-shrink-0">Copy</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
+            <button onClick={downloadTemplate} disabled={templateLoading}
+              className="flex items-center gap-2 text-sm mb-4 hover:underline disabled:opacity-50"
+              style={{ color: "var(--accent)" }}>
+              {templateLoading
+                ? <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              }
+              {templateLoading ? "Generating…" : "Download Template Excel"}
             </button>
             <label className="flex flex-col items-center gap-2 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors hover:border-blue-400" style={{ borderColor: "var(--border)" }}>
               <svg className="w-8 h-8" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -481,8 +591,8 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
                 <p className="text-sm font-semibold mb-2" style={{ color: "var(--text)" }}>{parsed.length} user{parsed.length !== 1 ? "s" : ""} ready to upload</p>
                 <div className="max-h-40 overflow-auto rounded-xl border text-xs" style={{ borderColor: "var(--border)" }}>
                   <table className="w-full">
-                    <thead><tr style={{ background: "var(--surface2)" }}>{["Name", "Email", "Role"].map(h => <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)" }}>{h}</th>)}</tr></thead>
-                    <tbody>{parsed.map((r, i) => <tr key={i} style={{ borderTop: "1px solid var(--border)" }}><td className="px-3 py-1.5" style={{ color: "var(--text)" }}>{r.name || "—"}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.email}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.role || "—"}</td></tr>)}</tbody>
+                    <thead><tr style={{ background: "var(--surface2)" }}>{["Name", "Email", "Role", "Location", "Brand"].map(h => <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color: "var(--text-muted)" }}>{h}</th>)}</tr></thead>
+                    <tbody>{parsed.map((r, i) => <tr key={i} style={{ borderTop: "1px solid var(--border)" }}><td className="px-3 py-1.5" style={{ color: "var(--text)" }}>{r.name || "—"}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.email}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.role || "—"}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.defaultLocation || "—"}</td><td className="px-3 py-1.5" style={{ color: "var(--text-muted)" }}>{r.brand || "—"}</td></tr>)}</tbody>
                   </table>
                 </div>
               </div>
@@ -502,12 +612,19 @@ function BulkUploadModal({ onClose, onDone }: { onClose: () => void; onDone: () 
             <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Upload Results</p>
             <div className="space-y-2 mb-5 max-h-64 overflow-y-auto">
               {results.map((r, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: "var(--surface2)" }}>
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.status === "created" ? "bg-green-500" : r.status === "skipped" ? "bg-amber-400" : "bg-red-500"}`} />
-                  <span className="text-sm flex-1" style={{ color: "var(--text)" }}>{r.name}</span>
-                  <span className="text-xs" style={{ color: r.status === "created" ? "#059669" : r.status === "skipped" ? "#92400e" : "#dc2626" }}>
-                    {r.status === "created" ? "Created" : r.status === "skipped" ? `Skipped: ${r.error}` : "Error"}
-                  </span>
+                <div key={i} className="px-3 py-2 rounded-xl" style={{ background: "var(--surface2)" }}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${r.status === "created" ? "bg-green-500" : r.status === "skipped" ? "bg-amber-400" : "bg-red-500"}`} />
+                    <span className="text-sm flex-1" style={{ color: "var(--text)" }}>{r.name}</span>
+                    <span className="text-xs font-semibold" style={{ color: r.status === "created" ? "#059669" : r.status === "skipped" ? "#92400e" : "#dc2626" }}>
+                      {r.status === "created" ? "Created" : r.status === "skipped" ? `Skipped: ${r.error}` : `Error: ${r.error}`}
+                    </span>
+                  </div>
+                  {r.status === "created" && r.skipped && r.skipped.length > 0 && (
+                    <p className="text-[10px] mt-1 ml-5" style={{ color: "#f59e0b" }}>
+                      ⚠ Ignored (not applicable for this role): {r.skipped.join(", ")}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -544,14 +661,17 @@ export default function AdminPage() {
     fetch("/api/admin/users")
       .then(async r => {
         const d = await r.json();
-        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        if (!r.ok) throw new Error(d.error || "Unable to load users right now.");
         return d;
       })
       .then(d => { setUsers(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(e => { setLoadError(e.message); setLoading(false); });
+      .catch(() => { setLoadError("Unable to load users right now. Please try again."); setLoading(false); });
   };
 
-  useEffect(() => { loadUsers(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { loadUsers(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const approvers = users.filter(u => u.role === "APPROVER");
 
@@ -578,17 +698,19 @@ export default function AdminPage() {
 
   const filtered = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === "ALL" ? true : filter === "PENDING" ? !u.role : u.role === filter;
+    const matchFilter = filter === "ALL" ? !!u.role : filter === "PENDING" ? !u.role : u.role === filter;
     return matchSearch && matchFilter;
   });
 
   const stats = [
-    { label: "Total Users",   value: users.length,                                   color: "#6366f1", bg: "#eef2ff" },
-    { label: "Pending",       value: users.filter(u => !u.role).length,               color: "#f59e0b", bg: "#fef3c7" },
-    { label: "Initiators",    value: users.filter(u => u.role === "INITIATOR").length, color: "#2563eb", bg: "#eff6ff" },
-    { label: "Approvers",     value: users.filter(u => u.role === "APPROVER").length,  color: "#7c3aed", bg: "#f5f3ff" },
-    { label: "Security",         value: users.filter(u => u.role === "SECURITY_OFFICER").length,  color: "#0f766e", bg: "#f0fdfa" },
-    { label: "Service Advisors", value: users.filter(u => u.role === "SERVICE_ADVISOR").length,   color: "#ea580c", bg: "#fff7ed" },
+    { label: "Total Users",      value: users.filter(u => !!u.role).length,                        color: "#6366f1", bg: "#eef2ff" },
+    { label: "Initiators",       value: users.filter(u => u.role === "INITIATOR").length,           color: "#2563eb", bg: "#eff6ff" },
+    { label: "Approvers",        value: users.filter(u => u.role === "APPROVER").length,            color: "#7c3aed", bg: "#f5f3ff" },
+    { label: "Admins",           value: users.filter(u => u.role === "ADMIN").length,               color: "#dc2626", bg: "#fef2f2" },
+    { label: "Cashiers",         value: users.filter(u => u.role === "CASHIER").length,             color: "#b45309", bg: "#fffbeb" },
+    { label: "Area Sales",       value: users.filter(u => u.role === "AREA_SALES_OFFICER").length,  color: "#15803d", bg: "#f0fdf4" },
+    { label: "Security",         value: users.filter(u => u.role === "SECURITY_OFFICER").length,    color: "#0f766e", bg: "#f0fdfa" },
+    { label: "Service Advisors", value: users.filter(u => u.role === "SERVICE_ADVISOR").length,     color: "#ea580c", bg: "#fff7ed" },
   ];
 
   return (
@@ -621,14 +743,6 @@ export default function AdminPage() {
           <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>Assign roles and manage system access</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
-          {users.filter(u => !u.role).length > 0 && (
-            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>
-              <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.5, repeat: Infinity }} className="w-2 h-2 rounded-full bg-amber-500" />
-              {users.filter(u => !u.role).length} pending
-            </motion.div>
-          )}
           <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={() => setShowBulkUpload(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
             style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
@@ -661,9 +775,82 @@ export default function AdminPage() {
         ))}
       </div>
 
+      {/* Pending Users — separate section */}
+      {users.filter(u => !u.role).length > 0 && (
+        <div className="rounded-2xl border mb-5 overflow-hidden" style={{ background: "var(--surface)", borderColor: "#fde68a" }}>
+          <div className="px-5 py-3 flex items-center justify-between" style={{ background: "#fef3c7", borderBottom: "1px solid #fde68a" }}>
+            <div className="flex items-center gap-2">
+              <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.5, repeat: Infinity }} className="w-2 h-2 rounded-full bg-amber-500" />
+              <span className="text-sm font-semibold" style={{ color: "#92400e" }}>
+                Pending Role Assignment — {users.filter(u => !u.role).length} user{users.filter(u => !u.role).length !== 1 ? "s" : ""} waiting
+              </span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>
+                  {["User", "Joined", "Assign Role"].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.filter(u => !u.role).map((user, i) => (
+                  <motion.tr key={user.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                    className="group transition-colors" style={{ borderBottom: "1px solid var(--border)" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: "#94a3b8" }}>
+                          {user.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="font-semibold" style={{ color: "var(--text)" }}>{user.name}</p>
+                          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{user.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
+                      {new Date(user.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                    </td>
+                    <td className="px-5 py-3">
+                      <select
+                        className="border rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-300"
+                        style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                        defaultValue=""
+                        onChange={async (e) => {
+                          const newRole = e.target.value;
+                          if (!newRole) return;
+                          // Save the role first
+                          await fetch(`/api/users/${user.id}/role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: newRole }) });
+                          const updatedUser = { ...user, role: newRole };
+                          setUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
+                          // If this role requires location/brand/approver, open the attributes modal
+                          if ((ROLE_ATTRS[newRole] ?? []).length > 0) {
+                            setAttrModal(updatedUser);
+                          }
+                        }}
+                      >
+                        <option value="">Assign role…</option>
+                        {Object.entries(ROLE_LABELS).map(([val, lbl]) => (
+                          <option key={val} value={val}>{lbl}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Search + Filter */}
       <div className="flex flex-wrap gap-3 mb-5">
-        <div className="relative flex-1 min-w-52">
+        <div className="relative flex-1 min-w-0">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
             className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
             style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }} />

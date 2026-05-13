@@ -136,6 +136,10 @@ function GridField({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
+function hasDisplayValue(value?: string | null) {
+  return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
+}
+
 function InitiatorGatePassDetailPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -200,7 +204,7 @@ function InitiatorGatePassDetailPageInner() {
   //   2. CUSTOMER_DELIVERY — display SAP invoice status panel
   useEffect(() => {
     if (!data) return;
-    const needsAfterSalesOrders = data.passType === "AFTER_SALES" && data.passSubType === "MAIN_OUT" && data.hasCredit && !data.creditApproved;
+    const needsAfterSalesOrders = data.passType === "AFTER_SALES" && data.passSubType === "MAIN_OUT";
     const needsCdOrders = data.passType === "CUSTOMER_DELIVERY";
     if (!needsAfterSalesOrders && !needsCdOrders) return;
     setServiceOrdersLoading(true);
@@ -474,14 +478,23 @@ function InitiatorGatePassDetailPageInner() {
   const isInitiatorView = role === "INITIATOR" || role === "AREA_SALES_OFFICER";
   const isSecurityOfficer = role === "SECURITY_OFFICER";
   // Security Officer can confirm Gate OUT:
-  // — APPROVED: LT, CD, and AFTER_SALES (except SUB_IN which goes to Gate IN)
-  // — INITIATOR_OUT: SUB_OUT two-step
-  const canSecurityGateOut = isSecurityOfficer && (
+  // — APPROVED: LT, CD, and AFTER_SALES (but NOT SUB_IN or MAIN_IN — those go to Gate IN)
+  // — INITIATOR_OUT: SUB_OUT two-step (source SO confirms physical gate release)
+  const isAfterSalesInbound = data.passType === "AFTER_SALES" &&
+    (data.passSubType === "SUB_IN" || data.passSubType === "MAIN_IN");
+  const canSecurityGateOut = isSecurityOfficer && !isAfterSalesInbound && (
     data.status === "INITIATOR_OUT" ||
     data.status === "APPROVED"
   );
+  // Security Officer can confirm Gate IN:
+  // — GATE_OUT: MAIN_IN, SUB_OUT, SUB_OUT_IN, LT, CD (vehicle has physically left source)
+  // — APPROVED: SUB_IN (Security at sub-location confirms vehicle entered)
   const canSecurityGateIn  = isSecurityOfficer && (
-    (data.status === "GATE_OUT" && (data.passSubType === "MAIN_IN" || data.passSubType === "SUB_OUT_IN" || data.passType === "CUSTOMER_DELIVERY" || data.passType === "LOCATION_TRANSFER")) ||
+    (data.status === "GATE_OUT" && (
+      data.passSubType === "MAIN_IN" || data.passSubType === "SUB_OUT" ||
+      data.passSubType === "SUB_OUT_IN" ||
+      data.passType === "CUSTOMER_DELIVERY" || data.passType === "LOCATION_TRANSFER"
+    )) ||
     (data.status === "APPROVED" && data.passType === "AFTER_SALES" && data.passSubType === "SUB_IN")
   );
   const isASO = role === "AREA_SALES_OFFICER";
@@ -493,6 +506,31 @@ function InitiatorGatePassDetailPageInner() {
   // MAIN_IN (Service/Repair) — vehicle arriving at DIMO, button label differs from outbound passes
   const isMainIn = data.passType === "AFTER_SALES" && data.passSubType === "MAIN_IN";
   const isRecipientView = role === "RECIPIENT";
+  const isCashierCompletedFlow = data.cashierCleared && !data.hasCredit;
+  const approvalActorLabel = isCashierCompletedFlow ? "Cashier" : "Approver";
+  const locationScheduleFields = [
+    { label: "Receiving Location / Branch", value: data.toLocation },
+    { label: "Estimated Arrival Date", value: data.arrivalDate },
+    { label: "Estimated Arrival Time", value: data.arrivalTime },
+    { label: "Out Reason", value: data.outReason },
+  ].filter((field) => hasDisplayValue(field.value));
+  const deliveryFields = [
+    { label: "Requested By", value: data.createdBy.name },
+    { label: "Departure Date", value: data.departureDate },
+    { label: "Departure Time", value: data.departureTime },
+  ].filter((field) => hasDisplayValue(field.value));
+  const transportationFields = [
+    { label: "Company Name", value: data.companyName },
+    { label: "Driver Name", value: data.driverName },
+    { label: "Driver NIC No", value: data.driverNIC },
+    { label: "Driver Contact", value: data.driverContact },
+  ].filter((field) => hasDisplayValue(field.value));
+  const hasTransportationMode = hasDisplayValue(data.transportMode);
+  const additionalFields = [
+    { label: "Mileage (Km) / Meter Reading", value: data.mileage },
+    { label: "Insurance Arrangements", value: data.insurance },
+    { label: "Garage Plate / Trade Plate", value: data.garagePlate },
+  ].filter((field) => hasDisplayValue(field.value));
   // RECIPIENT confirms at HQ gate:
   //   - Non-AFTER_SALES (LOCATION_TRANSFER, CUSTOMER_DELIVERY): any GATE_OUT pass
   //   - AFTER_SALES: only MAIN_IN (arriving), MAIN_OUT, SUB_OUT (departing HQ)
@@ -507,23 +545,49 @@ function InitiatorGatePassDetailPageInner() {
     <>
       {/* Print styles */}
       <style>{`
+        @page {
+          size: A4 portrait;
+          margin: 8mm 10mm;
+        }
         @media print {
+          html, body { height: auto !important; }
           .no-print { display: none !important; }
-          body { background: white !important; color: black !important; }
+          body { background: white !important; color: black !important; font-size: 8pt !important; }
           * { color: black !important; background: white !important; border-color: #d1d5db !important; }
           .print-show { display: block !important; }
 
-          /* Gate pass document layout */
-          .print-doc { max-width: 100% !important; padding: 0 !important; }
-          .print-section { border: 1px solid #d1d5db !important; border-radius: 4px !important; margin-bottom: 10px !important; }
-          .print-section-title { background: #f3f4f6 !important; padding: 6px 14px !important; font-size: 9pt !important; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid #d1d5db !important; }
-          .print-grid-field { background: #f9fafb !important; }
+          /* Force everything onto one page */
+          .print-doc {
+            max-width: 100% !important;
+            padding: 0 !important;
+            page-break-inside: avoid;
+          }
+
+          /* Gate pass document layout — compact spacing */
+          .print-section { border: 1px solid #d1d5db !important; border-radius: 3px !important; margin-bottom: 5px !important; }
+          .print-section-title { background: #f3f4f6 !important; padding: 3px 10px !important; font-size: 7.5pt !important; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid #d1d5db !important; }
+          .print-grid-field { background: #f9fafb !important; padding: 3px 8px !important; }
+
+          /* Shrink summary bar */
+          .print-doc .grid { gap: 4px !important; }
+          .print-doc .mb-5 { margin-bottom: 6px !important; }
+          .print-doc .mb-4 { margin-bottom: 4px !important; }
+          .print-doc .mb-3 { margin-bottom: 3px !important; }
+          .print-doc .mb-1 { margin-bottom: 2px !important; }
+          .print-doc .p-2  { padding: 3px 6px !important; }
+          .print-doc .p-3  { padding: 4px 8px !important; }
+          .print-doc .p-4  { padding: 5px 10px !important; }
+          .print-doc .p-5  { padding: 6px 12px !important; }
+          .print-doc .py-3 { padding-top: 3px !important; padding-bottom: 3px !important; }
+          .print-doc .px-6 { padding-left: 10px !important; padding-right: 10px !important; }
+          .print-doc .gap-3 { gap: 4px !important; }
+          .print-doc .gap-4 { gap: 5px !important; }
 
           /* Signature row */
-          .print-sig { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 24px; padding-top: 12px; border-top: 1px solid #d1d5db !important; }
+          .print-sig { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #d1d5db !important; }
           .print-sig-box { text-align: center; }
-          .print-sig-line { border-bottom: 1px solid #374151 !important; height: 40px; margin-bottom: 6px; }
-          .print-sig-label { font-size: 8pt; color: #6b7280 !important; }
+          .print-sig-line { border-bottom: 1px solid #374151 !important; height: 28px; margin-bottom: 4px; }
+          .print-sig-label { font-size: 7.5pt; color: #6b7280 !important; }
         }
       `}</style>
 
@@ -531,26 +595,28 @@ function InitiatorGatePassDetailPageInner() {
 
         {/* Print-only header */}
         <div className="hidden print:block mb-5">
-          <div className="flex items-start justify-between pb-3 mb-4" style={{ borderBottom: "2px solid #0d1b3e" }}>
+          <div className="flex items-start justify-between pb-2 mb-3" style={{ borderBottom: "2px solid #0d1b3e" }}>
             <div>
-              <p className="text-xs font-bold tracking-widest uppercase" style={{ color: "#0d1b3e", letterSpacing: "0.15em" }}>DIMO Gate Pass System</p>
-              <h1 className="text-2xl font-bold mt-0.5" style={{ color: "#0d1b3e" }}>
+              <p style={{ color: "#0d1b3e", fontSize: "7.5pt", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase" }}>DIMO Gate Pass System</p>
+              <h1 style={{ color: "#0d1b3e", fontSize: "15pt", fontWeight: 700, marginTop: "1px" }}>
                 {isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"} — Gate Pass
               </h1>
             </div>
-            <div className="text-right text-xs" style={{ color: "#6b7280" }}>
-              <p className="font-bold text-base" style={{ color: "#0d1b3e" }}>{data.gatePassNumber}</p>
+            <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt" }}>
+              <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{data.parentPass?.gatePassNumber ?? data.gatePassNumber}</p>
               <p>Status: {sc.label}</p>
               <p>Printed: {new Date().toLocaleString()}</p>
             </div>
           </div>
           {/* Summary bar */}
-          <div className="grid grid-cols-4 gap-3 text-xs mb-1">
+          <div className="grid grid-cols-4 gap-3 text-xs mb-1" style={{ fontSize: "7.5pt" }}>
             {[
               { l: "Created By", v: data.createdBy.name },
               { l: "Created At", v: new Date(data.createdAt).toLocaleDateString() },
-              { l: "Approved By", v: data.approvedBy?.name || "—" },
-              { l: "Approved At", v: data.approvedAt ? new Date(data.approvedAt).toLocaleDateString() : "—" },
+              { l: "Departure Date", v: data.departureDate || "—" },
+              { l: "Departure Time", v: data.departureTime || "—" },
+              { l: `${approvalActorLabel} By`, v: data.approvedBy?.name || "—" },
+              { l: `${approvalActorLabel} At`, v: data.approvedAt ? new Date(data.approvedAt).toLocaleDateString() : "—" },
             ].map(({ l, v }) => (
               <div key={l} className="rounded p-2" style={{ background: "#f3f4f6", border: "1px solid #e5e7eb" }}>
                 <p style={{ color: "#6b7280", fontSize: "8pt", marginBottom: "2px" }}>{l}</p>
@@ -563,7 +629,11 @@ function InitiatorGatePassDetailPageInner() {
         {/* Header */}
         <div className="flex items-start gap-3 mb-6 no-print">
           <button
-            onClick={() => router.back()}
+            onClick={() => {
+              if (role === "SECURITY_OFFICER") router.push("/gate-pass/security-gate-out");
+              else if (window.history.length > 1) router.back();
+              else router.push("/gate-pass");
+            }}
             className="mt-1 w-9 h-9 rounded-xl flex items-center justify-center border transition-all hover:shadow-sm"
             style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
           >
@@ -573,7 +643,7 @@ function InitiatorGatePassDetailPageInner() {
           </button>
           <div className="flex-1">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate - Out Pass {data.gatePassNumber}</h1>
+              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate - Out Pass {data.parentPass?.gatePassNumber ?? data.gatePassNumber}</h1>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.dot }} />
                 {sc.label}
@@ -654,47 +724,48 @@ function InitiatorGatePassDetailPageInner() {
           </div>
         </Section>
 
-        {isLT && (
+        {isLT && locationScheduleFields.length > 0 && (
           <Section title="Location &amp; Schedule">
-            <Field label="Receiving Location / Branch" value={data.toLocation} />
-            <Field label="Estimated Arrival Date" value={data.arrivalDate} />
-            <Field label="Estimated Arrival Time" value={data.arrivalTime} />
-            {data.outReason && <Field label="Out Reason" value={data.outReason} />}
+            {locationScheduleFields.map((field) => (
+              <Field key={field.label} label={field.label} value={field.value} />
+            ))}
           </Section>
         )}
 
-        {!isLT && (
+        {!isLT && deliveryFields.length > 0 && (
           <Section title="Delivery Details">
-            <Field label="Vehicle Details" value={data.vehicleDetails} />
-            <Field label="Requested By" value={data.requestedBy} />
-            <Field label="Departure Date" value={data.departureDate} />
-            <Field label="Departure Time" value={data.departureTime} />
+            {deliveryFields.map((field) => (
+              <Field key={field.label} label={field.label} value={field.value} />
+            ))}
           </Section>
         )}
 
-        <Section title="Transportation Details">
-          {data.transportMode && (
+        {(hasTransportationMode || transportationFields.length > 0) && (
+          <Section title="Transportation Details">
+            {hasTransportationMode && (
             <div className="mb-3">
               <span className="text-xs px-2.5 py-1 rounded-md font-semibold uppercase" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
                 {data.transportMode} Transportation
               </span>
             </div>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            <GridField label="Company Name" value={data.companyName} />
-            <GridField label="Carrier Name" value={data.carrierName} />
-            <GridField label="Carrier Reg No" value={data.carrierRegNo} />
-            <GridField label="Driver Name" value={data.driverName} />
-            <GridField label="Driver NIC No" value={data.driverNIC} />
-            <GridField label="Driver Contact" value={data.driverContact} />
-          </div>
-        </Section>
+            )}
+            {transportationFields.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {transportationFields.map((field) => (
+                  <GridField key={field.label} label={field.label} value={field.value} />
+                ))}
+              </div>
+            )}
+          </Section>
+        )}
 
-        <Section title="Additional Details">
-          <Field label="Mileage (Km) / Meter Reading" value={data.mileage} />
-          <Field label="Insurance Arrangements" value={data.insurance} />
-          <Field label="Garage Plate / Trade Plate" value={data.garagePlate} />
-        </Section>
+        {additionalFields.length > 0 && (
+          <Section title="Additional Details">
+            {additionalFields.map((field) => (
+              <Field key={field.label} label={field.label} value={field.value} />
+            ))}
+          </Section>
+        )}
 
         {data.comments && (
           <Section title="Comments">
@@ -821,7 +892,7 @@ function InitiatorGatePassDetailPageInner() {
         {/* Print-only signature area */}
         <div className="hidden print:block mt-6 pt-4" style={{ borderTop: "1px solid #d1d5db" }}>
           <div className="grid grid-cols-3 gap-8 text-xs">
-            {["Prepared By / Initiator", "Authorized By / Approver", "Received By / Gate Officer"].map((label) => (
+            {["Prepared By / Initiator", `Authorized By / ${approvalActorLabel}`, "Received By / Gate Officer"].map((label) => (
               <div key={label} className="text-center">
                 <div style={{ height: "48px", borderBottom: "1px solid #374151", marginBottom: "6px" }} />
                 <p style={{ color: "#6b7280", fontSize: "8pt" }}>{label}</p>
@@ -1006,7 +1077,16 @@ function InitiatorGatePassDetailPageInner() {
         <div className="mt-2 no-print">
           {/* Back button — top left */}
           <div className="mb-3">
-            <button onClick={() => router.back()}
+            <button onClick={() => {
+              if (role === "SECURITY_OFFICER") {
+                router.push("/gate-pass/security-gate-out");
+              } else if (window.history.length > 1) {
+                router.back();
+              } else {
+                if (role === "APPROVER" || role === "ADMIN") router.push("/gate-pass");
+                else router.push("/gate-pass");
+              }
+            }}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
               style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1139,12 +1219,14 @@ function InitiatorGatePassDetailPageInner() {
           })()}
 
           {/* ── APPROVER: Credit Approval banner (MAIN_OUT with credit orders pending) ── */}
-          {isApproverView && !approveResult && data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT" && data?.hasCredit && !data?.creditApproved && (() => {
+          {isApproverView && !approveResult && data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT" && !data?.creditApproved && (() => {
             const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
             const creditOrders = serviceOrders.filter((o) => {
               const t = (o.payTerm || "").toLowerCase().trim();
               return t !== "" && !immediateTerms.includes(t);
             });
+            // Fall back to showing ALL orders if no credit orders matched (payTerm format may differ)
+            const ordersToShow = creditOrders.length > 0 ? creditOrders : serviceOrders;
             const immOrders = serviceOrders.filter((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()) || (o.payTerm || "").trim() === "");
             return (
             <div className="w-full rounded-2xl border mb-3 overflow-hidden"
@@ -1172,13 +1254,13 @@ function InitiatorGatePassDetailPageInner() {
                   </svg>
                   <p className="text-xs" style={{ color: "#3b82f6" }}>Loading credit orders…</p>
                 </div>
-              ) : creditOrders.length > 0 ? (
+              ) : ordersToShow.length > 0 ? (
                 <div style={{ borderTop: "1px solid #bfdbfe" }}>
                   {/* Stats row */}
                   <div className="px-5 py-3 flex items-center gap-3" style={{ background: "#eff6ff" }}>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2 h-2 rounded-full" style={{ background: "#2563eb" }} />
-                      <span className="text-xs font-bold" style={{ color: "#1e40af" }}>{creditOrders.length} credit order{creditOrders.length !== 1 ? "s" : ""} requiring approval</span>
+                      <span className="text-xs font-bold" style={{ color: "#1e40af" }}>{ordersToShow.length} order{ordersToShow.length !== 1 ? "s" : ""} requiring approval</span>
                     </div>
                     {immOrders.length > 0 && (
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#fef3c7", color: "#b45309" }}>
@@ -1198,7 +1280,7 @@ function InitiatorGatePassDetailPageInner() {
                         </tr>
                       </thead>
                       <tbody>
-                        {creditOrders.map((o, idx) => (
+                        {ordersToShow.map((o, idx) => (
                           <tr key={o.id} style={{ background: idx % 2 === 0 ? "#eff6ff" : "#dbeafe40", borderBottom: "1px solid #bfdbfe" }}>
                             <td className="px-4 py-2.5 font-medium" style={{ color: "#3b82f6" }}>{idx + 1}</td>
                             <td className="px-4 py-2.5">
@@ -1547,7 +1629,7 @@ function InitiatorGatePassDetailPageInner() {
                       </div>
                       <div>
                         <p className="text-sm font-bold" style={{ color: "#1d4ed8" }}>Vehicle Out — Awaiting Gate IN at Sub-Location</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#3b82f6" }}>Security confirmed Gate OUT. ASO will create a Sub IN pass — Security Officer at the sub-location will then confirm arrival.</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#3b82f6" }}>Security confirmed Gate OUT. Initiator will create a Sub IN pass — Security Officer at the sub-location will then confirm arrival.</p>
                       </div>
                     </div>
                   ) : data.status === "GATE_OUT" && data.passType === "AFTER_SALES" && data.passSubType === "SUB_OUT_IN" ? (
@@ -1773,3 +1855,4 @@ export default function InitiatorGatePassDetailPage() {
     </Suspense>
   );
 }
+

@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -81,6 +81,26 @@ type Stats = {
   cancelled: number;
 };
 
+type PlantLocationOption = {
+  id: string;
+  value: string;
+  label: string;
+  plantCode: string;
+  plantDescription: string;
+  storageLocation: string;
+  storageDescription: string;
+};
+
+type CurrentPlantLocation = {
+  plantCode: string;
+  plantDescription: string;
+  storageLocation: string;
+  storageDescription: string;
+  internalNo: string;
+  externalNo: string;
+  chassisNo: string;
+};
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
@@ -113,7 +133,7 @@ function downloadCSV(passes: GatePassFull[], searchTerm: string) {
     "GP Number","Pass Type","Sub Type","Status","Vehicle","Chassis",
     "From Location","To Location","Departure Date","Departure Time",
     "Arrival Date","Arrival Time","Out Reason","Transport Mode",
-    "Company","Carrier","Carrier Reg No","Driver Name","Driver NIC","Driver Contact",
+    "Company","Carrier Reg No","Driver Name","Driver NIC","Driver Contact",
     "Mileage","Insurance","Garage Plate","Comments","Requested By",
     "Created By","Created By Email","Approved By","Created At",
   ];
@@ -124,7 +144,7 @@ function downloadCSV(passes: GatePassFull[], searchTerm: string) {
     p.departureDate ?? "", p.departureTime ?? "",
     p.arrivalDate ?? "", p.arrivalTime ?? "",
     p.outReason ?? "", p.transportMode ?? "",
-    p.companyName ?? "", p.carrierName ?? "", p.carrierRegNo ?? "",
+    p.companyName ?? "", p.carrierRegNo ?? "",
     p.driverName ?? "", p.driverNIC ?? "", p.driverContact ?? "",
     p.mileage ?? "", p.insurance ?? "", p.garagePlate ?? "",
     p.comments ?? "", p.requestedBy ?? "",
@@ -180,19 +200,23 @@ export default function VehicleReportPage() {
   const [searched, setSearched] = useState(false);
   const [lastSearch, setLastSearch] = useState("");
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
+  const [currentPlantLocation, setCurrentPlantLocation] = useState<CurrentPlantLocation | null>(null);
+  // Preserved SAP identifiers — survives SAP removing the vehicle from /plant on failed updates
+  const lastKnownSapIds = React.useRef<{ internalNo: string; externalNo: string; chassisNo: string } | null>(null);
+  const [plantLocations, setPlantLocations] = useState<PlantLocationOption[]>([]);
+  const [selectedPlant, setSelectedPlant] = useState("");
+  const [selectedSloc, setSelectedSloc] = useState("");
+  const [locationUpdateLoading, setLocationUpdateLoading] = useState(false);
+  const [locationUpdateMessage, setLocationUpdateMessage] = useState<string | null>(null);
+  const [locationUpdateError, setLocationUpdateError] = useState<string | null>(null);
 
-  if (status === "loading") {
-    return (
-      <div className="flex items-center justify-center min-h-64">
-        <svg className="animate-spin w-8 h-8" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-        </svg>
-      </div>
-    );
-  }
-  if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
-    return null;
+  async function loadVehicleReport(term: string) {
+    const res = await fetch(`/api/vehicle-report?vehicleNo=${encodeURIComponent(term)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error ?? "Failed to fetch vehicle report");
+    }
+    return data;
   }
 
   async function handleSearch() {
@@ -203,29 +227,32 @@ export default function VehicleReportPage() {
     setSearched(true);
     setLastSearch(term);
     setCurrentLocation(null);
+    setCurrentPlantLocation(null);
+    setPlantLocations([]);
+    setSelectedPlant("");
+    setSelectedSloc("");
+    setLocationUpdateMessage(null);
+    setLocationUpdateError(null);
     setExpandedRows(new Set());
     try {
-      const res = await fetch(`/api/vehicle-report?vehicleNo=${encodeURIComponent(term)}`);
-      if (!res.ok) {
-        const d = await res.json();
-        setError(d.error ?? "Failed to fetch vehicle report");
-        setPasses(null);
-        setVehicleMaster(null);
-        setStats(null);
-        return;
-      }
-      const data = await res.json();
+      const data = await loadVehicleReport(term);
       if (!data.passes || data.passes.length === 0) {
         setError("No gate passes found for this vehicle.");
         setPasses([]);
         setVehicleMaster(data.vehicleMaster ?? null);
         setStats(data.stats ?? null);
+        setCurrentPlantLocation(data.currentPlantLocation ?? null);
+        if (data.currentPlantLocation) lastKnownSapIds.current = data.currentPlantLocation;
+        setPlantLocations(data.plantLocations ?? []);
         return;
       }
       setVehicleMaster(data.vehicleMaster ?? null);
       setPasses(data.passes ?? []);
       setStats(data.stats ?? null);
       setCurrentLocation(data.currentLocation ?? null);
+      setCurrentPlantLocation(data.currentPlantLocation ?? null);
+      if (data.currentPlantLocation) lastKnownSapIds.current = data.currentPlantLocation;
+      setPlantLocations(data.plantLocations ?? []);
       setError(null);
     } catch {
       setError("Network error — please try again.");
@@ -240,6 +267,93 @@ export default function VehicleReportPage() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  }
+
+  const plantOptions = useMemo(() => {
+    const seen = new Map<string, { plantCode: string; plantDescription: string }>();
+    plantLocations.forEach((location) => {
+      const key = `${location.plantCode}|${location.plantDescription}`;
+      if (!seen.has(key)) {
+        seen.set(key, {
+          plantCode: location.plantCode,
+          plantDescription: location.plantDescription,
+        });
+      }
+    });
+    return Array.from(seen.values()).sort((a, b) =>
+      a.plantCode.localeCompare(b.plantCode) || a.plantDescription.localeCompare(b.plantDescription)
+    );
+  }, [plantLocations]);
+
+  const storageOptions = useMemo(() => {
+    return plantLocations.filter((location) => location.plantCode === selectedPlant);
+  }, [plantLocations, selectedPlant]);
+
+  async function handleLocationUpdate() {
+    if (!selectedPlant || !selectedSloc) {
+      setLocationUpdateError("Select both plant and storage location.");
+      setLocationUpdateMessage(null);
+      return;
+    }
+
+    setLocationUpdateLoading(true);
+    setLocationUpdateError(null);
+    setLocationUpdateMessage(null);
+
+    try {
+      const res = await fetch("/api/vehicle-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          searchTerm: lastSearch,
+          vehicleNo: vehicleMaster?.vehicleNo ?? null,
+          chassisNo: vehicleMaster?.chassisNo ?? null,
+          // Use current plant location first, then last-known (SAP removes vehicle
+          // from /plant after a failed transfer, so we preserve identifiers here)
+          sapInternalNo: currentPlantLocation?.internalNo ?? lastKnownSapIds.current?.internalNo ?? null,
+          sapExternalNo: currentPlantLocation?.externalNo ?? lastKnownSapIds.current?.externalNo ?? null,
+          sapChassisNo: currentPlantLocation?.chassisNo ?? lastKnownSapIds.current?.chassisNo ?? null,
+          plant: selectedPlant,
+          storageLocation: selectedSloc,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setLocationUpdateError(data.error ?? "Failed to update vehicle location.");
+        // SAP removes the vehicle from /plant even on a failed transfer.
+        // Do NOT refresh — preserve currentPlantLocation so the user can
+        // retry with the same SAP internal no (Vhcle) on the next attempt.
+        return;
+      }
+
+      const refreshed = await loadVehicleReport(lastSearch);
+      setVehicleMaster(refreshed.vehicleMaster ?? null);
+      setPasses(refreshed.passes ?? []);
+      setStats(refreshed.stats ?? null);
+      setCurrentLocation(refreshed.currentLocation ?? null);
+      setCurrentPlantLocation(refreshed.currentPlantLocation ?? null);
+      setPlantLocations(refreshed.plantLocations ?? []);
+      setLocationUpdateMessage(data.message || "Vehicle location updated successfully.");
+    } catch {
+      setLocationUpdateError("Network error while updating vehicle location.");
+    } finally {
+      setLocationUpdateLoading(false);
+    }
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="flex items-center justify-center min-h-64">
+        <svg className="animate-spin w-8 h-8" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+        </svg>
+      </div>
+    );
+  }
+  if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
+    return null;
   }
 
   const hasPasses = passes !== null && passes.length > 0;
@@ -259,7 +373,7 @@ export default function VehicleReportPage() {
         }
       `}</style>
 
-      <div className="flex flex-col print-report" style={{ height: "100%", minWidth: 0, overflow: "hidden" }}>
+      <div className="flex flex-col print-report w-full" style={{ height: "100%", minWidth: 0, overflow: "hidden" }}>
 
         {/* ── FIXED TOP ── */}
         <div className="flex-shrink-0">
@@ -343,17 +457,17 @@ export default function VehicleReportPage() {
           {/* Vehicle profile card */}
           {!loading && searched && !error && (
             <motion.div
-              className="rounded-2xl border mb-3 overflow-hidden"
+              className="rounded-2xl border mb-3 overflow-hidden w-full min-w-0"
               style={{ background: "var(--surface)", borderColor: "var(--border)" }}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.04 }}
             >
               {/* Top row: identity + location + stats */}
-              <div className="px-5 py-4 flex flex-wrap items-center gap-5">
+              <div className="px-5 py-4 flex flex-wrap items-center gap-5 min-w-0">
 
                 {/* Vehicle icon + number */}
-                <div className="flex items-center gap-3 flex-shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                     style={{ background: "linear-gradient(135deg,#1a4f9e18,#2563eb22)" }}>
                     <svg className="w-5 h-5" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -365,9 +479,9 @@ export default function VehicleReportPage() {
                         d="M13 8h4l3 3v5h-7V8z" />
                     </svg>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-base font-bold font-mono" style={{ color: "var(--accent)" }}>
+                  <div className="min-w-0 overflow-hidden">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                      <span className="text-base font-bold font-mono truncate" style={{ color: "var(--accent)" }}>
                         {vehicleMaster?.vehicleNo ?? lastSearch.toUpperCase()}
                       </span>
                       {vehicleMaster ? (
@@ -408,7 +522,7 @@ export default function VehicleReportPage() {
                 <div className="w-px h-10 flex-shrink-0 hidden sm:block" style={{ background: "var(--border)" }} />
 
                 {/* Current location */}
-                <div className="flex items-center gap-2.5 flex-shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
                     style={{ background: currentLocation ? "#f0fdf4" : "var(--surface2)", border: "1px solid", borderColor: currentLocation ? "#bbf7d0" : "var(--border)" }}>
                     <svg className="w-4 h-4" style={{ color: currentLocation ? "#15803d" : "#9ca3af" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -417,11 +531,11 @@ export default function VehicleReportPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide leading-none mb-0.5" style={{ color: "var(--text-muted)" }}>
                       Current Location
                     </p>
-                    <p className="text-sm font-bold leading-none" style={{ color: currentLocation ? "#15803d" : "var(--text-muted)" }}>
+                    <p className="text-sm font-bold leading-none truncate" style={{ color: currentLocation ? "#15803d" : "var(--text-muted)" }}>
                       {currentLocation ?? "Unknown"}
                     </p>
                   </div>
@@ -431,7 +545,7 @@ export default function VehicleReportPage() {
 
                 {/* Stats pills */}
                 {stats && (
-                  <div className="flex items-center gap-1.5 flex-wrap flex-shrink-0">
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                     <StatPill label="Total" value={stats.total} color="#2563eb" bg="#eff6ff" />
                     <StatPill label="Completed" value={stats.completed + stats.approved + stats.gateOut} color="#15803d" bg="#f0fdf4" />
                     <StatPill label="Pending" value={stats.pending} color="#c2410c" bg="#fff7ed" />
@@ -442,12 +556,94 @@ export default function VehicleReportPage() {
                   </div>
                 )}
               </div>
+
+              <div className="px-5 pb-4">
+                <div className="rounded-2xl border p-4 no-print" style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Update Vehicle Location</p>
+                      <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                        Change the live plant and storage location and show the API response message here.
+                      </p>
+                      {currentPlantLocation && (
+                        <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                          Current Plant {currentPlantLocation.plantCode} - {currentPlantLocation.plantDescription} | Sloc {currentPlantLocation.storageLocation} - {currentPlantLocation.storageDescription}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Plant</label>
+                        <select
+                          value={selectedPlant}
+                          onChange={(e) => {
+                            setSelectedPlant(e.target.value);
+                            setSelectedSloc("");
+                            setLocationUpdateError(null);
+                            setLocationUpdateMessage(null);
+                          }}
+                          className="w-full border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                        >
+                          <option value="">Select plant</option>
+                          {plantOptions.map((plant) => (
+                            <option key={`${plant.plantCode}-${plant.plantDescription}`} value={plant.plantCode}>
+                              {plant.plantCode} - {plant.plantDescription}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Storage Location</label>
+                        <select
+                          value={selectedSloc}
+                          onChange={(e) => {
+                            setSelectedSloc(e.target.value);
+                            setLocationUpdateError(null);
+                            setLocationUpdateMessage(null);
+                          }}
+                          disabled={!selectedPlant}
+                          className="w-full border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-60"
+                          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                        >
+                          <option value="">Select storage location</option>
+                          {storageOptions.map((location) => (
+                            <option key={location.id} value={location.storageLocation}>
+                              {location.storageLocation} - {location.storageDescription}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={handleLocationUpdate}
+                        disabled={locationUpdateLoading || !selectedPlant || !selectedSloc}
+                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                        style={{ background: "linear-gradient(135deg,#15803d,#22c55e)" }}
+                      >
+                        {locationUpdateLoading ? "Updating..." : "Update Location"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {locationUpdateMessage && (
+                    <div className="mt-3 rounded-xl border px-4 py-3 text-sm font-medium" style={{ background: "#f0fdf4", borderColor: "#bbf7d0", color: "#15803d" }}>
+                      {locationUpdateMessage}
+                    </div>
+                  )}
+
+                  {locationUpdateError && (
+                    <div className="mt-3 rounded-xl border px-4 py-3 text-sm font-medium" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
+                      {locationUpdateError}
+                    </div>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
         </div>
 
         {/* ── SCROLLABLE BODY ── */}
-        <div style={{ flex: "1 1 0", overflowY: "auto", minHeight: 0 }}>
+        <div style={{ flex: "1 1 0", overflow: "hidden", minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
 
           {/* Empty state */}
           {!searched && (
@@ -496,13 +692,13 @@ export default function VehicleReportPage() {
           {/* Journey table */}
           {!loading && searched && !error && hasPasses && (
             <motion.div
-              className="rounded-2xl border overflow-hidden"
-              style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+              className="rounded-2xl border overflow-hidden w-full min-w-0"
+              style={{ background: "var(--surface)", borderColor: "var(--border)", flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column" }}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.08 }}
             >
-              <div className="px-5 py-3 border-b flex items-center justify-between"
+              <div className="px-5 py-3 border-b flex items-center justify-between flex-shrink-0"
                 style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
                 <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Journey History</p>
                 <p className="text-xs" style={{ color: "var(--text-muted)" }}>
@@ -510,14 +706,14 @@ export default function VehicleReportPage() {
                 </p>
               </div>
 
-              <div style={{ overflowX: "auto" }}>
+              <div style={{ flex: "1 1 0", minHeight: 0, overflowX: "auto", overflowY: "auto" }}>
                 <table style={{ minWidth: "900px", width: "100%", borderCollapse: "collapse" }} className="text-sm">
                   <thead>
                     <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
                       {["#", "Gate Pass", "Type", "Status", "Journey (From → To)", "Departure", "Arrival", "Created By", "Approved By", ""].map((h, i) => (
                         <th key={i}
                           className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap"
-                          style={{ color: "var(--text-muted)" }}>
+                          style={{ color: "var(--text-muted)", position: "sticky", top: 0, background: "var(--surface2)", zIndex: 10 }}>
                           {h}
                         </th>
                       ))}
@@ -667,7 +863,6 @@ export default function VehicleReportPage() {
                                         <DetailGroup title="Transport">
                                           <DetailField label="Mode" value={p.transportMode} />
                                           <DetailField label="Company" value={p.companyName} />
-                                          <DetailField label="Carrier" value={p.carrierName} />
                                           <DetailField label="Carrier Reg No" value={p.carrierRegNo} />
                                         </DetailGroup>
 

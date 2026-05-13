@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles } from "@/lib/sap";
+import { fetchPlantLocationOptions, fetchPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
 
@@ -18,55 +19,62 @@ export async function GET(req: NextRequest) {
   const field = searchParams.get("field") as LookupField | null;
   const q = normalize(searchParams.get("q") ?? "");
   const rawLimit = parseInt(searchParams.get("limit") ?? "20", 10);
-  // Locations need a higher cap to show full lists without typing
   const take = field === "location" ? Math.min(rawLimit, 500) : Math.min(rawLimit, 50);
   const locationType = searchParams.get("locationType") ?? undefined;
 
-  // ── Bulk mode: ?fields=location,outReason,approver,... ──────────────────
   const fieldsParam = searchParams.get("fields");
   if (fieldsParam) {
-    const fields = fieldsParam.split(",").map(f => f.trim()) as LookupField[];
+    const fields = fieldsParam.split(",").map((f) => f.trim()) as LookupField[];
     const locType = searchParams.get("locationType") ?? undefined;
     const dimoLocType = searchParams.get("dimoLocationType") ?? undefined;
+
     try {
-      const [locations, dimoLocations, outReasons, approvers, companies, carriers] = await Promise.all([
-        prisma.locationOption.findMany({
-          where: locType ? { locationType: locType } as Record<string, unknown> : {},
-          orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
-          take: 300,
-        }),
-        dimoLocType
-          ? prisma.locationOption.findMany({
-              where: { locationType: dimoLocType } as Record<string, unknown>,
-              orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
-              take: 200,
-            })
-          : Promise.resolve([]),
+      const [apiLocations, outReasons, approvers, companies, carriers] = await Promise.all([
+        fetchPlantLocationOptions().catch(() => []),
         fields.includes("outReason") ? prisma.outReasonOption.findMany({ orderBy: { value: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("approver") ? prisma.user.findMany({ where: { role: "APPROVER" }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("companyName") ? prisma.carrierOption.findMany({ orderBy: { companyName: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("carrierRegNo") ? prisma.carrierOption.findMany({ orderBy: { registrationNo: "asc" }, take: 50 }) : Promise.resolve([]),
       ]);
-      const mapLoc = (row: { id: string; plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string }) => ({
-        id: row.id,
-        value: `${row.plantDescription} - ${row.storageDescription}`,
-        label: `${row.plantDescription} – ${row.storageDescription}`,
-        plantCode: row.plantCode,
-        plantDescription: row.plantDescription,
-        storageLocation: row.storageLocation,
-        storageDescription: row.storageDescription,
-      });
+
+      // Sync SAP-derived locations to DB so Gate IN can resolve destination codes
+      // even when no vehicle is currently parked at that location in SAP.
+      if (apiLocations.length > 0) {
+        prisma.locationOption.createMany({
+          data: apiLocations.map((loc) => ({
+            plantCode: loc.plantCode,
+            plantDescription: loc.plantDescription,
+            storageLocation: loc.storageLocation,
+            storageDescription: loc.storageDescription,
+          })),
+          skipDuplicates: true,
+        }).catch(() => { /* non-critical */ });
+      }
+
+      const locations = filterApiLocations(apiLocations, "", locType);
+      const dimoLocations = dimoLocType ? filterApiLocations(apiLocations, "", dimoLocType) : [];
+
       return NextResponse.json({
-        location: locations.map(mapLoc),
-        dimoLocation: dimoLocations.map(mapLoc),
+        location: locations,
+        dimoLocation: dimoLocations,
         outReason: outReasons.map((r: { id: string; value: string }) => ({ id: r.id, value: r.value, label: r.value })),
         approver: approvers.map((r: { id: string; name: string }) => ({ id: r.id, value: r.name, label: r.name })),
-        companyName: (companies as { id: string; companyName: string; registrationNo: string }[]).map(r => ({ id: r.id, value: r.companyName, label: r.companyName, registrationNo: r.registrationNo })),
-        carrierRegNo: (carriers as { id: string; registrationNo: string; companyName: string }[]).map(r => ({ id: r.id, value: r.registrationNo, label: `${r.registrationNo} — ${r.companyName}`, companyName: r.companyName })),
+        companyName: (companies as { id: string; companyName: string; registrationNo: string }[]).map((r) => ({
+          id: r.id,
+          value: r.companyName,
+          label: r.companyName,
+          registrationNo: r.registrationNo,
+        })),
+        carrierRegNo: (carriers as { id: string; registrationNo: string; companyName: string }[]).map((r) => ({
+          id: r.id,
+          value: r.registrationNo,
+          label: `${r.registrationNo} - ${r.companyName}`,
+          companyName: r.companyName,
+        })),
       });
     } catch (e) {
       console.error("Bulk lookups error:", e);
-      return NextResponse.json({ error: "DB error" }, { status: 500 });
+      return NextResponse.json({ error: "Lookup error" }, { status: 500 });
     }
   }
 
@@ -74,57 +82,56 @@ export async function GET(req: NextRequest) {
 
   try {
     if (field === "location") {
-      type LocRow = { id: string; plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string };
-      let rows: LocRow[];
+      const matnr = searchParams.get("matnr") ?? undefined;
 
-      if (locationType) {
-        // Use raw SQL — locationType column may not be in generated Prisma client yet
-        if (q) {
-          const like = `%${q}%`;
-          rows = await prisma.$queryRaw<LocRow[]>`
-            SELECT id, "plantCode", "plantDescription", "storageLocation", "storageDescription"
-            FROM "LocationOption"
-            WHERE "locationType" = ${locationType}
-              AND ("plantCode" ILIKE ${like} OR "plantDescription" ILIKE ${like}
-                OR "storageLocation" ILIKE ${like} OR "storageDescription" ILIKE ${like})
-            ORDER BY "plantCode" ASC, "storageDescription" ASC
-            LIMIT ${take}
-          `;
-        } else {
-          rows = await prisma.$queryRaw<LocRow[]>`
-            SELECT id, "plantCode", "plantDescription", "storageLocation", "storageDescription"
-            FROM "LocationOption"
-            WHERE "locationType" = ${locationType}
-            ORDER BY "plantCode" ASC, "storageDescription" ASC
-            LIMIT ${take}
-          `;
+      if (matnr) {
+        const [allRows, dbLocs] = await Promise.all([
+          fetchPlantVehicleRows().catch(() => []),
+          (locationType === "DIMO" || locationType === "DEALER")
+            ? prisma.locationOption.findMany({ where: { locationType }, select: { plantCode: true, storageLocation: true } })
+            : Promise.resolve(null),
+        ]);
+
+        // Build a set of plant+sloc keys from DB for the requested locationType
+        const dbAllowed = dbLocs
+          ? new Set(dbLocs.map((l: { plantCode: string; storageLocation: string }) => `${l.plantCode}|${l.storageLocation}`))
+          : null;
+
+        const seen = new Set<string>();
+        const options: LocationOption[] = [];
+        for (const row of allRows.filter(r => r.materialNo && r.materialNo.toUpperCase() === matnr.toUpperCase())) {
+          if (!row.plantDescription) continue;
+          // Fall back to storageLocation code when SAP leaves LgortDesc blank
+          const storageDesc = row.storageDescription || row.storageLocation;
+          const id = [row.plantCode, row.storageLocation].join("|");
+          if (seen.has(id)) continue;
+
+          // Filter by locationType: prefer DB match, fall back to D-prefix rule
+          if (locationType === "DIMO" || locationType === "DEALER") {
+            const inDb = dbAllowed?.has(id) ?? false;
+            const byPrefix = row.storageLocation.toUpperCase().startsWith("D") ? "DEALER" : "DIMO";
+            const effectiveType = inDb ? locationType : byPrefix;
+            if (effectiveType !== locationType) continue;
+          }
+
+          seen.add(id);
+          const value = [row.plantDescription, storageDesc].filter(Boolean).join(" - ");
+          options.push({
+            id, value, label: value,
+            plantCode: row.plantCode,
+            plantDescription: row.plantDescription,
+            storageLocation: row.storageLocation,
+            storageDescription: storageDesc,
+            source: "api",
+          });
         }
-      } else {
-        rows = await prisma.locationOption.findMany({
-          where: q ? {
-            OR: [
-              { plantCode: { contains: q, mode: "insensitive" } },
-              { plantDescription: { contains: q, mode: "insensitive" } },
-              { storageLocation: { contains: q, mode: "insensitive" } },
-              { storageDescription: { contains: q, mode: "insensitive" } },
-            ],
-          } : {},
-          orderBy: [{ plantCode: "asc" }, { storageDescription: "asc" }],
-          take,
-        });
+        return NextResponse.json({ options: filterApiLocations(options, q).slice(0, take) });
       }
 
-      return NextResponse.json({
-        options: rows.map((row) => ({
-          id: row.id,
-          value: `${row.plantDescription} - ${row.storageDescription}`,
-          label: `${row.plantDescription} – ${row.storageDescription}`,
-          plantCode: row.plantCode,
-          plantDescription: row.plantDescription,
-          storageLocation: row.storageLocation,
-          storageDescription: row.storageDescription,
-        })),
-      });
+      const apiLocations = await fetchPlantLocationOptions().catch(() => []);
+      const options = filterApiLocations(apiLocations, q, locationType).slice(0, take);
+
+      return NextResponse.json({ options });
     }
 
     if (field === "requestedBy") {
@@ -150,68 +157,138 @@ export async function GET(req: NextRequest) {
     }
 
     if (field === "vehicle") {
-      // ── 1. Try SAP first ────────────────────────────────────────────────
       const rawPassType = searchParams.get("passType") ?? "both";
-      // AFTER_SALES → use both SAP endpoints (IN + OUT) to load all vehicles
       const passType = (rawPassType === "AFTER_SALES" ? "both" : rawPassType) as
         "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both";
 
-      try {
-        const sapVehicles = await fetchSapVehicles(q, passType);
-        if (sapVehicles.length > 0) {
-          return NextResponse.json({
-            options: sapVehicles.slice(0, take).map((v, i) => ({
-              id:           `${v.internalNo || v.chassisNo || v.vehicleNo || i}-${i}`,
-              value:        v.vehicleNo || v.chassisNo,   // license plate preferred, fall back to VIN
-              label:        v.vehicleNo && v.chassisNo
-                              ? `${v.vehicleNo} / ${v.chassisNo}`
-                              : (v.vehicleNo || v.chassisNo),
-              chassisNo:    v.chassisNo,
-              description:  v.model,
-              model:        v.model,
-              make:         v.make,
-              colourFamily: "",
-              colour:       v.colour,
-            })),
-            source: "sap",
-          });
+      const merged = new Map<string, {
+        id: string;
+        value: string;
+        label: string;
+        chassisNo: string;
+        description: string;
+        model: string;
+        make: string;
+        colourFamily: string;
+        colour: string;
+        matnr: string;
+        internalNo: string;
+      }>();
+
+      // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel
+      const [sapResult, plantResult] = await Promise.allSettled([
+        fetchSapVehicles(q, passType),
+        fetchPlantVehicleRows(),
+      ]);
+
+      // Build Matnr lookup from /plant to cross-reference SAP /in/out entries
+      const plantMatnrByInternalNo = new Map<string, string>();
+      if (plantResult.status === "fulfilled") {
+        for (const row of plantResult.value) {
+          if (row.internalNo && row.materialNo) {
+            plantMatnrByInternalNo.set(row.internalNo.toUpperCase(), row.materialNo);
+          }
         }
-      } catch (sapErr) {
-        // SAP unavailable — fall through to local DB
-        console.warn("[lookups/vehicle] SAP error, falling back to local DB:", sapErr instanceof Error ? sapErr.message : sapErr);
       }
 
-      // ── 2. Fallback: local VehicleOption DB ─────────────────────────────
+      const seenInternalNos = new Set<string>();
+
+      if (sapResult.status === "fulfilled") {
+        sapResult.value.slice(0, take).forEach((v, i) => {
+          const key = `${(v.vehicleNo || "").toUpperCase()}::${(v.chassisNo || "").toUpperCase()}`;
+          if (merged.has(key)) return;
+          if (v.internalNo) seenInternalNos.add(v.internalNo.toUpperCase());
+          const matnr = v.internalNo ? (plantMatnrByInternalNo.get(v.internalNo.toUpperCase()) ?? "") : "";
+          merged.set(key, {
+            id: `${v.internalNo || v.chassisNo || v.vehicleNo || i}-${i}`,
+            value: v.vehicleNo || v.chassisNo,
+            label: v.vehicleNo && v.chassisNo ? `${v.vehicleNo} / ${v.chassisNo}` : (v.vehicleNo || v.chassisNo),
+            chassisNo: v.chassisNo ?? "",
+            description: v.model ?? "",
+            model: v.model ?? "",
+            make: v.make ?? "",
+            colourFamily: "",
+            colour: v.colour ?? "",
+            matnr,
+            internalNo: v.internalNo ?? "",
+          });
+        });
+      } else {
+        console.warn("[lookups/vehicle] SAP /in|/out error:", sapResult.reason instanceof Error ? sapResult.reason.message : sapResult.reason);
+      }
+
+      // Merge plant API vehicles — these cover vehicles not yet in business flow (no QP30/QS60)
+      if (plantResult.status === "fulfilled") {
+        const safe = q.trim().toUpperCase();
+        const filtered = safe
+          ? plantResult.value.filter((row) =>
+              row.chassisNo.toUpperCase().includes(safe) ||
+              row.externalNo.toUpperCase().includes(safe) ||
+              row.internalNo.toUpperCase().includes(safe)
+            )
+          : plantResult.value;
+
+        filtered.forEach((row, i) => {
+          if (row.internalNo && seenInternalNos.has(row.internalNo.toUpperCase())) return;
+          const identifier = row.externalNo || row.chassisNo || row.internalNo;
+          if (!identifier) return;
+          const key = `PLANT::${row.internalNo.toUpperCase() || identifier.toUpperCase()}`;
+          if (merged.has(key)) return;
+          merged.set(key, {
+            id: `plant-${row.internalNo || i}`,
+            value: identifier,
+            label: row.chassisNo && row.externalNo && row.externalNo !== row.chassisNo
+              ? `${row.externalNo} / ${row.chassisNo}`
+              : identifier,
+            chassisNo: row.chassisNo ?? "",
+            description: row.modelCode ?? "",
+            model: row.modelCode ?? "",
+            make: "",
+            colourFamily: "",
+            colour: "",
+            matnr: row.materialNo ?? "",
+            internalNo: row.internalNo ?? "",
+          });
+        });
+      }
+
       const options = await prisma.vehicleOption.findMany({
         where: q
           ? {
               OR: [
-                { vehicleNo:   { contains: q, mode: "insensitive" } },
-                { chassisNo:   { contains: q, mode: "insensitive" } },
+                { vehicleNo: { contains: q, mode: "insensitive" } },
+                { chassisNo: { contains: q, mode: "insensitive" } },
                 { description: { contains: q, mode: "insensitive" } },
-                { model:       { contains: q, mode: "insensitive" } },
-                { make:        { contains: q, mode: "insensitive" } },
+                { model: { contains: q, mode: "insensitive" } },
+                { make: { contains: q, mode: "insensitive" } },
               ],
             }
           : undefined,
         orderBy: { vehicleNo: "asc" },
         take,
       });
-      return NextResponse.json({
-        options: options.map((row) => ({
-          id:           row.id,
-          value:        row.vehicleNo,
-          chassisNo:    row.chassisNo    ?? "",
-          description:  row.description  ?? "",
-          model:        row.model        ?? "",
-          make:         row.make         ?? "",
+
+      options.forEach((row) => {
+        const key = `${(row.vehicleNo || "").toUpperCase()}::${(row.chassisNo || "").toUpperCase()}`;
+        if (merged.has(key)) return;
+        merged.set(key, {
+          id: row.id,
+          value: row.vehicleNo,
+          chassisNo: row.chassisNo ?? "",
+          description: row.description ?? "",
+          model: row.model ?? "",
+          make: row.make ?? "",
           colourFamily: row.colourFamily ?? "",
-          colour:       row.colour       ?? "",
-          label:        row.chassisNo
-                          ? `${row.vehicleNo} / ${row.chassisNo}`
-                          : row.vehicleNo,
-        })),
-        source: "local",
+          colour: row.colour ?? "",
+          label: row.chassisNo ? `${row.vehicleNo} / ${row.chassisNo}` : row.vehicleNo,
+          matnr: "",
+          internalNo: "",
+        });
+      });
+
+      return NextResponse.json({
+        options: Array.from(merged.values()).slice(0, take),
+        source: "combined",
       });
     }
 
@@ -241,13 +318,12 @@ export async function GET(req: NextRequest) {
         options: options.map((row) => ({
           id: row.id,
           value: row.registrationNo,
-          label: `${row.registrationNo} — ${row.companyName}`,
+          label: `${row.registrationNo} - ${row.companyName}`,
           companyName: row.companyName,
         })),
       });
     }
 
-    // approver
     const options = await prisma.user.findMany({
       where: {
         role: "APPROVER",
@@ -256,6 +332,7 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
       take,
     });
+
     return NextResponse.json({
       options: options.map((row) => ({ id: row.id, value: row.name, label: row.name })),
     });
@@ -275,7 +352,6 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const field = body.field as LookupField | undefined;
 
-  // ── Create a new Promotion / Finance location ───────────────────────
   if (field === "location") {
     const plantDescription = normalize(body.plantDescription ?? "");
     const locationType = normalize(body.locationType ?? "") as string;
@@ -285,15 +361,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "locationType must be PROMOTION or FINANCE" }, { status: 400 });
     }
 
-    // Use provided storageDescription or fall back to type default
     const storageDescRaw = normalize(body.storageDescription ?? "");
     const storageDescription = storageDescRaw || (locationType === "PROMOTION" ? "Promo Location" : "Finan Institute");
-
-    // Derive plantCode from initials (up to 6 chars)
     const plantCode = plantDescription.split(/\s+/).map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 6);
 
     try {
-      // Find next available Sloc number for this plantCode
       const existing = await prisma.locationOption.findMany({
         where: { plantCode },
         orderBy: { storageLocation: "desc" },
@@ -305,15 +377,17 @@ export async function POST(req: NextRequest) {
       const created = await prisma.locationOption.create({
         data: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
       });
+
       return NextResponse.json({
         option: {
           id: created.id,
           value: `${created.plantDescription} - ${created.storageDescription}`,
-          label: `${created.plantDescription} – ${created.storageDescription}`,
+          label: `${created.plantDescription} - ${created.storageDescription}`,
           plantCode: created.plantCode,
           plantDescription: created.plantDescription,
           storageLocation: created.storageLocation,
           storageDescription: created.storageDescription,
+          source: "db",
         },
       });
     } catch (e) {
@@ -326,13 +400,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Only vehicle creation is supported." }, { status: 400 });
   }
 
-  const vehicleNo    = normalize(body.vehicleNo    ?? "");
-  const chassisNo    = normalize(body.chassisNo    ?? "");
-  const description  = normalize(body.description  ?? "");
-  const model        = normalize(body.model        ?? "");
-  const make         = normalize(body.make         ?? "");
+  const vehicleNo = normalize(body.vehicleNo ?? "");
+  const chassisNo = normalize(body.chassisNo ?? "");
+  const description = normalize(body.description ?? "");
+  const model = normalize(body.model ?? "");
+  const make = normalize(body.make ?? "");
   const colourFamily = normalize(body.colourFamily ?? "");
-  const colour       = normalize(body.colour       ?? "");
+  const colour = normalize(body.colour ?? "");
 
   if (!vehicleNo) {
     return NextResponse.json({ error: "vehicleNo is required." }, { status: 400 });
@@ -342,33 +416,34 @@ export async function POST(req: NextRequest) {
     const created = await prisma.vehicleOption.upsert({
       where: { vehicleNo },
       update: {
-        chassisNo:    chassisNo    || null,
-        description:  description  || null,
-        model:        model        || null,
-        make:         make         || null,
+        chassisNo: chassisNo || null,
+        description: description || null,
+        model: model || null,
+        make: make || null,
         colourFamily: colourFamily || null,
-        colour:       colour       || null,
+        colour: colour || null,
       },
       create: {
         vehicleNo,
-        chassisNo:    chassisNo    || null,
-        description:  description  || null,
-        model:        model        || null,
-        make:         make         || null,
+        chassisNo: chassisNo || null,
+        description: description || null,
+        model: model || null,
+        make: make || null,
         colourFamily: colourFamily || null,
-        colour:       colour       || null,
+        colour: colour || null,
       },
     });
+
     return NextResponse.json({
       option: {
         id: created.id,
         value: created.vehicleNo,
-        chassisNo:    created.chassisNo    ?? "",
-        description:  created.description  ?? "",
-        model:        created.model        ?? "",
-        make:         created.make         ?? "",
+        chassisNo: created.chassisNo ?? "",
+        description: created.description ?? "",
+        model: created.model ?? "",
+        make: created.make ?? "",
         colourFamily: created.colourFamily ?? "",
-        colour:       created.colour       ?? "",
+        colour: created.colour ?? "",
         label: created.chassisNo ? `${created.vehicleNo} / ${created.chassisNo}` : created.vehicleNo,
       },
     });

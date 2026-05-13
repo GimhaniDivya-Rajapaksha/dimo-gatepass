@@ -19,10 +19,11 @@ interface TimePickerProps {
   placeholder?: string;
   error?: string;
   date?: string;       // "YYYY-MM-DD" — when provided, past times are disabled if date is today
+  minTime?: string;    // "HH:MM" — when provided, times at or before this are disabled
 }
 
 export default function TimePicker({
-  value, onChange, placeholder = "Select time", error, date,
+  value, onChange, placeholder = "Select time", error, date, minTime,
 }: TimePickerProps) {
   // Determine if the given date is today — if so, block past times
   const nowRef = new Date();
@@ -35,10 +36,17 @@ export default function TimePicker({
                 d.getDate()     === nowRef.getDate();
     } catch { /* invalid date string */ }
   }
-  const minH = isToday ? nowRef.getHours() : 0;
-  const minM = isToday ? nowRef.getMinutes() : 0;
-  const isPastHour = (h: number) => isToday && h < minH;
-  const isPastMin  = (h: number, m: number) => isToday && h === minH && m < minM;
+  // minTime overrides the today-based floor when provided
+  const minTimeH = minTime ? parseInt(minTime.split(":")[0], 10) : (isToday ? nowRef.getHours() : 0);
+  const minTimeM = minTime ? parseInt(minTime.split(":")[1], 10) : (isToday ? nowRef.getMinutes() : 0);
+  const hasFloor = isToday || !!minTime;
+  // Arrival must be strictly AFTER departure — add 1 min to the floor when minTime is set
+  const floorH = minTime ? (minTimeM === 59 ? minTimeH + 1 : minTimeH) : minTimeH;
+  const floorM = minTime ? (minTimeM === 59 ? 0 : minTimeM + 1) : minTimeM;
+  const minH = floorH;
+  const minM = floorM;
+  const isPastHour = (h: number) => hasFloor && h < minH;
+  const isPastMin  = (h: number, m: number) => hasFloor && h === minH && m < minM;
   const [open, setOpen] = useState(false);
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
 
@@ -266,7 +274,6 @@ export default function TimePicker({
                     <div style={{ paddingTop: ITEM_H * 1.5, paddingBottom: ITEM_H * 1.5 }}>
                       {Array.from({ length: 24 }, (_, i) => {
                         const h12v = i === 0 ? 12 : i > 12 ? i - 12 : i;
-                        const period = i >= 12 ? "PM" : "AM";
                         const sel = i === curH;
                         const past = isPastHour(i);
                         return (
@@ -284,7 +291,6 @@ export default function TimePicker({
                               transform: sel ? "scale(1.1)" : "scale(1)",
                             }}>
                             <span style={{ fontVariantNumeric: "tabular-nums" }}>{pad(h12v)}</span>
-                            <span className="text-[10px] ml-1" style={{ color: sel ? "#93c5fd" : "var(--text-muted)", opacity: 0.7 }}>{period}</span>
                           </div>
                         );
                       })}

@@ -21,7 +21,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const {
     toLocation, fromLocation, departureDate, departureTime,
     arrivalDate, arrivalTime, approver, outReason, comments,
-    passSubType, serviceJobNo,
+    passSubType, serviceJobNo, requestedBy,
+    transportMode, companyName, carrierRegNo, driverName, driverNIC,
+    driverContact, mileage, insurance, garagePlate,
   } = body;
 
   // Determine next status (same routing logic as create)
@@ -50,10 +52,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       departureTime: departureTime || null,
       arrivalDate:   arrivalDate   || null,
       arrivalTime:   arrivalTime   || null,
+      requestedBy:   requestedBy   || null,
       outReason:     outReason     || null,
       comments:      comments      || null,
       passSubType:   passSubType   || null,
       serviceJobNo:  serviceJobNo  || null,
+      transportMode: transportMode || null,
+      companyName:   companyName   || null,
+      carrierRegNo:  carrierRegNo  || null,
+      driverName:    driverName    || null,
+      driverNIC:     driverNIC     || null,
+      driverContact: driverContact || null,
+      mileage:       mileage       || null,
+      insurance:     insurance     || null,
+      garagePlate:   garagePlate   || null,
       ...(approvedById ? { approvedById, approvedAt } : {}),
     },
     include: { createdBy: { select: { name: true, email: true } } },
