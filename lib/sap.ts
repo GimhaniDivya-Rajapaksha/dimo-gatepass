@@ -136,18 +136,14 @@ function mapOrder(row: Record<string, unknown>): SapOrder {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * Build OData filter string for vehicle search.
- *  - With query q: search by VIN, license plate, or external number (partial match)
- *  - Without query:  apply the base status filter (mmsta/sdsta)
- */
-function vehicleFilter(q: string, baseFilter: string): string {
-  if (!q.trim()) return baseFilter;
-  const safe = q.trim().replace(/'/g, "''");
-  return (
-    `substringof('${safe}',vhvin) or ` +
-    `substringof('${safe}',xdbexlicext) or ` +
-    `substringof('${safe}',vhcex)`
+function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
+  if (!q.trim()) return vehicles;
+  const safe = q.trim().toUpperCase();
+  return vehicles.filter((v) =>
+    v.chassisNo.toUpperCase().includes(safe) ||
+    v.vehicleNo.toUpperCase().includes(safe) ||
+    v.externalNo.toUpperCase().includes(safe) ||
+    v.internalNo.toUpperCase().includes(safe)
   );
 }
 
@@ -163,12 +159,14 @@ export async function fetchSapVehicles(
   passType: "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both" = "both"
 ): Promise<SapVehicle[]> {
 
+  // Always fetch with the base status filter — JS filtering handles the search
+  // query. SAP OData substringof() support is inconsistent across endpoints.
   const fetchIN = () =>
-    apimPost("in", vehicleFilter(q, "mmsta eq 'QP30'"))
+    apimPost("in", "mmsta eq 'QP30'")
       .then((rows) => rows.map(mapVehicle));
 
   const fetchOUT = () =>
-    apimPost("out", vehicleFilter(q, "sdsta eq 'QS60'"))
+    apimPost("out", "sdsta eq 'QS60'")
       .then((rows) => rows.map(mapVehicle));
 
   let raw: SapVehicle[];
@@ -178,7 +176,6 @@ export async function fetchSapVehicles(
   } else if (passType === "CUSTOMER_DELIVERY") {
     raw = await fetchOUT();
   } else {
-    // Both in parallel
     const [inRes, outRes] = await Promise.allSettled([fetchIN(), fetchOUT()]);
     raw = [];
     if (inRes.status  === "fulfilled") raw.push(...inRes.value);
@@ -194,8 +191,8 @@ export async function fetchSapVehicles(
     if (!existing || (!existing.vehicleNo && v.vehicleNo)) seen.set(key, v);
   }
 
-  // Only return vehicles that have at least a license plate or VIN — these are identifiable for a gate pass
-  return [...seen.values()].filter((v) => v.vehicleNo || v.chassisNo);
+  const all = [...seen.values()].filter((v) => v.vehicleNo || v.chassisNo);
+  return jsVehicleFilter(all, q);
 }
 
 /**

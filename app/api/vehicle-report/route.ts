@@ -2,33 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { fetchPlantLocationOptions, fetchPlantVehicleRows, findPlantVehicleRow } from "@/lib/location-api";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const role = session.user.role;
-  if (!["INITIATOR", "APPROVER", "ADMIN"].includes(role ?? "")) {
+  if (!["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(role ?? "")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const vehicleNo = new URL(req.url).searchParams.get("vehicleNo")?.trim() ?? "";
-  if (!vehicleNo) return NextResponse.json({ vehicleMaster: null, passes: [], stats: {} });
+  const searchParams = new URL(req.url).searchParams;
+  const vehicleNo = searchParams.get("vehicleNo")?.trim() ?? "";
+  const chassisNo = searchParams.get("chassisNo")?.trim() ?? "";
+  const searchTerms = [vehicleNo, chassisNo].filter(Boolean);
+  if (searchTerms.length === 0) return NextResponse.json({ vehicleMaster: null, passes: [], stats: {} });
 
-  const [vehicleMaster, passes] = await Promise.all([
+  const [vehicleMaster, passes, plantRows, plantLocations] = await Promise.all([
     prisma.vehicleOption.findFirst({
       where: {
-        OR: [
-          { vehicleNo: { contains: vehicleNo, mode: "insensitive" } },
-          { chassisNo: { contains: vehicleNo, mode: "insensitive" } },
-        ],
+        OR: searchTerms.flatMap((term) => ([
+          { vehicleNo: { contains: term, mode: "insensitive" as const } },
+          { chassisNo: { contains: term, mode: "insensitive" as const } },
+        ])),
       },
     }),
     prisma.gatePass.findMany({
       where: {
-        OR: [
-          { vehicle: { contains: vehicleNo, mode: "insensitive" } },
-          { chassis: { contains: vehicleNo, mode: "insensitive" } },
-        ],
+        OR: searchTerms.flatMap((term) => ([
+          { vehicle: { contains: term, mode: "insensitive" as const } },
+          { chassis: { contains: term, mode: "insensitive" as const } },
+        ])),
       },
       include: {
         createdBy:  { select: { name: true, email: true } },
@@ -41,6 +45,8 @@ export async function GET(req: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
+    fetchPlantVehicleRows().catch(() => []),
+    fetchPlantLocationOptions().catch(() => []),
   ]);
 
   const stats = {
@@ -53,9 +59,25 @@ export async function GET(req: NextRequest) {
     cancelled: passes.filter(p => p.status === "CANCELLED").length,
   };
 
-  // Current location = toLocation of the most recent COMPLETED pass
-  const currentLocation =
-    passes.find(p => p.status === "COMPLETED" && p.toLocation)?.toLocation ?? null;
+  const currentPlantLocation = findPlantVehicleRow(plantRows, [
+    vehicleNo,
+    chassisNo,
+    vehicleMaster?.vehicleNo ?? null,
+    vehicleMaster?.chassisNo ?? null,
+  ]);
 
-  return NextResponse.json({ vehicleMaster, passes, stats, currentLocation });
+  const currentLocation = currentPlantLocation
+    ? [currentPlantLocation.plantDescription, currentPlantLocation.storageDescription]
+        .filter(Boolean)
+        .join(" - ")
+    : passes.find(p => p.status === "COMPLETED" && p.toLocation)?.toLocation ?? null;
+
+  return NextResponse.json({
+    vehicleMaster,
+    passes,
+    stats,
+    currentLocation,
+    currentPlantLocation,
+    plantLocations,
+  });
 }

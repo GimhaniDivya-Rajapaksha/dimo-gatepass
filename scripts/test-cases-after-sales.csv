@@ -1,0 +1,182 @@
+Test Case ID,Sub ID,Test Case Description,Scenario,Screen,Pre-conditions,Test Steps,Test Data,Expected Result,Actual Result,Status v1.0,Priority,Comments
+AS-TC-001,AS-TC-001-01,Create MAIN_IN Gate Pass – All Required Fields Valid,Happy Path – Vehicle arriving at service centre for repair/service,Create Gate Pass > Service/Repair > Gate IN,"User is logged in as Initiator. Location master data (DIMO locations) loaded. Vehicle master exists.","1. Navigate to Create Gate Pass
+2. Select Service / Repair tab
+3. Select Gate IN mode
+4. Enter Vehicle Registration Number
+5. Select Chassis No from lookup
+6. Select Make from dropdown
+7. Select Vehicle Colour
+8. Select Receiving Location (DIMO plant)
+9. Select Service Job Type(s) (e.g. Repair)
+10. Enter Arrival Date and Time
+11. Enter Customer Name (optional)
+12. Click Submit","Vehicle: WP CAB-1234 | Chassis: HMA41CA3BNE123456 | Make: TATA | Colour: White | Location: Colombo TATA - Altair Showroom | Job: Repair | Arrival: 2026-04-02 09:00","Gate pass created with status APPROVED. GP number generated (e.g. GP-0220). Initiator sees pass in My Gate Passes under Service/Repair tab. Security Officer at fromLocation receives notification to confirm Gate IN.",,Open,High,MAIN_IN is auto-approved – no approver step needed. fromLocation is auto-set to initiator's defaultLocation.
+AS-TC-001,AS-TC-001-02,Create MAIN_IN – Vehicle Registration Missing,Field Validation – Required field blank,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator.,"1. Navigate to Create Gate Pass > Service/Repair > Gate IN
+2. Leave Vehicle Registration field empty
+3. Fill all other required fields
+4. Click Submit","Vehicle: (blank) | All other fields valid","Form does not submit. Inline validation error displayed: ""Vehicle registration is required"". Field highlighted in red.",,Open,High,
+AS-TC-001,AS-TC-001-03,Create MAIN_IN – Chassis Number Missing,Field Validation – Required field blank,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator.,"1. Navigate to Create Gate Pass > Service/Repair > Gate IN
+2. Leave Chassis No field blank
+3. Fill all other required fields
+4. Click Submit","Chassis: (blank) | All other fields valid","Form does not submit. Validation error: ""Chassis number is required"".",,Open,High,
+AS-TC-001,AS-TC-001-04,Create MAIN_IN – Arrival Date in the Past,Field Validation – Past date not allowed,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator.,"1. Navigate to Create Gate Pass > Service/Repair > Gate IN
+2. Fill all required fields
+3. Set Arrival Date to yesterday's date
+4. Click Submit","Arrival Date: 2026-04-01 (yesterday)","Form does not submit. Validation error: ""Arrival date cannot be in the past"".",,Open,Medium,
+AS-TC-001,AS-TC-001-05,Create MAIN_IN – No Service Job Type Selected,Field Validation – Required multi-select,Create Gate Pass > Service/Repair > Gate IN,User logged in as Initiator.,"1. Navigate to Create Gate Pass > Service/Repair > Gate IN
+2. Fill all required fields except Service Job Type
+3. Click Submit","Service Job Type: (none selected)","Form does not submit. Validation error indicating at least one job type must be selected.",,Open,Medium,
+AS-TC-001,AS-TC-001-06,Create MAIN_IN – Verify Auto-Approval Status,System Behaviour – MAIN_IN skips approval workflow,My Gate Passes > Service/Repair,MAIN_IN gate pass successfully created.,"1. Create a valid MAIN_IN gate pass
+2. Navigate to My Gate Passes
+3. Select Service/Repair filter
+4. Locate the newly created pass","GP: newly created MAIN_IN","Pass status is APPROVED immediately after creation. No pending approval state shown.",,Open,High,MAIN_IN / SUB_OUT / SUB_IN auto-approved by system design.
+AS-TC-002,AS-TC-002-01,Security Gate IN – Confirm MAIN_IN Vehicle Arrival,Happy Path – Security Officer confirms vehicle at gate,Gate IN / OUT > Gate IN Panel,Security Officer logged in at the correct plant location. MAIN_IN pass in APPROVED status exists for this location.,"1. Login as Security Officer (e.g. Security One – Colombo TATA)
+2. Navigate to Gate IN / OUT page
+3. Locate the MAIN_IN pass in Gate IN queue
+4. Verify vehicle details (number plate, chassis, colour)
+5. Slide the slider to confirm Gate IN","GP: MAIN_IN APPROVED | Vehicle: WP CAB-1234 | fromLocation: Colombo TATA - Altair Showroom","Pass status changes to COMPLETED. Pass removed from Gate IN queue. Initiator receives notification: ""Vehicle Arrived – Security Confirmed Gate IN"".",,Open,Critical,Security Officer must be at the same plant as the pass fromLocation.
+AS-TC-002,AS-TC-002-02,Security Gate IN – MAIN_IN Not Visible to Wrong Location Security,Role & Location Scoping,Gate IN / OUT > Gate IN Panel,"Security Officer logged in at a DIFFERENT plant (e.g. Kandy Branch). MAIN_IN pass exists for Colombo TATA.","1. Login as Security Two (Kandy Branch)
+2. Navigate to Gate IN / OUT page
+3. Check Gate IN queue","MAIN_IN pass fromLocation: Colombo TATA - Altair Showroom","MAIN_IN pass does NOT appear in Security Two's Gate IN queue. Queue scoped to Kandy Branch only.",,Open,High,
+AS-TC-002,AS-TC-002-03,Security Gate IN – Notification Sent to Initiator on Confirmation,Real-Time Notification,My Gate Passes / Notification Bell,MAIN_IN in APPROVED status. Initiator logged in.,"1. Security Officer confirms Gate IN for a MAIN_IN pass
+2. Switch to Initiator session
+3. Check notification bell
+4. Check My Gate Passes status","GP: MAIN_IN | Initiator: Initiator One","Notification appears in Initiator's bell: ""Vehicle Arrived – Security Confirmed Gate IN"". My Gate Passes shows pass as COMPLETED.",,Open,High,
+AS-TC-003,AS-TC-003-01,Create SUB_OUT – Vehicle Moving to Sub-Location,Happy Path – Vehicle sent from service plant to sub-location,Create Gate Pass > Service/Repair > Gate OUT > Sub Gate OUT,"Initiator logged in. Parent MAIN_IN gate pass exists and is COMPLETED. Vehicle is physically at the service plant.","1. Login as Initiator
+2. Navigate to Create Gate Pass > Service/Repair > Gate OUT
+3. Select Sub Gate OUT sub-type
+4. Enter or scan the parent MAIN_IN GP number
+5. Verify vehicle details auto-populated from parent pass
+6. Verify From Location auto-filled (vehicle's current location)
+7. Select To Location (destination sub-plant)
+8. Enter Departure Date and Time
+9. Add transport/carrier details
+10. Click Submit","Parent GP: MAIN_IN pass | From: Colombo TATA - Altair Showroom | To: Kandy Branch - Vehicle Park-1 | Departure: 2026-04-02 10:00","SUB_OUT gate pass created with status APPROVED. Uses same GP number as parent MAIN_IN. Source Security Officer (Colombo) receives notification to confirm Gate OUT.",,Open,Critical,SUB_OUT auto-approved. fromLocation must exactly match source Security Officer's defaultLocation for them to see it in Gate OUT queue.
+AS-TC-003,AS-TC-003-02,Create SUB_OUT – Parent GP Number Not Found,Field Validation – Invalid GP number entered,Create Gate Pass > Service/Repair > Gate OUT > Sub Gate OUT,Initiator logged in.,"1. Navigate to Create Gate Pass > Service/Repair > Gate OUT
+2. Select Sub Gate OUT
+3. Enter a GP number that does not exist (e.g. GP-9999)
+4. Click search/find","GP Number: GP-9999","Error shown: pass not found. Vehicle details do not auto-populate. Submit button remains disabled until a valid pass is found.",,Open,High,
+AS-TC-003,AS-TC-003-03,Create SUB_OUT – To Location Not Selected,Field Validation – Required field,Create Gate Pass > Service/Repair > Gate OUT > Sub Gate OUT,Initiator logged in. Valid parent MAIN_IN pass found.,"1. Find valid parent MAIN_IN pass
+2. Leave To Location blank
+3. Fill all other fields
+4. Click Submit","To Location: (blank)","Form validation error: ""Destination location is required"".",,Open,High,
+AS-TC-003,AS-TC-003-04,Create SUB_OUT – Verify GP Number Consistency,System Behaviour – SUB_OUT displays parent GP number,My Gate Passes > Service/Repair (expanded journey),SUB_OUT pass successfully created.,"1. Navigate to My Gate Passes > Service/Repair tab
+2. Find the parent MAIN_IN vehicle card
+3. Expand journey details
+4. View SUB_OUT step","Parent GP: e.g. GP-0214","SUB_OUT step in the journey timeline shows the parent GP number (GP-0214), NOT a separate sub-pass number. Journey progress updates: In Transit → Kandy Branch.",,Open,High,User requirement: all sub-passes share the parent GP number in the UI.
+AS-TC-004,AS-TC-004-01,Source Security Gate OUT – SUB_OUT Appears in Gate OUT Queue,Happy Path – Source Security sees SUB_OUT ready to release,Gate IN / OUT > Gate OUT Panel,"Source Security Officer (Colombo TATA) logged in. SUB_OUT pass in APPROVED or INITIATOR_OUT status exists with fromLocation = Colombo TATA.","1. Login as Security One (Colombo TATA - Altair Showroom)
+2. Navigate to Gate IN / OUT page
+3. Check Gate OUT queue
+4. Locate SUB_OUT pass","SUB_OUT pass | fromLocation: Colombo TATA - Altair Showroom | status: APPROVED","SUB_OUT pass appears in Source Security's Gate OUT queue. Card shows vehicle number, GP number (parent), route (From → To), pass sub-type: SUB OUT.",,Open,Critical,
+AS-TC-004,AS-TC-004-02,Source Security Gate OUT – Confirm Gate OUT by Sliding,Happy Path – Security slides to confirm departure,Gate IN / OUT > Gate OUT Panel,SUB_OUT in Source Security's Gate OUT queue.,"1. Login as Security One
+2. Locate SUB_OUT pass in Gate OUT queue
+3. Verify vehicle details on card
+4. Slide the slider fully to confirm Gate OUT","Vehicle: 2427 | GP: GP-0214 | Route: Colombo → Kandy","Status changes to GATE_OUT. Pass removed from Source Security's Gate OUT queue. Destination Security (Kandy) receives notification. Destination Initiator (Kandy) receives notification in Vehicle Arrivals.",,Open,Critical,
+AS-TC-004,AS-TC-004-03,Source Security Gate OUT – Wrong Location Security Cannot See SUB_OUT,Location Scoping,Gate IN / OUT > Gate OUT Panel,"Security Two (Kandy) logged in. SUB_OUT fromLocation = Colombo TATA.","1. Login as Security Two (Kandy Branch)
+2. Navigate to Gate IN / OUT
+3. Check Gate OUT queue","SUB_OUT fromLocation: Colombo TATA - Altair Showroom","SUB_OUT does NOT appear in Security Two's Gate OUT queue. Scoped correctly to source location only.",,Open,High,
+AS-TC-005,AS-TC-005-01,Destination Security Gate IN – SUB_OUT Appears After Source Confirms Gate OUT,Happy Path – Destination SO sees incoming vehicle,Gate IN / OUT > Gate IN Panel,"Source Security has confirmed Gate OUT (status = GATE_OUT). Destination Security (Kandy) logged in.","1. Source Security confirms Gate OUT for SUB_OUT
+2. Login as Security Two (Kandy Branch - Vehicle Park-1)
+3. Navigate to Gate IN / OUT page
+4. Check Gate IN queue (within 8 seconds of notification or manual refresh)","SUB_OUT status: GATE_OUT | toLocation: Kandy Branch - Vehicle Park-1","SUB_OUT appears in Destination Security's Gate IN queue. Card shows route (Colombo → Kandy), vehicle number, GP number (parent), sub-type: SUB OUT.",,Open,Critical,This is the core bug being fixed. Server now filters by toLocation to ensure correct scoping.
+AS-TC-005,AS-TC-005-02,Destination Security Gate IN – Confirm Vehicle Arrival by Sliding,Happy Path – Security slides to confirm arrival,Gate IN / OUT > Gate IN Panel,SUB_OUT in GATE_OUT status visible in Destination Security's Gate IN queue.,"1. Login as Security Two (Kandy Branch)
+2. Locate SUB_OUT pass in Gate IN queue
+3. Verify vehicle details
+4. Slide the slider to confirm Gate IN","Vehicle: 2427 | GP: GP-0214 | status: GATE_OUT","Status changes to COMPLETED. Pass removed from Gate IN queue. Source Initiator receives notification in My Gate Passes. Destination Initiator (Kandy) receive arrival notification. Vehicle Arrivals page for Kandy moves pass to Recently Confirmed.",,Open,Critical,
+AS-TC-005,AS-TC-005-03,Destination Initiator – Vehicle Arrivals Auto-Updates After Security Gate IN,Real-Time Notification,Vehicle Arrivals (receive page),"Destination Initiator (Initiator Two – Kandy) logged in and on Vehicle Arrivals page. Destination Security has just confirmed Gate IN.","1. Login as Initiator Two (Kandy Branch)
+2. Open Vehicle Arrivals page
+3. Wait up to 10 seconds (notification poll) OR click Refresh","SUB_OUT just confirmed as GATE_OUT by source SO","Vehicle card auto-moves from Pending Arrivals tab to Recently Confirmed tab. Badge shows ""Security Gate IN ✓"". No manual confirm button shown for AFTER_SALES SUB_OUT.",,Open,High,
+AS-TC-005,AS-TC-005-04,Source Initiator – My Gate Passes Status Updates After Destination Gate IN,Real-Time Notification,My Gate Passes > Service/Repair journey card,"Source Initiator (Initiator One – Colombo) logged in. Destination Security just confirmed Gate IN.","1. Login as Initiator One
+2. Navigate to My Gate Passes > Service/Repair tab
+3. Expand journey card for the relevant vehicle
+4. Wait up to 10 seconds (notification poll) OR click Refresh","SUB_OUT status changes to COMPLETED","Journey step for SUB_OUT shows status COMPLETED with label ""Security confirmed Gate IN at sub-location"". Current Location on the card updates to the sub-location (Kandy Branch - Vehicle Park-1).",,Open,High,
+AS-TC-005,AS-TC-005-05,Destination Security Gate IN – SUB_OUT Not Visible Until Source Confirms Gate OUT,Negative / Sequencing,Gate IN / OUT > Gate IN Panel,"Destination Security Two logged in. SUB_OUT status = APPROVED or INITIATOR_OUT (source SO has NOT yet confirmed Gate OUT).","1. Initiator creates SUB_OUT (status: APPROVED or INITIATOR_OUT)
+2. Login as Security Two (Kandy)
+3. Check Gate IN queue immediately","SUB_OUT status: APPROVED or INITIATOR_OUT","SUB_OUT does NOT appear in Destination Security's Gate IN queue. It only appears after status is GATE_OUT (source SO confirmed departure).",,Open,High,Prevents premature Gate IN confirmation before vehicle has physically left source.
+AS-TC-006,AS-TC-006-01,Create MAIN_OUT – Final Vehicle Departure from Service Centre,Happy Path – Vehicle leaving after service completion,Create Gate Pass > Service/Repair > Gate OUT > Main Gate OUT,"Initiator logged in. All SUB_OUT/SUB_IN cycles completed. Vehicle is back at service plant.","1. Login as Initiator / Service Advisor
+2. Navigate to Create Gate Pass > Service/Repair > Gate OUT
+3. Select Main Gate OUT sub-type
+4. Enter parent MAIN_IN GP number
+5. Verify vehicle details auto-filled
+6. Select Approver (if credit payment orders exist)
+7. Enter Departure Date / Time
+8. Add transport details
+9. Click Submit","Parent GP: MAIN_IN pass | Departure: 2026-04-02 14:00 | Payment: Mixed (Immediate + Credit)","MAIN_OUT created. Status routes to CASHIER_REVIEW. Cashier receives notification to review payment orders.",,Open,High,MAIN_OUT goes to CASHIER_REVIEW first (not APPROVED) so cashier can verify SAP payment orders.
+AS-TC-006,AS-TC-006-02,Create MAIN_OUT – Routes to CASHIER_REVIEW (Not Direct Approval),System Behaviour – Correct status routing,My Gate Passes / Cashier Review screen,MAIN_OUT just created.,"1. Create MAIN_OUT pass
+2. Check status in My Gate Passes
+3. Check Cashier Review page (login as Cashier)","MAIN_OUT pass | Payment: Immediate","Status is CASHIER_REVIEW (not APPROVED). Cashier sees the pass in their review queue.",,Open,High,
+AS-TC-007,AS-TC-007-01,Cashier Clears Immediate Payment – MAIN_OUT with No Credit Orders,Happy Path – Cashier clears cash/immediate payment only,Cashier Review screen,"Cashier logged in. MAIN_OUT in CASHIER_REVIEW status. Pass has only immediate payment orders (no credit).","1. Login as Cashier
+2. Navigate to Cashier Review
+3. Locate MAIN_OUT pass
+4. Verify SAP payment orders listed
+5. Confirm immediate payment cleared
+6. Submit clearance","MAIN_OUT | Payment Type: Immediate only | Orders all cleared","Status changes directly to APPROVED (no approver needed since no credit orders). Security Officer at fromLocation receives notification to confirm Gate OUT.",,Open,Critical,If no credit orders → Cashier clearance alone moves pass to APPROVED.
+AS-TC-007,AS-TC-007-02,Cashier Clears Immediate – Credit Orders Still Pending Approver,System Behaviour – Parallel approval flow,Cashier Review screen / Approver screen,"Cashier logged in. MAIN_OUT has mixed payment: immediate + credit orders.","1. Login as Cashier
+2. Clear immediate payment orders
+3. Note status remains in CASHIER_REVIEW
+4. Switch to Approver login
+5. Check Approver queue","MAIN_OUT | Payment: Immediate + Credit","After Cashier clears immediate: status stays in CASHIER_REVIEW. Notification sent to Approver to approve credit portion. Both must complete before status becomes APPROVED.",,Open,High,Parallel approval: Cashier + Approver must both complete for MAIN_OUT to reach APPROVED.
+AS-TC-008,AS-TC-008-01,Approver Reviews and Approves Credit Portion of MAIN_OUT,Happy Path – Approver approves credit orders,Approvals screen,"Approver logged in. MAIN_OUT in CASHIER_REVIEW status has credit orders pending.","1. Login as Approver
+2. Navigate to Pending Approvals
+3. Locate MAIN_OUT pass
+4. Review credit order details
+5. Click Approve credit","MAIN_OUT | Credit orders pending | Cashier has NOT yet cleared immediate","Credit portion marked as approved. If Cashier has also cleared immediate → status changes to APPROVED. If Cashier not done → remains in CASHIER_REVIEW.",,Open,High,
+AS-TC-008,AS-TC-008-02,Approver Rejects Credit Portion of MAIN_OUT,Rejection Flow,Approvals screen,Approver logged in. MAIN_OUT in CASHIER_REVIEW with credit orders.,"1. Login as Approver
+2. Find MAIN_OUT in pending approvals
+3. Click Reject
+4. Enter rejection reason
+5. Confirm rejection","Rejection reason: ""Credit limit exceeded""","MAIN_OUT status changes to REJECTED. Initiator receives notification with rejection reason.",,Open,Medium,
+AS-TC-009,AS-TC-009-01,Security Gate OUT – MAIN_OUT Appears After Full Approval,Happy Path – Security sees MAIN_OUT ready for Gate OUT,Gate IN / OUT > Gate OUT Panel,"Security Officer at service plant logged in. MAIN_OUT status is APPROVED (both Cashier + Approver completed).","1. Login as Security One (Colombo TATA)
+2. Navigate to Gate IN / OUT
+3. Check Gate OUT queue","MAIN_OUT status: APPROVED | fromLocation: Colombo TATA - Altair Showroom","MAIN_OUT appears in Security's Gate OUT queue. Card shows vehicle number, GP number, payment type confirmation, pass sub-type: MAIN OUT.",,Open,Critical,
+AS-TC-009,AS-TC-009-02,Security Gate OUT – Confirm MAIN_OUT Vehicle Departure,Happy Path – Final vehicle exit,Gate IN / OUT > Gate OUT Panel,MAIN_OUT in Security's Gate OUT queue.,"1. Login as Security Officer
+2. Locate MAIN_OUT in Gate OUT queue
+3. Verify vehicle details
+4. Slide to confirm Gate OUT","Vehicle details match MAIN_OUT pass","Status changes to COMPLETED. Pass removed from Gate OUT queue. RECIPIENT users receive notification. Initiator notified of final Gate OUT confirmation. Gate pass journey shown as complete.",,Open,Critical,MAIN_OUT COMPLETED = full After Sales cycle done. MAIN_IN remains open in journey view until MAIN_OUT COMPLETED.
+AS-TC-009,AS-TC-009-03,MAIN_IN Journey Open Until MAIN_OUT Completed,System Behaviour – Journey card lifecycle,My Gate Passes > Service/Repair,"MAIN_IN exists. Multiple sub-passes created and completed. MAIN_OUT just confirmed COMPLETED.","1. Navigate to My Gate Passes > Service/Repair
+2. Find the vehicle's journey card before MAIN_OUT
+3. Confirm MAIN_OUT
+4. Refresh My Gate Passes","Full journey: MAIN_IN → SUB_OUT → Security Gate IN → MAIN_OUT","Before MAIN_OUT: MAIN_IN card status still shows as active with sub-steps. After MAIN_OUT COMPLETED: journey card shows ""Journey Complete"". All steps shown as done in the timeline.",,Open,High,
+AS-TC-010,AS-TC-010-01,Real-Time Notification – Source Security Notified on SUB_OUT Creation,Notification Delivery,Notification Bell / Gate IN OUT page,SUB_OUT pass created by Initiator.,"1. Initiator creates SUB_OUT (fromLocation = Colombo TATA)
+2. Within 8 seconds check Security One's notification bell and Gate OUT queue","SUB_OUT newly created | fromLocation: Colombo TATA","Security One receives notification: ""Sub OUT Ready – Confirm Gate Release"". Pass appears in Gate OUT queue.",,Open,High,
+AS-TC-010,AS-TC-010-02,Real-Time Notification – Destination Security + Initiator Notified After Gate OUT,Notification Delivery – Simultaneous,Notification Bell / Gate IN queue / Vehicle Arrivals,"Source Security confirms Gate OUT. Destination Security Two and Initiator Two are logged in (Kandy Branch).","1. Source Security confirms Gate OUT on SUB_OUT
+2. Within 8 seconds check Security Two's Gate IN queue
+3. Check Initiator Two's Vehicle Arrivals page
+4. Check both notification bells","Gate OUT confirmed | toLocation: Kandy Branch - Vehicle Park-1","Both Security Two and Initiator Two receive notifications simultaneously (within 8–10 second poll cycle). Pass appears in Security Two's Gate IN queue. Pass appears in Initiator Two's Vehicle Arrivals Pending tab.",,Open,Critical,Core user requirement: ""same time it comes to both Initiator Two and Security Two"".
+AS-TC-010,AS-TC-010-03,Real-Time Notification – Initiator Auto-Refresh After Security Gate IN,Notification Delivery – Vehicle Arrivals page,Vehicle Arrivals (receive page),"Destination Initiator Two logged in on Vehicle Arrivals page. Destination Security confirms Gate IN.","1. Initiator Two on Vehicle Arrivals page (do not manually refresh)
+2. Destination Security confirms Gate IN
+3. Wait up to 10 seconds","Notification type: GATE_PASS_RECEIVED","Vehicle Arrivals page auto-refreshes without manual action. Pass moves from Pending Arrivals to Recently Confirmed tab. Badge shows ""Security Gate IN ✓"".",,Open,High,10-second notification poll drives auto-refresh.
+AS-TC-011,AS-TC-011-01,GP Number – SUB_OUT Displayed with Parent MAIN_IN Number on Security Gate Page,UI Consistency – GP number display,Gate IN / OUT > Gate OUT/IN card,SUB_OUT pass exists.,"1. Login as Source Security One
+2. Navigate to Gate OUT queue
+3. Find SUB_OUT card
+4. Read GP number on badge","SUB_OUT | parentPass.gatePassNumber: GP-0214 | own gatePassNumber: GP-0215","Gate card badge displays parent GP number (GP-0214), not the SUB_OUT's own internal GP number.",,Open,High,
+AS-TC-011,AS-TC-011-02,GP Number – Journey Timeline in My Gate Passes Shows Single GP Number,UI Consistency – Journey card,My Gate Passes > Service/Repair > Expanded journey,Multiple sub-passes created under one MAIN_IN.,"1. Login as Initiator
+2. Navigate to My Gate Passes > Service/Repair
+3. Expand journey card
+4. View each step in the timeline","MAIN_IN: GP-0214 | SUB_OUT, SUB_IN, MAIN_OUT all created","All steps in journey timeline show the parent GP number (GP-0214). No different GP numbers visible per sub-pass step.",,Open,High,
+AS-TC-012,AS-TC-012-01,Role Restriction – Non-Initiator Cannot Create After Sales Pass,Access Control,Create Gate Pass,Logged in as Security Officer or Approver.,"1. Login as Security Officer
+2. Navigate to Create Gate Pass
+3. Attempt to create an After Sales pass","User role: SECURITY_OFFICER","System denies creation. Either the Create Gate Pass page is inaccessible from Security Officer's navigation, or submission returns a 403 error.",,Open,High,
+AS-TC-012,AS-TC-012-02,Role Restriction – Initiator Cannot Confirm Security Gate IN/OUT for SUB_OUT,Access Control,My Gate Passes,Initiator logged in. SUB_OUT in GATE_OUT status.,"1. Login as Initiator
+2. Navigate to My Gate Passes > Service/Repair
+3. Locate SUB_OUT in journey card or list
+4. Check if confirm/gate-in button is visible for AFTER_SALES SUB_OUT","SUB_OUT status: GATE_OUT | passSubType: SUB_OUT","No ""Confirm"" or ""Gate IN"" button shown for AFTER_SALES SUB_OUT passes. Message ""Awaiting Security Gate IN"" displayed instead.",,Open,High,User requirement: ""No need this confirm button"" for SUB_OUT.
+AS-TC-012,AS-TC-012-03,Role Restriction – Cashier Cannot Access Gate IN / OUT Operations,Access Control,Gate IN / OUT page,Cashier logged in.,"1. Login as Cashier
+2. Attempt to navigate to Gate IN / OUT page","User role: CASHIER","Gate IN / OUT page is not in Cashier's navigation. Direct URL access redirects to appropriate dashboard or shows access denied.",,Open,Medium,
+AS-TC-013,AS-TC-013-01,Security Location Scoping – Security Officer Sees Only Their Plant's Passes,Security Data Isolation,Gate IN / OUT,"Both Security One (Colombo) and Security Two (Kandy) logged in separately. Multiple passes exist for both locations.","1. Login as Security One (Colombo TATA - Altair Showroom)
+2. Check Gate IN and Gate OUT queues
+3. Logout
+4. Login as Security Two (Kandy Branch - Vehicle Park-1)
+5. Check Gate IN and Gate OUT queues","Passes at Colombo: 3 | Passes at Kandy: 2","Security One sees only Colombo passes. Security Two sees only Kandy passes. No cross-location data leakage.",,Open,Critical,Server-side filtering by fromLocation (Gate OUT) and toLocation (Gate IN).
+AS-TC-013,AS-TC-013-02,Security Location Scoping – Null defaultLocation Falls Back to Show All,Edge Case – Missing location config,Gate IN / OUT,Security Officer user created WITHOUT a defaultLocation assigned.,"1. Login as a Security Officer with no defaultLocation set
+2. Navigate to Gate IN / OUT","defaultLocation: NULL","All passes shown (no location filter applied). Header shows generic label instead of specific gate name.",,Open,Medium,Admin must ensure defaultLocation is set for all Security Officers.
+AS-TC-014,AS-TC-014-01,Session Stale – Re-login Refreshes Location and Role After Data Changes,Session Management,Login page,"User was logged in before a DB re-seed or role/location change. Sees wrong data or 0 records.","1. Admin updates user's defaultLocation in DB
+2. User refreshes page – still sees old data
+3. User clicks Sign Out
+4. User logs back in","defaultLocation changed from Colombo to Kandy","After re-login JWT is refreshed. New defaultLocation used. User sees correct location-scoped data.",,Open,High,JWT is set at sign-in time only. Location changes require re-login to take effect.
+AS-TC-015,AS-TC-015-01,Print Gate Pass – After Sales MAIN_IN,Functional – Print/PDF generation,Gate Pass Detail page,MAIN_IN pass in APPROVED or COMPLETED status.,"1. Navigate to My Gate Passes
+2. Find MAIN_IN pass
+3. Click Print icon
+4. Verify print preview / PDF","MAIN_IN pass in APPROVED status","Print preview opens showing correct GP number (parent), vehicle details, locations, service job types, status, printed timestamp.",,Open,Medium,
+AS-TC-015,AS-TC-015-02,Print Gate Pass – Unavailable for PENDING_APPROVAL Status,Functional – Print button disabled state,My Gate Passes / Gate Pass Detail,Pass in PENDING_APPROVAL status.,"1. Find a pass in PENDING_APPROVAL status
+2. Hover over / click Print icon","Status: PENDING_APPROVAL","Print icon is disabled (greyed out). Tooltip or indicator shows ""Available after approval"".",,Open,Low,Print only enabled for APPROVED / GATE_OUT / COMPLETED statuses.

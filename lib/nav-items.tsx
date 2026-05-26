@@ -2,6 +2,7 @@ export type NavItem = {
   label: string;
   href: string;
   icon: React.ReactNode;
+  showDraftBadge?: boolean; // shows live DRAFT count badge in sidebar
 };
 
 const DashboardIcon = () => (
@@ -44,11 +45,26 @@ const XCircleIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
   </svg>
 );
+const PendingFormsIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+  </svg>
+);
 const VehicleReportIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10z" />
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 8h4l3 3v5h-7V8z" />
+  </svg>
+);
+const OrdersReportIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+  </svg>
+);
+const ArrivalsIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" />
   </svg>
 );
 
@@ -61,6 +77,7 @@ const UsersIcon = () => (
 export const navItemsByRole: Record<string, NavItem[]> = {
   ADMIN: [
     { label: "User Management", href: "/admin", icon: <UsersIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   AREA_SALES_OFFICER: [
     { label: "Dashboard", href: "/aso", icon: <DashboardIcon /> },
@@ -73,17 +90,20 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   CASHIER: [
     { label: "Dashboard", href: "/cashier", icon: <DashboardIcon /> },
     { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
+    { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   INITIATOR: [
     { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
     { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
+    { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
     { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
     { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon /> },
-    { label: "Sent to Recipient", href: "/gate-pass?status=GATE_OUT", icon: <BoxIcon /> },
+    { label: "Vehicle Arrivals", href: "/gate-pass/receive", icon: <ArrivalsIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
@@ -93,10 +113,21 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
+    { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   RECIPIENT: [
     { label: "Dashboard", href: "/recipient", icon: <DashboardIcon /> },
     { label: "Awaiting Acknowledgement", href: "/gate-pass/receive", icon: <BoxIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+  ],
+  SECURITY_OFFICER: [
+    { label: "Gate IN / OUT", href: "/gate-pass/security-gate-out", icon: <BoxIcon /> },
+    { label: "Create Pass",  href: "/gate-pass/security-create",    icon: <ListIcon /> },
+  ],
+  SERVICE_ADVISOR: [
+    { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
+    { label: "Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "Create Pass", href: "/gate-pass/create", icon: <BoxIcon /> },
+    { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
   ],
 };

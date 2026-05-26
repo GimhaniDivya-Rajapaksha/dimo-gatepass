@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 
@@ -8,12 +9,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
+  const isSO = session.user.role === "SECURITY_OFFICER";
+
   return (
-    <div className="flex min-h-screen">
-      <Sidebar user={session.user} role={session.user.role} />
-      <div className="flex-1 ml-64 flex flex-col min-h-screen">
+    <div className="flex min-h-screen overflow-x-hidden">
+      {!isSO && (
+        <Suspense fallback={<div className="w-64 flex-shrink-0" style={{ background: "#0d1b3e" }} />}>
+          <Sidebar user={session.user} role={session.user.role} />
+        </Suspense>
+      )}
+      <div className={`flex-1 min-w-0 flex flex-col h-screen overflow-hidden ${isSO ? "" : "ml-64"}`}>
         <DashboardHeader user={session.user} />
-        <main className="flex-1 p-6 main-bg">
+        <main className="flex-1 p-6 main-bg overflow-y-auto overflow-x-hidden flex flex-col" style={{ minHeight: 0 }}>
           {children}
         </main>
       </div>

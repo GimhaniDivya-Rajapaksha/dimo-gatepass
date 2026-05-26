@@ -14,17 +14,23 @@ interface SidebarProps {
 }
 
 const roleLabels: Record<string, string> = {
-  INITIATOR: "Gate Pass Initiator",
-  APPROVER:  "Approver",
-  RECIPIENT: "Recipient",
-  ADMIN:     "Administrator",
+  INITIATOR:        "Gate Pass Initiator",
+  APPROVER:         "Approver",
+  RECIPIENT:        "Recipient",
+  ADMIN:            "Administrator",
+  CASHIER:          "Cashier",
+  AREA_SALES_OFFICER: "Area Sales Officer",
+  SECURITY_OFFICER: "Security Officer",
 };
 
 const roleColors: Record<string, string> = {
-  INITIATOR: "#3b82f6",
-  APPROVER:  "#f59e0b",
-  RECIPIENT: "#10b981",
-  ADMIN:     "#8b5cf6",
+  INITIATOR:        "#3b82f6",
+  APPROVER:         "#f59e0b",
+  RECIPIENT:        "#10b981",
+  ADMIN:            "#8b5cf6",
+  CASHIER:          "#f59e0b",
+  AREA_SALES_OFFICER: "#06b6d4",
+  SECURITY_OFFICER: "#1d4ed8",
 };
 
 export default function Sidebar({ user, role }: SidebarProps) {
@@ -32,8 +38,24 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const searchParams = useSearchParams();
   const { theme }  = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (role !== "INITIATOR" && role !== "SERVICE_ADVISOR") return;
+    fetch("/api/gate-pass?status=DRAFT&limit=1")
+      .then(r => r.json())
+      .then(d => setDraftCount(d.total ?? 0))
+      .catch(() => {});
+    const id = setInterval(() => {
+      fetch("/api/gate-pass?status=DRAFT&limit=1")
+        .then(r => r.json())
+        .then(d => setDraftCount(d.total ?? 0))
+        .catch(() => {});
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [role]);
 
   const isDark   = mounted && theme === "dark";
   const navItems = navItemsByRole[role ?? ""] ?? navItemsByRole["INITIATOR"];
@@ -127,8 +149,14 @@ export default function Sidebar({ user, role }: SidebarProps) {
                   style={{ background: isActive ? c.iconActiveBg : c.iconBg, color: isActive ? lime : c.text, boxShadow: isActive ? c.iconGlow : "none" }}>
                   {item.icon}
                 </span>
-                <span className="relative z-10 truncate">{item.label}</span>
-                {isActive && (
+                <span className="relative z-10 truncate flex-1">{item.label}</span>
+                {item.showDraftBadge && draftCount > 0 && (
+                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
+                    style={{ background: "#f59e0b", color: "#1c1400" }}>
+                    {draftCount}
+                  </span>
+                )}
+                {isActive && !item.showDraftBadge && (
                   <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>
@@ -162,6 +190,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
             title="Sign out"
             className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:bg-red-500/15 hover:text-red-500"
             style={{ background: c.btnBg, color: c.btnColor }}
+            suppressHydrationWarning
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

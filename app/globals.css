@@ -3,6 +3,27 @@
 /* Class-based dark mode for next-themes */
 @custom-variant dark (&:is(.dark *));
 
+/* ── Global box-sizing & overflow reset ───────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+img, video, iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Flex children default to min-width:0 so text/content never
+   forces the parent wider than its container */
+.flex-1, [class*="flex-"] {
+  min-width: 0;
+}
+
 :root {
   --bg: #f0f4f8;
   --surface: #ffffff;
@@ -45,6 +66,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-geist), system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
 }
 
 /* DIMO brand typography */

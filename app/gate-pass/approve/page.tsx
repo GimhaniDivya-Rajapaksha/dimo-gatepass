@@ -9,6 +9,9 @@ type GatePass = {
   status: string; vehicle: string; chassis: string | null;
   departureDate: string | null; requestedBy: string | null;
   toLocation: string | null; fromLocation: string | null;
+  paymentType: string | null;
+  hasCredit: boolean | null; creditApproved: boolean | null;
+  hasImmediate: boolean | null; cashierCleared: boolean | null;
   createdBy: { name: string }; createdAt: string;
   parentPass: ParentPass | null;
 };
@@ -82,6 +85,7 @@ export default function ApproverListPage() {
   useEffect(() => { fetchPasses(); void fetchCounts(); }, [fetchPasses, fetchCounts]);
   useEffect(() => { setPage(1); }, [activeType, search]);
 
+
   const handleView = (id: string) => {
     fetch(`/api/notifications/read`, { method: "POST" });
     router.push(`/gate-pass/${id}`);
@@ -118,6 +122,7 @@ export default function ApproverListPage() {
                     ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
                     : { background: "var(--surface2)", color: "var(--text-muted)" }
                   }
+                  suppressHydrationWarning
                 >
                   {label}
                   {cnt > 0 && (
@@ -143,6 +148,7 @@ export default function ApproverListPage() {
               placeholder="Search passes..."
               className="w-full border rounded-xl px-4 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              suppressHydrationWarning
             />
             <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -217,9 +223,15 @@ export default function ApproverListPage() {
                                 {stc.label}
                               </span>
                             )}
-                            <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
-                              {sc.label}
-                            </span>
+                            {p.status === "CASHIER_REVIEW" && p.hasCredit && !p.creditApproved ? (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                                Credit Pending
+                              </span>
+                            ) : (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
+                                {sc.label}
+                              </span>
+                            )}
                           </div>
 
                           {/* Vehicle */}
@@ -352,7 +364,7 @@ export default function ApproverListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
-                  {["Action", "Gate Pass No", "Vehicle / Chassis", activeType === "LOCATION_TRANSFER" ? "To Location" : "Vehicle Details", "Requested By", "Departure Date", "Status"].map((h) => (
+                  {["Action", "Gate Pass No", "Vehicle / Chassis", activeType === "LOCATION_TRANSFER" ? "To Location" : "Payment Type", "Requested By", "Departure Date", "Status"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
@@ -405,7 +417,7 @@ export default function ApproverListPage() {
                           {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
                         </td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>
-                          {activeType === "LOCATION_TRANSFER" ? (p.toLocation || "-") : (p.vehicle || "-")}
+                          {activeType === "LOCATION_TRANSFER" ? (p.toLocation || "-") : (p.paymentType || "-")}
                         </td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text)" }}>{p.createdBy.name}</td>
                         <td className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>{p.departureDate || "-"}</td>

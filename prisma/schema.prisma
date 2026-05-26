@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
@@ -14,6 +15,8 @@ enum Role {
   ADMIN
   AREA_SALES_OFFICER
   CASHIER
+  SECURITY_OFFICER
+  SERVICE_ADVISOR
 }
 
 enum PassType {
@@ -26,10 +29,13 @@ enum GatePassStatus {
   PENDING_APPROVAL
   APPROVED
   REJECTED
+  INITIATOR_OUT
+  INITIATOR_IN
   GATE_OUT
   COMPLETED
   CANCELLED
   CASHIER_REVIEW
+  DRAFT
 }
 
 model User {
@@ -42,6 +48,7 @@ model User {
   approver         User?          @relation("InitiatorApprover", fields: [approverId], references: [id])
   initiators       User[]         @relation("InitiatorApprover")
   defaultLocation  String?
+  brand            String?
   resetToken       String?        @unique
   resetTokenExpiry DateTime?
   createdAt        DateTime       @default(now())
@@ -92,8 +99,15 @@ model GatePass {
   resubmitNote    String? // initiator's correction note when resubmitting
 
   passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
-  serviceJobNo   String?   // After Sales service job/work order number
-  parentPassId   String?
+  paymentType    String?   // CASH | CREDIT | MIXED (used for MAIN_OUT)
+  cashierCleared  Boolean  @default(false)
+  creditApproved  Boolean  @default(false)
+  hasCredit       Boolean  @default(false)
+  hasImmediate    Boolean  @default(false)
+  serviceJobNo      String?   // After Sales service job/work order number
+  securityCreated   Boolean  @default(false) // created by Security Officer with vehicle only
+  gateDirection     String?  // "IN" | "OUT" — direction selected by security at creation
+  parentPassId      String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
   subPasses      GatePass[] @relation("SubPasses")
   fromLocation   String?

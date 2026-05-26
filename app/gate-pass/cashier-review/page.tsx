@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,6 +19,9 @@ type GatePass = {
   fromLocation: string | null;
   departureDate: string | null;
   serviceJobNo: string | null;
+  paymentType: string | null;
+  hasImmediate?: boolean;
+  cashierCleared?: boolean;
   createdBy: { name: string; email: string };
   createdAt: string;
   parentPass: { id: string; gatePassNumber: string; vehicle: string; serviceJobNo: string | null } | null;
@@ -40,6 +43,50 @@ function fmtDate(d: string | null) {
   catch { return d; }
 }
 
+// ── Slide to Confirm ──────────────────────────────────────────────────────────
+
+function SlideToConfirm({ onConfirm, disabled }: { onConfirm: () => void; disabled?: boolean }) {
+  const [pos, setPos] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startXRef = useRef(0);
+  const TRACK = 300;
+  const HANDLE = 56;
+  const MAX = TRACK - HANDLE;
+
+  function start(x: number) { if (disabled) return; setDragging(true); startXRef.current = x - pos; }
+  function move(x: number) {
+    if (!dragging) return;
+    const p = Math.max(0, Math.min(MAX, x - startXRef.current));
+    setPos(p);
+    if (p >= MAX - 2) { setDragging(false); setPos(0); onConfirm(); }
+  }
+  function end() { if (dragging) { setDragging(false); setPos(0); } }
+
+  return (
+    <div className="relative rounded-full select-none overflow-hidden"
+      style={{ width: TRACK, height: 52, background: "#d1fae5", border: "2px solid #6ee7b7", opacity: disabled ? 0.5 : 1 }}
+      onMouseMove={(e) => move(e.clientX)} onMouseUp={end} onMouseLeave={end}
+      onTouchMove={(e) => move(e.touches[0].clientX)} onTouchEnd={end}
+    >
+      {/* Fill */}
+      <div className="absolute inset-0 rounded-full" style={{ width: pos + HANDLE, background: "#10b981", opacity: 0.35 }} />
+      {/* Label */}
+      <div className="absolute inset-0 flex items-center justify-center text-sm font-bold pointer-events-none" style={{ color: "#065f46", paddingLeft: HANDLE + 4 }}>
+        → Slide to Confirm Payment Cleared
+      </div>
+      {/* Handle */}
+      <div className="absolute top-1 rounded-full flex items-center justify-center shadow-md cursor-grab active:cursor-grabbing"
+        style={{ left: pos + 4, width: HANDLE - 8, height: 44, background: "linear-gradient(135deg,#059669,#10b981)", transition: dragging ? "none" : "left 0.15s" }}
+        onMouseDown={(e) => start(e.clientX)} onTouchStart={(e) => start(e.touches[0].clientX)}
+      >
+        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 // ── Order Assignment Modal ────────────────────────────────────────────────────
 
 function OrderModal({
@@ -49,14 +96,16 @@ function OrderModal({
 }: {
   pass: GatePass;
   onClose: () => void;
-  onProceed: (result: "APPROVED" | "PENDING_APPROVAL") => void;
+  onProceed: (result: { status: string; creditPending?: boolean }) => void;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
+  const isCustomerDelivery = pass.passType === "CUSTOMER_DELIVERY";
 
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
 
@@ -71,8 +120,16 @@ function OrderModal({
   // Selected checkboxes on the right (assigned) side
   const [selectedRight, setSelectedRight] = useState<Set<string>>(new Set());
 
-  const available = orders.filter((o) => !o.isAssigned);
-  const assigned   = orders.filter((o) => o.isAssigned);
+  // Cashier only handles immediate-payment orders; credit orders go to Approver separately
+  const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction", ""];
+  const immediateOrders = orders.filter((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()));
+  const creditOrders    = orders.filter((o) => {
+    const t = (o.payTerm || "").toLowerCase().trim();
+    return t !== "" && !immediateTerms.includes(t);
+  });
+
+  const available = immediateOrders.filter((o) => !o.isAssigned);
+  const assigned   = immediateOrders.filter((o) => o.isAssigned);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -175,6 +232,7 @@ function OrderModal({
   }
 
   async function handleDeleteOrder(id: string) {
+    if (!window.confirm("Remove this order from the payment review list?")) return;
     await fetch(`/api/service-orders?id=${id}`, { method: "DELETE" });
     await fetchOrders();
   }
@@ -213,14 +271,21 @@ function OrderModal({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/service-orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "proceed", gatePassId: pass.id }),
-      });
+      const res = isCustomerDelivery
+        ? await fetch(`/api/gate-pass/${pass.id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "cashier_clear_cd" }),
+          })
+        : await fetch("/api/service-orders", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "proceed", gatePassId: pass.id }),
+          });
       const d = await res.json();
       if (!res.ok) { setError(d.error ?? "Failed to proceed"); return; }
-      onProceed(d.status as "APPROVED" | "PENDING_APPROVAL");
+      setConfirmProceed(false);
+      onProceed({ status: d.status, creditPending: d.creditPending });
     } finally {
       setSaving(false);
     }
@@ -230,7 +295,7 @@ function OrderModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.5)" }}>
       <motion.div
-        className="w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col"
+        className="relative w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col"
         style={{ background: "var(--surface)", maxHeight: "90vh" }}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -242,7 +307,7 @@ function OrderModal({
           style={{ borderColor: "var(--border)" }}>
           <div>
             <h2 className="text-base font-bold" style={{ color: "var(--text)" }}>
-              Select{" "}
+              {isCustomerDelivery ? "Review" : "Select"}{" "}
               <span className="font-mono" style={{ color: "var(--accent)" }}>{jobNo}</span>
               {" "}Orders
             </h2>
@@ -285,9 +350,9 @@ function OrderModal({
         <div className="px-6 py-3 border-b flex-shrink-0 flex items-center gap-3"
           style={{ borderColor: "var(--border)", background: "#f8fafc" }}>
           {[
-            { n: "1", text: "Click Sync SAP to load orders", done: orders.length > 0 },
-            { n: "2", text: "Move all paid orders → Fully Paid", done: orders.length > 0 && available.length === 0 },
-            { n: "3", text: orders.length === 0 ? "No orders found? Send to Approver" : available.length === 0 ? "Done & Close — vehicle cleared" : "Partial? Proceed → Approver reviews", done: false },
+            { n: "1", text: "Immediate payment orders auto-loaded from SAP", done: immediateOrders.length > 0 },
+            { n: "2", text: "Mark all immediate orders as Fully Paid", done: immediateOrders.length > 0 && available.length === 0 },
+            { n: "3", text: available.length === 0 && immediateOrders.length > 0 ? `${isCustomerDelivery ? "Proceed" : "Slide to confirm"} — your part is done` : "Credit orders are handled by Approver in parallel", done: false },
           ].map((step, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs">
               <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
@@ -308,6 +373,19 @@ function OrderModal({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" : "M5 13l4 4L19 7"} />
             </svg>
             {sapSyncMsg}
+          </div>
+        )}
+
+        {/* Credit orders info banner */}
+        {creditOrders.length > 0 && (
+          <div className="px-6 py-2.5 flex items-center gap-2 text-xs flex-shrink-0"
+            style={{ background: "#eff6ff", borderBottom: "1px solid #bfdbfe" }}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            <span style={{ color: "#1d4ed8" }}>
+              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are being reviewed by the <strong>Approver in the same location</strong> — not your responsibility.
+            </span>
           </div>
         )}
 
@@ -434,46 +512,59 @@ function OrderModal({
           style={{ borderColor: "var(--border)" }}>
           <div className="flex-1">
             {error && <p className="text-sm font-medium" style={{ color: "#ef4444" }}>{error}</p>}
-            {orders.length > 0 && (
+            {immediateOrders.length > 0 && (
               <div className="flex items-center gap-3 text-xs" style={{ color: "var(--text-muted)" }}>
                 <span>
-                  <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> fully paid
+                  <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> immediate paid
                 </span>
                 <span>·</span>
                 <span>
                   <span className="font-semibold" style={{ color: available.length > 0 ? "#c2410c" : "var(--text-muted)" }}>
                     {available.length}
-                  </span> pending payment
+                  </span> unpaid
                 </span>
-                {available.length === 0 && assigned.length > 0 && (
+                {available.length === 0 && (
                   <span className="px-2 py-0.5 rounded-full font-semibold"
                     style={{ background: "#f0fdf4", color: "#15803d" }}>
-                    All paid — ready to complete ✓
-                  </span>
-                )}
-                {available.length > 0 && assigned.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: "#fff7ed", color: "#c2410c" }}>
-                    Partial payment — will go to Approver
+                    All immediate orders cleared ✓
                   </span>
                 )}
               </div>
             )}
           </div>
           {(() => {
-            const allPaid = orders.length > 0 && available.length === 0;
-            const partial = orders.length > 0 && available.length > 0 && assigned.length > 0;
-            const noOrders = orders.length === 0;
-            const bg = noOrders ? "linear-gradient(135deg,#d97706,#b45309)" : allPaid ? "linear-gradient(135deg,#059669,#10b981)" : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "No Orders — Send to Approver"
-              : allPaid ? "Done & Close — Release Vehicle"
-              : partial ? "Send to Approver (partial payment)"
+            // allPaid: all IMMEDIATE orders cleared (credit orders are approver's job)
+            const allPaid = immediateOrders.length > 0 && available.length === 0;
+            const partial = immediateOrders.length > 0 && available.length > 0 && assigned.length > 0;
+            const noOrders = immediateOrders.length === 0;
+
+            // For all-paid case: show Slide to Confirm instead of a regular button
+            if (allPaid && !isCustomerDelivery) {
+              return saving ? (
+                <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                  Processing…
+                </div>
+              ) : (
+                <SlideToConfirm onConfirm={handleProceed} disabled={saving} />
+              );
+            }
+
+            const bg = allPaid || isCustomerDelivery
+              ? "linear-gradient(135deg,#059669,#10b981)"
+              : "linear-gradient(135deg,#d97706,#b45309)";
+            const label = noOrders ? "No Immediate Orders — Proceed"
+              : partial ? "Some Unpaid — Proceed Anyway"
               : "Proceed";
             return (
               <button
-                onClick={handleProceed}
+                onClick={() => setConfirmProceed(true)}
                 disabled={saving}
-                title={noOrders ? "No SAP orders found — escalate to Approver" : allPaid ? "All orders paid — release vehicle" : "Some unpaid — needs Approver approval"}
+                title={noOrders ? "No immediate orders — proceed with cashier confirmation" : "Confirm and proceed"}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
                 style={{ background: bg, flexShrink: 0 }}
               >
@@ -487,7 +578,6 @@ function OrderModal({
                   </>
                 ) : (
                   <>
-                    {allPaid && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
                     {partial && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
                     {label}
                   </>
@@ -496,6 +586,51 @@ function OrderModal({
             );
           })()}
         </div>
+
+        {confirmProceed && (
+          <div className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: "rgba(15, 23, 42, 0.45)" }}>
+            <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#eff6ff", color: "#2563eb" }}>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold" style={{ color: "var(--text)" }}>
+                    Confirm Proceed
+                  </h3>
+                  <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                    {isCustomerDelivery
+                      ? "Confirm that payment is cleared and this customer delivery can move to security gate out."
+                      : "Confirm the cashier review is complete for this service pass. Remaining credit items, if any, will stay with the approver."}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setConfirmProceed(false)}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: "var(--surface2)", color: "var(--text-muted)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleProceed}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                >
+                  {saving ? "Processing..." : "Yes, Proceed"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </motion.div>
     </div>
   );
@@ -557,19 +692,28 @@ export default function CashierReviewPage() {
   const router = useRouter();
 
   const [passes, setPasses] = useState<GatePass[]>([]);
+  const [cdPasses, setCdPasses] = useState<GatePass[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "success" | "info" } | null>(null);
+  const [activeTab, setActiveTab] = useState<"AFTER_SALES" | "CUSTOMER_DELIVERY">("AFTER_SALES");
 
   // All hooks must be declared before any conditional returns
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50");
-      const d = await res.json();
-      setPasses(d.passes ?? []);
-      setTotal(d.total ?? 0);
+      const [asRes, cdRes] = await Promise.all([
+        fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50&cashierPending=true"),
+        fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=CUSTOMER_DELIVERY&limit=50"),
+      ]);
+      const asData = await asRes.json();
+      const cdData = await cdRes.json();
+      const asPasses: GatePass[] = asData.passes ?? [];
+      const cdFiltered: GatePass[] = (cdData.passes ?? []).filter((p: GatePass) => p.hasImmediate && !p.cashierCleared);
+      setPasses(asPasses);
+      setCdPasses(cdFiltered);
+      setTotal((asData.total ?? 0) + cdFiltered.length);
     } finally {
       setLoading(false);
     }
@@ -592,18 +736,23 @@ export default function CashierReviewPage() {
     setTimeout(() => setToastMsg(null), 3500);
   }
 
-  function handleProceedResult(result: "APPROVED" | "PENDING_APPROVAL") {
+  function handleProceedResult(result: { status: string; creditPending?: boolean }) {
     setModalPass(null);
-    if (result === "APPROVED") {
-      showToast("All orders paid — pass approved. Initiator can now Mark as Gate Out.", "success");
+    if (result.status === "APPROVED") {
+      showToast("All checks complete — Security Officer notified for Gate Release.", "success");
+    } else if (result.creditPending) {
+      showToast("Immediate orders cleared — waiting for credit approval.", "info");
     } else {
-      showToast("Partial payment — sent to Approver for review.", "info");
+      showToast("Payment cleared — awaiting further processing.", "info");
     }
     void fetchPasses();
   }
 
+  const asCount = passes.length;
+  const cdCount = cdPasses.length;
+
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col gap-0">
       {/* Toast */}
       <AnimatePresence>
         {toastMsg && (
@@ -614,9 +763,7 @@ export default function CashierReviewPage() {
               color:      toastMsg.type === "success" ? "#15803d" : "#1d4ed8",
               border: `1px solid ${toastMsg.type === "success" ? "#bbf7d0" : "#bfdbfe"}`,
             }}
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 40 }}
+            initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }}
           >
             <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {toastMsg.type === "success"
@@ -630,18 +777,20 @@ export default function CashierReviewPage() {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Order Review</h1>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Payment Review</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
-            Review service orders and mark jobs as complete or escalate to approver
+            Clear payments and confirm gate release readiness
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="px-3 py-1.5 rounded-xl text-sm font-semibold"
-            style={{ background: "#fef3c7", color: "#b45309" }}>
-            {total} pending review
-          </div>
+          {total > 0 && (
+            <div className="px-3 py-1.5 rounded-xl text-sm font-semibold"
+              style={{ background: "#fef3c7", color: "#b45309" }}>
+              {total} pending
+            </div>
+          )}
           <button onClick={() => void fetchPasses()}
             className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-80 transition-opacity"
             style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
@@ -652,131 +801,182 @@ export default function CashierReviewPage() {
         </div>
       </div>
 
-      {/* Instructions banner */}
-      <div className="rounded-2xl border px-5 py-3 mb-4 flex items-start gap-3 flex-shrink-0"
-        style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
-        <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <div className="text-sm" style={{ color: "#1d4ed8" }}>
-          <span className="font-semibold">How it works: </span>
-          Open a pass → add the service orders → move fully-paid orders to <strong>Assigned</strong> →
-          click <strong>Proceed</strong>. If all are assigned → job is <strong>Completed</strong>.
-          If some remain → sent to <strong>Approver</strong> for partial payment approval.
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4">
+        {([
+          { key: "AFTER_SALES",       label: "Service / Repair",     count: asCount, icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" },
+          { key: "CUSTOMER_DELIVERY", label: "Customer Delivery",    count: cdCount, icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
+        ] as const).map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              style={active
+                ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }
+                : { background: "var(--surface2)", color: "var(--text-muted)", border: "1px solid var(--border)" }
+              }
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
+              </svg>
+              {tab.label}
+              {tab.count > 0 && (
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold"
+                  style={active
+                    ? { background: "rgba(255,255,255,0.25)", color: "#fff" }
+                    : { background: "#ef4444", color: "#fff" }
+                  }
+                >
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Scrollable list */}
-      <div style={{ flex: "1 1 0", overflowY: "auto", minHeight: 0 }}>
+      <div>
         {loading ? (
-          <div className="flex items-center justify-center py-20">
+          <div className="flex items-center justify-center py-24">
             <svg className="animate-spin w-8 h-8" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
           </div>
-        ) : passes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-4">
-            <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
-              style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
-              <svg className="w-10 h-10" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="text-center">
-              <p className="text-base font-semibold" style={{ color: "var(--text)" }}>All clear!</p>
-              <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>No passes waiting for order review</p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {passes.map((p, i) => (
-              <motion.div
-                key={p.id}
-                className="rounded-2xl border p-5 flex items-center gap-5"
-                style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04 }}
-              >
-                {/* Left: pass info */}
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                    style={{ background: "#fef3c7" }}>
-                    <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                  </div>
-                  <div>
-                    <Link href={`/gate-pass/${p.id}`}
-                      className="text-sm font-bold font-mono hover:underline"
-                      style={{ color: "var(--accent)" }}>
-                      {p.gatePassNumber}
-                    </Link>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {fmtDate(p.createdAt)} · {p.createdBy.name}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-
-                {/* Vehicle */}
-                <div className="flex-shrink-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Vehicle</p>
-                  <p className="text-sm font-bold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
-                  {p.chassis && <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
-                </div>
-
-                <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-
-                {/* Journey */}
-                <div className="flex-shrink-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--text-muted)" }}>Main OUT from</p>
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span style={{ color: "var(--text)" }}>{p.fromLocation || "—"}</span>
-                    <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                    </svg>
-                    <span className="font-medium" style={{ color: "var(--accent)" }}>{p.toLocation || "—"}</span>
-                  </div>
-                </div>
-
-                {/* Service Job No */}
-                {(p.serviceJobNo || p.parentPass?.serviceJobNo) && (
-                  <>
-                    <div className="w-px h-10 flex-shrink-0" style={{ background: "var(--border)" }} />
-                    <div className="flex-shrink-0">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Job No</p>
-                      <p className="text-sm font-mono font-bold" style={{ color: "#b45309" }}>
-                        {p.serviceJobNo ?? p.parentPass?.serviceJobNo}
-                      </p>
+        ) : activeTab === "AFTER_SALES" ? (
+          /* ── After Sales tab ── */
+          passes.length === 0 ? (
+            <EmptyState icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" title="All clear!" sub="No service passes awaiting order review" />
+          ) : (
+            <>
+              <div className="rounded-2xl border px-4 py-3 mb-3 flex items-center gap-2.5"
+                style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs" style={{ color: "#1d4ed8" }}>
+                  Open a pass → assign fully-paid orders → <strong>Proceed</strong>. Uncleared orders escalate to Approver.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {passes.map((p, i) => (
+                  <motion.div key={p.id}
+                    className="rounded-2xl border p-4 flex items-center gap-4"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  >
+                    {/* Icon + GP number */}
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#fef3c7" }}>
+                      <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
                     </div>
-                  </>
-                )}
 
-                <div className="flex-1" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link href={`/gate-pass/${p.id}`} className="text-sm font-bold font-mono hover:underline" style={{ color: "var(--accent)" }}>
+                          {p.gatePassNumber}
+                        </Link>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
+                          Awaiting Review
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        <p className="text-sm font-semibold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                        {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
+                        {(p.serviceJobNo || p.parentPass?.serviceJobNo) && (
+                          <span className="text-xs font-semibold" style={{ color: "#b45309" }}>
+                            Job: {p.serviceJobNo ?? p.parentPass?.serviceJobNo}
+                          </span>
+                        )}
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(p.createdAt)} · {p.createdBy.name}</span>
+                      </div>
+                    </div>
 
-                {/* Cashier Review badge */}
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0"
-                  style={{ background: "#fef3c7", color: "#b45309" }}>
-                  Awaiting Review
-                </span>
+                    <button
+                      onClick={() => setModalPass(p)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      </svg>
+                      Review Orders
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )
 
-                {/* Review button */}
-                <button
-                  onClick={() => setModalPass(p)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow transition-all hover:opacity-90 flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                  </svg>
-                  Review Orders
-                </button>
-              </motion.div>
-            ))}
-          </div>
+        ) : (
+          /* ── Customer Delivery tab ── */
+          cdPasses.length === 0 ? (
+            <EmptyState icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" title="All clear!" sub="No Customer Delivery passes awaiting payment clearance" />
+          ) : (
+            <>
+              <div className="rounded-2xl border px-4 py-3 mb-3 flex items-center gap-2.5"
+                style={{ background: "#f0fdf4", borderColor: "#bbf7d0" }}>
+                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-xs" style={{ color: "#15803d" }}>
+                  Open a pass to review SAP orders, confirm payment, and proceed to Gate OUT clearance.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                {cdPasses.map((p, i) => (
+                  <motion.div key={p.id}
+                    className="rounded-2xl border p-4 flex items-center gap-4"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  >
+                    {/* Icon */}
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: "#fef3c7" }}>
+                      <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link href={`/gate-pass/${p.id}`} className="text-sm font-bold font-mono hover:underline" style={{ color: "var(--accent)" }}>
+                          {p.gatePassNumber}
+                        </Link>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
+                          Awaiting Review
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        <p className="text-sm font-semibold font-mono" style={{ color: "var(--text)" }}>{p.vehicle}</p>
+                        {p.chassis && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.chassis}</p>}
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(p.createdAt)} · {p.createdBy.name}</span>
+                      </div>
+                    </div>
+
+                    {/* Review Orders */}
+                    <button
+                      onClick={() => setModalPass(p)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90 flex-shrink-0"
+                      style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      </svg>
+                      Review Orders
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )
         )}
       </div>
 
@@ -790,6 +990,23 @@ export default function CashierReviewPage() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, sub }: { icon: string; title: string; sub: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4">
+      <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
+        style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
+        <svg className="w-10 h-10" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={icon} />
+        </svg>
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold" style={{ color: "var(--text)" }}>{title}</p>
+        <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>{sub}</p>
+      </div>
     </div>
   );
 }

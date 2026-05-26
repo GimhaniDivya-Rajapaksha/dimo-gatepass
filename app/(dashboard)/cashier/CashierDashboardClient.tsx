@@ -23,10 +23,13 @@ export default function CashierDashboardClient({ user }: Props) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/gate-pass?passType=AFTER_SALES&status=CASHIER_REVIEW&limit=10")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d) { setPending(d.passes || []); setTotal(d.total || 0); }
+    Promise.all([
+      fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=AFTER_SALES&limit=50&cashierPending=true").then(r => r.ok ? r.json() : { passes: [], total: 0 }),
+      fetch("/api/gate-pass?status=CASHIER_REVIEW&passType=CUSTOMER_DELIVERY&limit=50").then(r => r.ok ? r.json() : { passes: [], total: 0 }),
+    ])
+      .then(([asData, cdData]) => {
+        setPending([...(asData.passes || []), ...(cdData.passes || [])].slice(0, 10));
+        setTotal((asData.total || 0) + (cdData.total || 0));
         setLoading(false);
       })
       .catch(() => setLoading(false));

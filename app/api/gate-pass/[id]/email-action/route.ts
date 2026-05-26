@@ -127,6 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           passSubType: gatePass.passSubType,
           vehicle: gatePass.vehicle ?? "",
           chassis: gatePass.chassis,
+          createdByName: gatePass.createdBy?.name ?? "Initiator",
           rejectionReason: comment.trim() || "Rejected via email",
           approverName: approver?.name ?? "Approver",
         }
