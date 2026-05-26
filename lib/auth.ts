@@ -24,7 +24,14 @@ async function loadUserClaims(params: { id?: string; email?: string }) {
   if (!id && !email) return null;
 
   return prisma.user.findFirst({
-    where: id ? { id } : { email },
+    where:
+      id && email
+        ? {
+            OR: [{ id }, { email }],
+          }
+        : id
+          ? { id }
+          : { email },
     select: {
       id: true,
       email: true,
@@ -173,18 +180,33 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
     async jwt({ token, user }) {
-      if (user) {
-        const claims =
-          await loadUserClaims({
-            id: user.id,
-            email: user.email ?? undefined,
-          }).catch(() => null);
+      const lookupId =
+        (user?.id as string | undefined) ??
+        (typeof token.id === "string" ? token.id : undefined) ??
+        (typeof token.sub === "string" ? token.sub : undefined);
+      const lookupEmail =
+        (user?.email as string | undefined) ??
+        (typeof token.email === "string" ? token.email : undefined);
 
+      const claims =
+        await loadUserClaims({
+          id: lookupId,
+          email: lookupEmail,
+        }).catch(() => null);
+
+      if (user) {
         token.id = claims?.id ?? user.id;
         token.role = claims?.role ?? (user as { role: string | null }).role ?? null;
-        token.defaultLocation = claims?.defaultLocation ?? null;
-        token.approverName = claims?.approver?.name ?? null;
+      } else if (claims) {
+        token.id = claims.id;
+        token.role = claims.role ?? null;
       }
+
+      if (claims) {
+        token.defaultLocation = claims.defaultLocation ?? null;
+        token.approverName = claims.approver?.name ?? null;
+      }
+
       return token;
     },
     async session({ session, token }) {

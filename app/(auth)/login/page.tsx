@@ -129,6 +129,7 @@ function LoginForm() {
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors"
                 style={{ color: "var(--text-muted)" }}
+                suppressHydrationWarning
               >
                 {showPassword ? (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -161,6 +162,7 @@ function LoginForm() {
             whileTap={{ scale: loading ? 1 : 0.98 }}
             className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg transition-opacity disabled:opacity-70"
             style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
+            suppressHydrationWarning
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
@@ -188,6 +190,7 @@ function LoginForm() {
           whileTap={{ scale: loading ? 1 : 0.98 }}
           className="w-full py-3 rounded-xl font-semibold text-sm border transition-all disabled:opacity-70 flex items-center justify-center gap-3"
           style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+          suppressHydrationWarning
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="#f25022" d="M1 1h10v10H1z" />
