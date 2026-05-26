@@ -677,10 +677,15 @@ export default function AdminPage() {
 
   async function assignRole(userId: string, role: string) {
     setAssigning(userId);
-    await fetch("/api/admin/assign-role", {
+    const res = await fetch("/api/admin/assign-role", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, role }),
     });
+    if (!res.ok) {
+      setAssigning(null);
+      setLoadError("Unable to assign the role right now. Please try again.");
+      return;
+    }
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
     setAssigning(null);
     setSuccessId(userId);
@@ -824,14 +829,7 @@ export default function AdminPage() {
                         onChange={async (e) => {
                           const newRole = e.target.value;
                           if (!newRole) return;
-                          // Save the role first
-                          await fetch(`/api/users/${user.id}/role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: newRole }) });
-                          const updatedUser = { ...user, role: newRole };
-                          setUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
-                          // If this role requires location/brand/approver, open the attributes modal
-                          if ((ROLE_ATTRS[newRole] ?? []).length > 0) {
-                            setAttrModal(updatedUser);
-                          }
+                          await assignRole(user.id, newRole);
                         }}
                       >
                         <option value="">Assign role…</option>

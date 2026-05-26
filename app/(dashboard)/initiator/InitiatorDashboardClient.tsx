@@ -530,8 +530,10 @@ export default function InitiatorDashboardClient({ user }: Props) {
         } finally { if (!cancelled) setMainInLoading(false); }
 
         try {
-          const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "50" });
-          if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
+          const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
+          const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+          if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
+          else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
           const [arrivingRes, subOutRes] = await Promise.all([
             fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
             fetch(`/api/gate-pass?${subOutParams}`),
@@ -546,7 +548,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
             // Only show SUB_OUT passes heading TO this initiator's location (not leaving it)
             const incoming = (subOutData.passes || []).filter((p: GatePass) =>
               p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
-              && (!user.defaultLocation || p.toLocation === user.defaultLocation)
+              && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
             );
             const seen = new Set<string>();
             const merged: GatePass[] = [];
@@ -608,8 +610,10 @@ export default function InitiatorDashboardClient({ user }: Props) {
     setArrivingLoading(true);
     try {
       // Own passes (SUB_OUT_IN, SUB_IN) + incoming SUB_OUT heading to my location
-      const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "50" });
-      if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
+      const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
+      const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+      if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
+      else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
       const [ownRes, incomingRes] = await Promise.all([
         fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
         fetch(`/api/gate-pass?${subOutParams}`),
@@ -624,7 +628,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
       // Only SUB_OUT passes heading TO this initiator's location (arriving, not leaving)
       const incoming = (incomingData.passes || []).filter((p: GatePass) =>
         p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
-        && (!user.defaultLocation || p.toLocation === user.defaultLocation)
+        && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
       );
       const seen = new Set<string>();
       const merged: GatePass[] = [];

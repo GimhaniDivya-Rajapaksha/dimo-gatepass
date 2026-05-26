@@ -102,6 +102,7 @@ export default function ASODashboardClient({ user }: Props) {
 
   const [myPasses, setMyPasses] = useState<MyPass[]>([]);
   const [myTotal, setMyTotal] = useState(0);
+  const [pendingApprovalTotal, setPendingApprovalTotal] = useState(0);
   const [myPages, setMyPages] = useState(1);
   const [myPage, setMyPage] = useState(1);
   const [myLoading, setMyLoading] = useState(true);
@@ -118,12 +119,15 @@ export default function ASODashboardClient({ user }: Props) {
   const fetchIncoming = useCallback(async () => {
     setIncomingLoading(true);
     try {
-      // Show GATE_OUT SUB_OUT passes — Security A confirmed Gate OUT, vehicle is en route to ASO
+      // Show GATE_OUT SUB_OUT passes at this ASO's destination plant.
+      // Security workflows are plant-based, so we match by plant prefix instead of exact sub-location text.
       const outParams = new URLSearchParams({
         passType: "AFTER_SALES", passSubType: "SUB_OUT",
         status: "GATE_OUT", limit: "50", locationView: "true",
       });
-      if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
+      const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+      if (destinationPlant) outParams.set("toLocationPlant", destinationPlant);
+      else if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
 
       // Also fetch APPROVED SUB_IN passes to detect which vehicles already have a sub-in created
       const [outRes, subInRes] = await Promise.all([
@@ -177,6 +181,25 @@ export default function ASODashboardClient({ user }: Props) {
       setMyLoading(false);
     }
   }, [myPage, subTypeFilter, statusFilter]);
+
+  const fetchPendingApprovalTotal = useCallback(async () => {
+    const params = new URLSearchParams({
+      passType: "AFTER_SALES",
+      status: "PENDING_APPROVAL",
+      limit: "1",
+    });
+    try {
+      const res = await fetch(`/api/gate-pass?${params}`);
+      if (!res.ok) {
+        setPendingApprovalTotal(0);
+        return;
+      }
+      const d = await res.json();
+      setPendingApprovalTotal(d.total || 0);
+    } catch {
+      setPendingApprovalTotal(0);
+    }
+  }, []);
 
   const handlePassAction = useCallback(async (id: string, action: "gate_out" | "gate_in", label: string) => {
     if (!confirm(`${label}?`)) return;
@@ -239,6 +262,7 @@ export default function ASODashboardClient({ user }: Props) {
 
   useEffect(() => { void fetchIncoming(); }, [fetchIncoming]);
   useEffect(() => { void fetchMyPasses(); }, [fetchMyPasses]);
+  useEffect(() => { void fetchPendingApprovalTotal(); }, [fetchPendingApprovalTotal]);
   useEffect(() => { setMyPage(1); }, [subTypeFilter, statusFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -317,7 +341,7 @@ export default function ASODashboardClient({ user }: Props) {
           },
           {
             label: "Pending Approval",
-            value: myLoading ? 0 : myPasses.filter(p => p.status === "PENDING_APPROVAL").length,
+            value: myLoading ? 0 : pendingApprovalTotal,
             accent: "#f59e0b",
             icon: (
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

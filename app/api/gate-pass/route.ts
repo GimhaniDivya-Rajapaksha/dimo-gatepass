@@ -9,6 +9,16 @@ function ciEquals(value: string | null | undefined) {
   return normalized ? { equals: normalized, mode: "insensitive" as const } : undefined;
 }
 
+function plantPrefix(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized.split(" - ")[0].trim() : "";
+}
+
+function ciStartsWithPlant(value: string | null | undefined) {
+  const plant = plantPrefix(value);
+  return plant ? { startsWith: plant, mode: "insensitive" as const } : undefined;
+}
+
 function withJourneyNumber<T extends { passType?: string | null; gatePassNumber: string; parentPass?: { gatePassNumber: string } | null }>(pass: T): T {
   if (pass.passType === "AFTER_SALES" && pass.parentPass?.gatePassNumber) {
     return { ...pass, gatePassNumber: pass.parentPass.gatePassNumber };
@@ -53,6 +63,7 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = {};
 
   if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
+    const locationView = searchParams.get("locationView") === "true";
     if (status === "DRAFT") {
       // Security-created drafts are assigned to a role and should only appear
       // in that role's Pending Forms queue.
@@ -60,7 +71,7 @@ export async function GET(req: NextRequest) {
         { status: "DRAFT" },
         { comments: { contains: `[[ASSIGNED_ROLE:${role}]]` } },
       ];
-    } else if (role === "INITIATOR") {
+    } else if (role === "INITIATOR" && !locationView) {
       // INITIATOR sees own passes AND sub-passes linked to their main passes
       const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
       const orClauses: unknown[] = [
@@ -94,10 +105,12 @@ export async function GET(req: NextRequest) {
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
-      // Also show AFTER_SALES passes heading to / from this ASO's location (e.g. SUB_OUT from Initiator)
+      // Promo/Finance are sub-locations under the same plant, so match by
+      // plant prefix instead of the exact storage-location text.
       if (asoLocation) {
-        orClauses.push({ passType: "AFTER_SALES", toLocation: ciEquals(asoLocation) });
-        orClauses.push({ passType: "AFTER_SALES", fromLocation: ciEquals(asoLocation) });
+        const plantLocation = ciStartsWithPlant(asoLocation);
+        orClauses.push({ passType: "AFTER_SALES", toLocation: plantLocation });
+        orClauses.push({ passType: "AFTER_SALES", fromLocation: plantLocation });
       }
       where.AND = [{ OR: orClauses }];
     }

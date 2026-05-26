@@ -43,9 +43,6 @@ export async function GET() {
         { parentPass: { createdById: userId } },
       ],
     };
-  } else if (role === "APPROVER") {
-    // Passes assigned to this approver for review
-    scopeWhere = { approverId: userId };
   }
   // CASHIER, SECURITY_OFFICER, ADMIN → all passes
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 
 interface Props {
-  user: { name?: string | null; email?: string | null; role: string | null };
+  user: { name?: string | null; email?: string | null; role: string | null; defaultLocation?: string | null };
 }
 
 type ReadyPass = {
@@ -23,17 +23,25 @@ export default function SecurityOfficerDashboardClient({ user }: Props) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/gate-pass?passType=AFTER_SALES&status=APPROVED&passSubType=MAIN_OUT&limit=10")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) {
-          setPending(d.passes || []);
-          setTotal(d.total || 0);
-        }
+    const plantName = user.defaultLocation ? user.defaultLocation.split(" - ")[0].trim() : null;
+    const fromLocQ = plantName ? `&fromLocationPlant=${encodeURIComponent(plantName)}` : "";
+
+    Promise.all([
+      fetch(`/api/gate-pass?status=APPROVED&limit=100${fromLocQ}`).then((r) => (r.ok ? r.json() : { passes: [] })),
+      fetch(`/api/gate-pass?status=INITIATOR_OUT&limit=100${fromLocQ}`).then((r) => (r.ok ? r.json() : { passes: [] })),
+    ])
+      .then(([approvedData, initiatorOutData]) => {
+        const approvedGateOut = (approvedData.passes || []).filter((p: ReadyPass & { passType?: string; passSubType?: string | null }) =>
+          !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN") &&
+          !(p.passType === "AFTER_SALES" && p.passSubType === "MAIN_IN")
+        );
+        const queue = [...approvedGateOut, ...(initiatorOutData.passes || [])];
+        setPending(queue.slice(0, 10));
+        setTotal(queue.length);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [user.defaultLocation]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
