@@ -475,6 +475,7 @@ export default function SecurityGateDashboard() {
   const [releasedToday,    setReleasedToday]    = useState(0);
   const [clearedInToday,   setClearedInToday]   = useState(0);
   const [loading,          setLoading]          = useState(true);
+  const [refreshing,       setRefreshing]       = useState(false);
   const [toast,            setToast]            = useState<{ msg: string; ok: boolean } | null>(null);
   const [search,           setSearch]           = useState("");
   const [gateMode,         setGateMode]         = useState<GateMode>("BOTH");
@@ -523,11 +524,19 @@ export default function SecurityGateDashboard() {
     return () => { active = false; };
   }, [status]);
 
-  const fetchAll = useCallback(async () => {
+  const fetchJson = async (url: string) => {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return res.json();
+  };
+
+  const fetchAll = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
     if (isInitialFetch.current) {
       setLoading(true);
       isInitialFetch.current = false;
     }
+    if (!silent) setRefreshing(true);
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -541,14 +550,14 @@ export default function SecurityGateDashboard() {
 
     try {
       // Sequential fetches — connection pool limit is 1 on Supabase free tier
-      const outData        = await fetch(`/api/gate-pass?status=APPROVED&limit=100${fromLocQ}`).then(r => r.json());
-      const initiatorOutData = await fetch(`/api/gate-pass?status=INITIATOR_OUT&limit=100${fromLocQ}`).then(r => r.json());
-      const inData         = await fetch(`/api/gate-pass?status=GATE_OUT&limit=100${toLocQ}`).then(r => r.json());
-      const subInData      = await fetch(`/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100${toLocQ}`).then(r => r.json());
-      const initiatorInData = await fetch(`/api/gate-pass?status=INITIATOR_IN&limit=100${toLocQ}`).then(r => r.json());
-      const releasedData   = await fetch(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`).then(r => r.json());
-      const clearedData    = await fetch(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`).then(r => r.json());
-      const draftData      = await fetch("/api/gate-pass?status=DRAFT&limit=50").then(r => r.json());
+      const outData        = await fetchJson(`/api/gate-pass?status=APPROVED&limit=100${fromLocQ}`);
+      const initiatorOutData = await fetchJson(`/api/gate-pass?status=INITIATOR_OUT&limit=100${fromLocQ}`);
+      const inData         = await fetchJson(`/api/gate-pass?status=GATE_OUT&limit=100${toLocQ}`);
+      const subInData      = await fetchJson(`/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100${toLocQ}`);
+      const initiatorInData = await fetchJson(`/api/gate-pass?status=INITIATOR_IN&limit=100${toLocQ}`);
+      const releasedData   = await fetchJson(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
+      const clearedData    = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
+      const draftData      = await fetchJson("/api/gate-pass?status=DRAFT&limit=50");
       setDraftPasses(draftData.passes ?? []);
 
       // Server already scoped by location — just filter by pass type/subtype
@@ -585,6 +594,7 @@ export default function SecurityGateDashboard() {
       showToast("Failed to refresh passes.", false);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myLocation]);
@@ -593,7 +603,7 @@ export default function SecurityGateDashboard() {
 
   // Auto-refresh every 90 seconds
   useEffect(() => {
-    const interval = setInterval(() => { void fetchAll(); }, 90_000);
+    const interval = setInterval(() => { void fetchAll({ silent: true }); }, 90_000);
     return () => clearInterval(interval);
   }, [fetchAll]);
 
@@ -613,7 +623,7 @@ export default function SecurityGateDashboard() {
         ).length;
         if (incoming > lastNotifCount.current) {
           lastNotifCount.current = incoming;
-          void fetchAll();
+          void fetchAll({ silent: true });
         } else {
           lastNotifCount.current = incoming;
         }
@@ -717,12 +727,20 @@ export default function SecurityGateDashboard() {
               ))}
             </div>
             <button onClick={() => void fetchAll()}
-              className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-80 transition-opacity"
+              disabled={refreshing}
+              className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
               style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-              <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
+              {refreshing ? (
+                <svg className="w-4 h-4 animate-spin" style={{ color: "var(--text-muted)" }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
             </button>
           </div>
         </div>

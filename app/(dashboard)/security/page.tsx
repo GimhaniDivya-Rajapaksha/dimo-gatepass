@@ -8,7 +8,12 @@ export default async function SecurityOfficerDashboardPage() {
   if (!session || session.user.role !== "SECURITY_OFFICER") redirect("/login");
   return (
     <SecurityOfficerDashboardClient
-      user={{ name: session.user.name, email: session.user.email, role: session.user.role }}
+      user={{
+        name: session.user.name,
+        email: session.user.email,
+        role: session.user.role,
+        defaultLocation: session.user.defaultLocation,
+      }}
     />
   );
 }

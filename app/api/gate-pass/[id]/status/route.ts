@@ -9,6 +9,16 @@ function ciLocation(value: string | null | undefined) {
   return normalized ? { equals: normalized, mode: "insensitive" as const } : undefined;
 }
 
+function plantPrefix(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized.split(" - ")[0].trim() : "";
+}
+
+function ciStartsWithPlant(value: string | null | undefined) {
+  const plant = plantPrefix(value);
+  return plant ? { startsWith: plant, mode: "insensitive" as const } : undefined;
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -500,11 +510,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+      const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
 
       const [destSecurity, destInitiators, asoUsers] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
         prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...asoPlantFilter } }),
       ]);
 
       const destUsers = [...destSecurity, ...destInitiators, ...asoUsers];
