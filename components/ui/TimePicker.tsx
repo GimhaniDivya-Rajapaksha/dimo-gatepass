@@ -4,6 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
+function currentTimeValue() {
+  const now = new Date();
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 function fmtDisplay(value: string) {
   if (!value) return "";
   const [h, m] = value.split(":").map(Number);
@@ -48,6 +53,8 @@ export default function TimePicker({
   const isPastHour = (h: number) => hasFloor && h < minH;
   const isPastMin  = (h: number, m: number) => hasFloor && h === minH && m < minM;
   const [open, setOpen] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualValue, setManualValue] = useState(value);
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
 
   const curH = value ? parseInt(value.split(":")[0], 10) : -1;
@@ -59,6 +66,10 @@ export default function TimePicker({
   const popupRef     = useRef<HTMLDivElement>(null);
 
   const ITEM_H = 44;
+
+  useEffect(() => {
+    setManualValue(value);
+  }, [value]);
 
   /* Calculate fixed popup position */
   function calcPos() {
@@ -93,7 +104,7 @@ export default function TimePicker({
       window.removeEventListener("scroll", calcPos, true);
       window.removeEventListener("resize", calcPos);
     };
-  }, [open]); // eslint-disable-line
+  }, [open]);
 
   /* Scroll to selected (or current time if empty) on open */
   useEffect(() => {
@@ -152,6 +163,19 @@ export default function TimePicker({
     onChange(`${pad(h)}:${pad(curM >= 0 ? curM : 0)}`);
   }
 
+  function applyManualValue(nextValue = manualValue) {
+    if (!nextValue) return;
+    const [h, m] = nextValue.split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return;
+    if (isPastHour(h) || isPastMin(h, m)) return;
+    onChange(`${pad(h)}:${pad(m)}`);
+    setManualMode(false);
+    setTimeout(() => {
+      hourRef.current?.scrollTo({ top: h * ITEM_H, behavior: "smooth" });
+      minRef.current?.scrollTo({ top: m * ITEM_H, behavior: "smooth" });
+    }, 50);
+  }
+
   const isPM = curH >= 12;
 
   const presets = [
@@ -169,7 +193,16 @@ export default function TimePicker({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => {
+          setOpen(o => !o);
+          setManualMode(false);
+        }}
+        onDoubleClick={() => {
+          setOpen(true);
+          setManualMode(true);
+          setManualValue(value || currentTimeValue());
+        }}
+        title="Double-click to type a time"
         className="w-full flex items-center gap-3 border rounded-xl px-4 py-2.5 text-sm transition-all text-left"
         style={{
           background: "var(--surface2)",
@@ -248,6 +281,44 @@ export default function TimePicker({
             </div>
 
             {/* ── Drum-roll picker ── */}
+            {manualMode && (
+              <div className="px-4 py-3 flex items-end gap-2" style={{ borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>
+                <label className="flex-1">
+                  <span className="block text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
+                    Type Time
+                  </span>
+                  <input
+                    type="time"
+                    value={manualValue}
+                    onChange={(e) => setManualValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyManualValue();
+                      if (e.key === "Escape") setManualMode(false);
+                    }}
+                    className="w-full border rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                    autoFocus
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => applyManualValue()}
+                  className="px-3 py-2 rounded-xl text-xs font-black text-white"
+                  style={{ background: "#2563eb" }}
+                >
+                  Set
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualMode(false)}
+                  className="px-3 py-2 rounded-xl text-xs font-black border"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
+                >
+                  Scroll
+                </button>
+              </div>
+            )}
+
             <div className="flex items-stretch px-4 pt-3 pb-2 gap-2">
 
               {/* Hour column */}

@@ -15,6 +15,8 @@ export async function GET() {
         id: true, name: true, email: true, role: true, createdAt: true,
         approverId: true, defaultLocation: true, brand: true,
         approver: { select: { id: true, name: true } },
+        backupApproverId: true,
+        backupApprover: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
     });

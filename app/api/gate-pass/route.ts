@@ -47,6 +47,27 @@ async function findApproversForLocation(location: string | null, selectedApprove
   return prisma.user.findMany({ where: { role: "APPROVER" } });
 }
 
+async function sendApprovalEmailsToApprovers(approvers: { id: string; email: string; name: string }[], gatePass: any, createdByName: string) {
+  try {
+    for (const approver of approvers) {
+      await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        passType: gatePass.passType,
+        passSubType: gatePass.passSubType,
+        vehicle: gatePass.vehicle,
+        chassis: gatePass.chassis,
+        toLocation: gatePass.toLocation,
+        fromLocation: gatePass.fromLocation,
+        departureDate: gatePass.departureDate,
+        departureTime: gatePass.departureTime,
+        createdByName,
+      }, approver.id);
+    }
+  } catch (emailErr) {
+    console.error("[email] Failed to send approval email:", emailErr);
+  }
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -395,6 +416,7 @@ export async function POST(req: NextRequest) {
                 gatePassId: gatePass.id,
               })),
             });
+            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
           }
           return NextResponse.json({ gatePass }, { status: 201 });
         } else if (hasImmediate && hasCredit) {
@@ -436,6 +458,7 @@ export async function POST(req: NextRequest) {
                 gatePassId: gatePass.id,
               })),
             });
+            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
           }
           return NextResponse.json({ gatePass }, { status: 201 });
         }
@@ -457,6 +480,7 @@ export async function POST(req: NextRequest) {
               gatePassId: gatePass.id,
             })),
           });
+          await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
         }
         return NextResponse.json({ gatePass }, { status: 201 });
       }
@@ -473,6 +497,7 @@ export async function POST(req: NextRequest) {
             gatePassId: gatePass.id,
           })),
         });
+        await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
       }
       return NextResponse.json({ gatePass }, { status: 201 });
     }
@@ -618,6 +643,7 @@ export async function POST(req: NextRequest) {
             gatePassId: gatePass.id,
           })),
         });
+        await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
       }
     }
 
@@ -651,26 +677,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  try {
-    const approversEmail = await prisma.user.findMany({ where: { role: "APPROVER" }, select: { id: true, name: true, email: true } });
-    const createdByUser = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true } });
-    for (const approver of approversEmail) {
-      await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
-        gatePassNumber: gatePass.gatePassNumber,
-        passType: gatePass.passType,
-        passSubType: gatePass.passSubType,
-        vehicle: gatePass.vehicle,
-        chassis: gatePass.chassis,
-        toLocation: gatePass.toLocation,
-        fromLocation: gatePass.fromLocation,
-        departureDate: gatePass.departureDate,
-        departureTime: gatePass.departureTime,
-        createdByName: createdByUser?.name || session.user.name || "Unknown",
-      });
-    }
-  } catch (emailErr) {
-    console.error("[email] Failed to send approval email:", emailErr);
-  }
+  await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
 
   return NextResponse.json({ gatePass }, { status: 201 });
   } catch (err) {

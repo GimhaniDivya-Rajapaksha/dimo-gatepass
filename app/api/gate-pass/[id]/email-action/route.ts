@@ -2,6 +2,63 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyApprovalToken } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 
+async function findTokenApprover(approverId?: string | null) {
+  if (approverId) {
+    const approver = await prisma.user.findFirst({
+      where: { id: approverId, role: "APPROVER" },
+      select: { id: true, name: true, email: true },
+    });
+    if (approver) return approver;
+  }
+
+  return prisma.user.findFirst({
+    where: { role: "APPROVER" },
+    select: { id: true, name: true, email: true },
+  });
+}
+
+async function notifySecurityAfterApproval(gatePass: {
+  id: string;
+  gatePassNumber: string;
+  vehicle: string | null;
+  passType: string;
+  passSubType: string | null;
+  fromLocation: string | null;
+  toLocation: string | null;
+}) {
+  const needsSecurityNotify =
+    (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||
+    gatePass.passType === "LOCATION_TRANSFER" ||
+    gatePass.passType === "CUSTOMER_DELIVERY";
+
+  if (!needsSecurityNotify) return;
+
+  const securityWhere = gatePass.fromLocation
+    ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
+    : { role: "SECURITY_OFFICER" as any };
+  const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+
+  if (securityOfficers.length === 0) return;
+
+  await prisma.notification.createMany({
+    data: securityOfficers.map((s: { id: string }) => ({
+      userId: s.id,
+      type: "GATE_PASS_APPROVED",
+      title: gatePass.passType === "LOCATION_TRANSFER"
+        ? "Location Transfer Approved - Confirm Gate OUT"
+        : gatePass.passType === "CUSTOMER_DELIVERY"
+          ? "Customer Delivery Approved - Confirm Gate OUT"
+          : "Vehicle Cleared - Ready for Gate OUT",
+      message: gatePass.passType === "LOCATION_TRANSFER"
+        ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) - LT approved, heading to ${gatePass.toLocation ?? "destination"}. Please confirm Gate OUT.`
+        : gatePass.passType === "CUSTOMER_DELIVERY"
+          ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) - customer delivery approved. Please confirm Gate OUT.`
+          : `${gatePass.gatePassNumber} (${gatePass.vehicle}) - credit approved. Please confirm gate release.`,
+      gatePassId: gatePass.id,
+    })),
+  });
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { searchParams } = new URL(req.url);
@@ -25,25 +82,54 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!gatePass) {
     return new NextResponse(errorPage("Gate pass not found."), { status: 404, headers: { "Content-Type": "text/html" } });
   }
-  if (gatePass.status !== "PENDING_APPROVAL") {
+  const canProcessByEmail = gatePass.status === "PENDING_APPROVAL"
+    || (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved);
+  if (!canProcessByEmail) {
     return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
   }
 
   if (action === "approve") {
-    const approver = await prisma.user.findFirst({ where: { role: "APPROVER" } });
-    await prisma.gatePass.update({
-      where: { id },
-      data: { status: "APPROVED", approvedById: approver?.id, approvedAt: new Date() },
-    });
-    await prisma.notification.create({
-      data: {
-        userId: gatePass.createdById,
-        type: "GATE_PASS_APPROVED",
-        title: "Gate Pass Approved",
-        message: `Your gate pass ${gatePass.gatePassNumber} has been approved.`,
-        gatePassId: gatePass.id,
-      },
-    });
+    const approver = await findTokenApprover(verified.approverId);
+    if (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved) {
+      await prisma.gatePass.update({
+        where: { id },
+        data: {
+          creditApproved: true,
+          approvedById: approver?.id,
+          approvedAt: new Date(),
+          ...(gatePass.cashierCleared || !gatePass.hasImmediate ? { status: "APPROVED" } : {}),
+        },
+      });
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_APPROVED",
+          title: gatePass.cashierCleared || !gatePass.hasImmediate ? "Gate Pass Approved" : "Credit Approved - Awaiting Cashier Clearance",
+          message: gatePass.cashierCleared || !gatePass.hasImmediate
+            ? `Your gate pass ${gatePass.gatePassNumber} has been approved.`
+            : `Gate pass ${gatePass.gatePassNumber} credit orders were approved. Waiting for cashier clearance.`,
+          gatePassId: gatePass.id,
+        },
+      });
+      if (gatePass.cashierCleared || !gatePass.hasImmediate) {
+        await notifySecurityAfterApproval(gatePass);
+      }
+    } else {
+      await prisma.gatePass.update({
+        where: { id },
+        data: { status: "APPROVED", approvedById: approver?.id, approvedAt: new Date() },
+      });
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_APPROVED",
+          title: "Gate Pass Approved",
+          message: `Your gate pass ${gatePass.gatePassNumber} has been approved.`,
+          gatePassId: gatePass.id,
+        },
+      });
+      await notifySecurityAfterApproval(gatePass);
+    }
     return new NextResponse(successPage(gatePass.gatePassNumber), { headers: { "Content-Type": "text/html" } });
   }
 
@@ -90,11 +176,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!gatePass) {
     return new NextResponse(errorPage("Gate pass not found."), { status: 404, headers: { "Content-Type": "text/html" } });
   }
-  if (gatePass.status !== "PENDING_APPROVAL") {
+  const canProcessByEmail = gatePass.status === "PENDING_APPROVAL"
+    || (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved);
+  if (!canProcessByEmail) {
     return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
   }
 
-  const approver = await prisma.user.findFirst({ where: { role: "APPROVER" } });
+  const approver = await findTokenApprover(verified.approverId);
   await prisma.gatePass.update({
     where: { id },
     data: {

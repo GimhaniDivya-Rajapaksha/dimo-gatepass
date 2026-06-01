@@ -105,7 +105,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             gatePassNumber: pass.gatePassNumber, passType: pass.passType, passSubType,
             vehicle: pass.vehicle, chassis: pass.chassis, toLocation, fromLocation,
             departureDate, departureTime, createdByName: createdByUser?.name || session.user.name || "Unknown",
-          });
+          }, a.id);
         }
       } catch { /* non-fatal */ }
     }

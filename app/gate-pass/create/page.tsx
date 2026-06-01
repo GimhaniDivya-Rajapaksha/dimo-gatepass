@@ -101,7 +101,7 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         </button>
       )}
       {open && (
-        <div className="absolute z-30 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
+        <div className="absolute z-50 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           {loading ? (
             <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
@@ -139,12 +139,13 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
 }
 
 /* ─── Location Picker (Promotion / Finance) ─────────────────────────── */
-function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, onNewLocation }: {
+function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, onNewLocation, matnr }: {
   value: string; displayValue?: string;
   onSelect: (o: LookupOption) => void;
   locationType: "PROMOTION" | "FINANCE";
   error?: string;
   onNewLocation?: (o: LookupOption) => void;
+  matnr?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<LookupOption[]>([]);
@@ -158,11 +159,13 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
   const containerRef = useRef<HTMLDivElement>(null);
 
   async function load() {
-    const res = await fetch(`/api/lookups?field=location&locationType=${locationType}&limit=200`);
+    const params = new URLSearchParams({ field: "location", locationType, limit: "200" });
+    if (matnr) params.set("matnr", matnr);
+    const res = await fetch(`/api/lookups?${params.toString()}`);
     const data: { options: LookupOption[] } = await res.json();
     setOptions(data.options ?? []);
   }
-  useEffect(() => { void load(); }, [locationType]);
+  useEffect(() => { void load(); }, [locationType, matnr]);
 
   // Unique plant names for the ADD form dropdown
   const plantNames = useMemo(() => {
@@ -630,6 +633,15 @@ function AddVehicleModal({ onClose, onAdd }: {
 }
 
 /* ─── Main Page ─────────────────────────────────────────────────────── */
+function currentDateValue() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function currentTimeValue() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
 export default function CreateGatePassPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -640,6 +652,7 @@ export default function CreateGatePassPage() {
   const isRejectEditMode = !!rejectedId;
   const [passType, setPassType] = useState<PassType>("LOCATION_TRANSFER");
   const [locationType, setLocationType] = useState<LocationType | "">("");
+  const [ltBulkMode, setLtBulkMode] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>("CARRIER");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -648,13 +661,32 @@ export default function CreateGatePassPage() {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [addVehicleTarget, setAddVehicleTarget] = useState<"lt" | "cd" | "sr">("lt");
   const [assignedApprover, setAssignedApprover] = useState<{ id: string; name: string } | null>(null);
+  const [primaryApprover, setPrimaryApprover] = useState<{ id: string; name: string } | null>(null);
+  const [backupApprover, setBackupApprover] = useState<{ id: string; name: string } | null>(null);
   const [selectedLocationDetail, setSelectedLocationDetail] = useState<{
     plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string;
   } | null>(null);
   const [selectedVehicleDetail, setSelectedVehicleDetail] = useState<{
     chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
+    matnr?: string;
     currentLocation?: string;
   } | null>(null);
+  const [ltBulkVehicles, setLtBulkVehicles] = useState<Array<{
+    vehicle: string;
+    chassisNo: string;
+    model: string;
+    make: string;
+    colourFamily: string;
+    colour: string;
+    matnr?: string;
+    currentLocation?: string;
+    toLocationType?: Exclude<LocationType, "OTHER"> | "";
+    toLocation?: string;
+    toLocationPlant?: string;
+    toLocationStorage?: string;
+  }>>([]);
+  const [ltBulkLocationOptions, setLtBulkLocationOptions] = useState<Record<string, LookupOption[]>>({});
+  const [ltBulkLocationLoading, setLtBulkLocationLoading] = useState<Record<string, boolean>>({});
   const [selectedCdVehicleDetail, setSelectedCdVehicleDetail] = useState<{
     vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
   } | null>(null);
@@ -669,12 +701,12 @@ export default function CreateGatePassPage() {
   });
   const [locationLoading, setLocationLoading] = useState(false);
 
-  const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD" for min date constraint
+  const today = currentDateValue(); // "YYYY-MM-DD" for min date constraint
 
   // Location Transfer / After Sales fields (shared structure)
   const [lt, setLt] = useState({
     toLocation: "", fromLocation: "", outReason: "", vehicle: "",
-    approver: "", departureDate: "", departureTime: "", reasonToOut: "",
+    approver: "", departureDate: currentDateValue(), departureTime: currentTimeValue(), reasonToOut: "",
     arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
@@ -682,7 +714,7 @@ export default function CreateGatePassPage() {
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
-    approver: "", vehicle: "", departureDate: "", departureTime: "",
+    approver: "", vehicle: "", departureDate: currentDateValue(), departureTime: currentTimeValue(),
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
   });
@@ -956,17 +988,91 @@ export default function CreateGatePassPage() {
 
 
   // Auto-assign approver from session (approverName is embedded in JWT — no extra fetch needed)
+  function selectConfiguredApprover(approver: { id: string; name: string }) {
+    setAssignedApprover(approver);
+    setLt(p => ({ ...p, approver: approver.name }));
+    setCd(p => ({ ...p, approver: approver.name }));
+    setSr(p => ({ ...p, approver: approver.name }));
+    setMainOutApprover(approver.name);
+  }
+
+  function renderAssignedApprover() {
+    if (!assignedApprover) return null;
+    const configuredApprovers = [primaryApprover, backupApprover].filter(
+      (approver): approver is { id: string; name: string } => Boolean(approver?.name)
+    );
+    const uniqueApprovers = configuredApprovers.filter((approver, index, all) =>
+      all.findIndex((item) => item.name === approver.name) === index
+    );
+
+    return (
+      <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
+        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
+            Select approver
+          </p>
+          <select
+            value={assignedApprover.name}
+            onChange={(e) => {
+              const next = uniqueApprovers.find((approver) => approver.name === e.target.value);
+              if (next) selectConfiguredApprover(next);
+            }}
+            className="w-full bg-transparent text-sm font-semibold focus:outline-none"
+            style={{ color: "var(--text)" }}
+          >
+            {uniqueApprovers.map((approver) => (
+              <option key={approver.name} value={approver.name}>
+                {approver.name === primaryApprover?.name ? "Approver 1" : "Approver 2"} - {approver.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    );
+  }
+
   useEffect(() => {
     if (status === "authenticated") {
       const approverName = (session?.user as { approverName?: string | null })?.approverName ?? null;
+      const backupApproverName = (session?.user as { backupApproverName?: string | null })?.backupApproverName ?? null;
+      setBackupApprover(backupApproverName ? { id: "", name: backupApproverName } : null);
       if (approverName) {
-        setAssignedApprover({ id: "", name: approverName });
+        const primary = { id: "", name: approverName };
+        setPrimaryApprover(primary);
+        setAssignedApprover(primary);
         setLt(p => ({ ...p, approver: approverName }));
         setCd(p => ({ ...p, approver: approverName }));
         setSr(p => ({ ...p, approver: approverName }));
+      } else {
+        setPrimaryApprover(null);
+        setAssignedApprover(null);
       }
     }
   }, [status, session]);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let active = true;
+
+    fetch("/api/me", { cache: "no-store" })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!active || !data?.user) return;
+        const primary = data.user.approver as { id: string; name: string } | null;
+        const backup = data.user.backupApprover as { id: string; name: string } | null;
+        setPrimaryApprover(primary);
+        setBackupApprover(backup);
+        if (primary) selectConfiguredApprover(primary);
+      })
+      .catch(() => { /* session values remain as fallback */ });
+
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   const fetchLookup = async (field: LookupField, q = "", lt_type?: string) => {
     if (field === "location") setLocationLoading(true);
@@ -975,6 +1081,7 @@ export default function CreateGatePassPage() {
       const limit = field === "location" ? "300" : "40";
       const params = new URLSearchParams({ field, q, limit });
       if (field === "location" && lt_type) params.set("locationType", lt_type);
+      if (field === "location" && selectedVehicleDetail?.matnr) params.set("matnr", selectedVehicleDetail.matnr);
       // Tell the vehicle lookup which SAP API to query based on current pass type
       if (field === "vehicle" && passType && passType !== "AFTER_SALES") {
         params.set("passType", passType);
@@ -992,8 +1099,10 @@ export default function CreateGatePassPage() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
+    if (locationType && selectedVehicleDetail?.matnr) return;
     // Single bulk request instead of 7 simultaneous fetches
     setLocationLoading(true);
+    const materialScopedLocations = Boolean(selectedVehicleDetail?.matnr);
     const params = new URLSearchParams({ fields: "location,outReason,approver,companyName,carrierRegNo", dimoLocationType: "DIMO" });
     if (locationType) params.set("locationType", locationType);
     fetch(`/api/lookups?${params.toString()}`)
@@ -1002,7 +1111,7 @@ export default function CreateGatePassPage() {
         if (!d) return;
         setLookupOptions(prev => ({
           ...prev,
-          location: d.location ?? prev.location,
+          location: materialScopedLocations ? prev.location : (d.location ?? prev.location),
           outReason: d.outReason ?? prev.outReason,
           approver: d.approver ?? prev.approver,
           companyName: d.companyName ?? prev.companyName,
@@ -1016,6 +1125,12 @@ export default function CreateGatePassPage() {
     void fetchLookup("vehicle");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !locationType || !selectedVehicleDetail?.matnr) return;
+    void fetchLookup("location", "", locationType);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, locationType, selectedVehicleDetail?.matnr]);
 
   // Fetch SAP invoice data when a CD vehicle is selected
   useEffect(() => {
@@ -1225,6 +1340,37 @@ export default function CreateGatePassPage() {
     if (isLtLike) setL(k as keyof typeof lt, v);
     else if (isSr) setS(k as keyof typeof sr, v);
     else setC(k as keyof typeof cd, v);
+  };
+
+  const clearCarrierDetails = () => {
+    setCarrier("companyName", "");
+    setCarrier("carrierRegNo", "");
+  };
+
+  const clearDriverDetails = () => {
+    setCarrier("driverNIC", "");
+    setCarrier("driverName", "");
+    setCarrier("contactNo", "");
+  };
+
+  const updateLtBulkVehicle = (vehicle: string, patch: Partial<(typeof ltBulkVehicles)[number]>) => {
+    setLtBulkVehicles((prev) => prev.map((item) => item.vehicle === vehicle ? { ...item, ...patch } : item));
+  };
+
+  const loadLtBulkVehicleLocations = async (vehicle: string, matnr = "", q = "", vehicleLocationType?: string) => {
+    const effectiveLocationType = vehicleLocationType || ltBulkVehicles.find((item) => item.vehicle === vehicle)?.toLocationType || "";
+    if (!effectiveLocationType) return;
+    setLtBulkLocationLoading((prev) => ({ ...prev, [vehicle]: true }));
+    try {
+      const params = new URLSearchParams({ field: "location", q, limit: "300", locationType: effectiveLocationType });
+      if (matnr) params.set("matnr", matnr);
+      const res = await fetch(`/api/lookups?${params.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { options?: LookupOption[] };
+      setLtBulkLocationOptions((prev) => ({ ...prev, [vehicle]: data.options ?? [] }));
+    } finally {
+      setLtBulkLocationLoading((prev) => ({ ...prev, [vehicle]: false }));
+    }
   };
 
   const setMileage = (k: string, v: string) => {
@@ -1485,10 +1631,15 @@ export default function CreateGatePassPage() {
     const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
 
     if (isLtLike) {
-      if (!lt.toLocation) e.toLocation = "Destination location is required";
+      if (ltBulkMode) {
+        if (ltBulkVehicles.length === 0) e.vehicle = "Add at least one vehicle to the bulk list";
+        else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocationType)) e.toLocation = "Select a location type for every bulk vehicle";
+        else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocation)) e.toLocation = "Select a destination for every bulk vehicle";
+        else if (ltBulkVehicles.some((vehicle) => vehicle.currentLocation && vehicle.toLocation === vehicle.currentLocation)) e.toLocation = "A vehicle destination cannot be the same as its current location";
+      } else if (!lt.toLocation) e.toLocation = "Destination location is required";
       else if (selectedVehicleDetail?.currentLocation && lt.toLocation === selectedVehicleDetail.currentLocation) e.toLocation = "To Location cannot be the same as the vehicle's current location";
       if (!lt.outReason) e.outReason = "Reason for going out is required";
-      if (!lt.vehicle) e.vehicle = "Vehicle is required";
+      if (!ltBulkMode && !lt.vehicle) e.vehicle = "Vehicle is required";
       if (!lt.approver) e.approver = "Approver is required";
       if (!lt.departureDate) e.departureDate = "Departure date is required";
       else if (parseDate(lt.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
@@ -1794,12 +1945,35 @@ export default function CreateGatePassPage() {
         };
 
     try {
-      const res = await fetch("/api/gate-pass", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+      if (isLtLike && ltBulkMode) {
+        const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const batchPayloads = ltBulkVehicles.map((vehicle, index) => ({
+          ...(payload as Record<string, unknown>),
+          vehicle: vehicle.vehicle,
+          chassis: vehicle.chassisNo || null,
+          make: vehicle.make || null,
+          vehicleColor: vehicle.colour || null,
+          toLocation: vehicle.toLocation || null,
+          fromLocation: vehicle.currentLocation || lt.fromLocation || null,
+          comments: `[[LT_BATCH:${batchId}]][[LT_BATCH_INDEX:${index + 1}]][[LT_BATCH_TOTAL:${ltBulkVehicles.length}]]`,
+        }));
+
+        for (const item of batchPayloads) {
+          const res = await fetch("/api/gate-pass", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(item),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to submit bulk transfer"); }
+        }
+      } else {
+        const res = await fetch("/api/gate-pass", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+      }
       setSubmitted(true);
       setTimeout(() => router.push("/gate-pass"), 2500);
     } catch (err) {
@@ -2507,14 +2681,7 @@ export default function CreateGatePassPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
                       <Field label="Approver Id" required error={errors.approver}>
                         {assignedApprover ? (
-                          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                            </svg>
-                            <span className="font-medium text-xs truncate">{assignedApprover.name}</span>
-                            <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                          </div>
+                          renderAssignedApprover()
                         ) : (
                           <SearchInput value={sr.approver} onChange={(v) => { setS("approver", v); void fetchLookup("approver", v); }} onFocus={() => void fetchLookup("approver", sr.approver)} placeholder="Search approver" error={errors.approver} options={lookupOptions.approver} />
                         )}
@@ -3046,14 +3213,7 @@ export default function CreateGatePassPage() {
                                             Select Approver <span style={{ color: "#dc2626" }}>*</span>
                                           </label>
                                           {assignedApprover ? (
-                                            <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                                              style={{ background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" }}>
-                                              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                              </svg>
-                                              <span className="font-semibold truncate">{assignedApprover.name}</span>
-                                              <span className="text-xs ml-1" style={{ color: "#3b82f6" }}>(auto-assigned)</span>
-                                            </div>
+                                            renderAssignedApprover()
                                           ) : (
                                             <select
                                               value={mainOutApprover}
@@ -3136,7 +3296,32 @@ export default function CreateGatePassPage() {
 
               {/* Vehicle Selection — shown first so To Location can be filtered by Matnr */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                <SectionTitle>Vehicle</SectionTitle>
+                <div className="flex items-center justify-between gap-3 mb-5">
+                  <SectionTitle>Vehicle</SectionTitle>
+                  {!isDraftMode && !isRejectEditMode && (
+                    <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer" style={{ color: "var(--text)" }}>
+                      <input
+                        type="checkbox"
+                        checked={ltBulkMode}
+                        onChange={(e) => {
+                          setLtBulkMode(e.target.checked);
+                          setL("vehicle", "");
+                          setSelectedVehicleDetail(ltBulkVehicles[0] ? {
+                            chassisNo: ltBulkVehicles[0].chassisNo,
+                            model: ltBulkVehicles[0].model,
+                            make: ltBulkVehicles[0].make,
+                            colourFamily: ltBulkVehicles[0].colourFamily,
+                            colour: ltBulkVehicles[0].colour,
+                            matnr: ltBulkVehicles[0].matnr,
+                            currentLocation: ltBulkVehicles[0].currentLocation,
+                          } : null);
+                        }}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      Bulk vehicles
+                    </label>
+                  )}
+                </div>
                 {isDraftMode || isRejectEditMode ? (
                   <LockedVehicleField label="Vehicle" vehicle={lt.vehicle} details={selectedVehicleDetail} />
                 ) : (
@@ -3158,21 +3343,45 @@ export default function CreateGatePassPage() {
                           error={errors.vehicle}
                           options={lookupOptions.vehicle}
                           onSelect={(o) => {
-                            setL("vehicle", o.value);
                             const detail = {
+                              vehicle:      o.value,
                               chassisNo:    o.chassisNo    ?? "",
                               model:        o.model        ?? "",
                               make:         o.make         ?? "",
                               colourFamily: o.colourFamily ?? "",
                               colour:       o.colour       ?? "",
+                              matnr:        o.matnr        ?? "",
                             };
-                            setSelectedVehicleDetail(detail);
+                            if (ltBulkMode) {
+                              setLtBulkVehicles((prev) => prev.some((v) => v.vehicle === detail.vehicle || (detail.chassisNo && v.chassisNo === detail.chassisNo))
+                                ? prev
+                                : [...prev, detail]);
+                              setL("vehicle", "");
+                              if (ltBulkVehicles.length === 0) {
+                                setSelectedVehicleDetail({
+                                  chassisNo: detail.chassisNo,
+                                  model: detail.model,
+                                  make: detail.make,
+                                  colourFamily: detail.colourFamily,
+                                  colour: detail.colour,
+                                  matnr: detail.matnr,
+                                });
+                              }
+                            } else {
+                              setL("vehicle", o.value);
+                              setSelectedVehicleDetail(detail);
+                            }
                             setL("toLocation", "");
                             setSelectedLocationDetail(null);
                             void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
                               if (loc) {
-                                setL("fromLocation", loc);
-                                setSelectedVehicleDetail({ ...detail, currentLocation: loc });
+                                if (ltBulkMode) {
+                                  setLtBulkVehicles((prev) => prev.map((v) => v.vehicle === detail.vehicle ? { ...v, currentLocation: loc } : v));
+                                  if (ltBulkVehicles.length === 0) setSelectedVehicleDetail({ ...detail, currentLocation: loc });
+                                } else {
+                                  setL("fromLocation", loc);
+                                  setSelectedVehicleDetail({ ...detail, currentLocation: loc });
+                                }
                               }
                             });
                           }}
@@ -3209,7 +3418,138 @@ export default function CreateGatePassPage() {
                         )}
                       </div>
                     </div>
-                    {selectedVehicleDetail && (
+                    {ltBulkMode && (
+                      <div className="mt-3 rounded-xl border overflow-visible" style={{ background: "var(--surface2)", borderColor: errors.vehicle ? "#f87171" : "var(--border)" }}>
+                        <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: "var(--border)" }}>
+                          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Bulk vehicle list</p>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "#eff6ff", color: "#1d4ed8" }}>{ltBulkVehicles.length}</span>
+                        </div>
+                        {ltBulkVehicles.length === 0 ? (
+                          <p className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>Search and select vehicles above to add them.</p>
+                        ) : (
+                          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+                            {ltBulkVehicles.map((v) => (
+                              <div key={`${v.vehicle}-${v.chassisNo}`} className="px-4 py-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold truncate" style={{ color: "var(--text)" }}>{v.vehicle}</p>
+                                    <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                                      {[v.chassisNo, v.currentLocation].filter(Boolean).join(" - ") || "Detecting location..."}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setLtBulkVehicles((prev) => prev.filter((item) => item.vehicle !== v.vehicle))}
+                                    className="w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0"
+                                    style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface)" }}
+                                    title="Remove vehicle"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                </div>
+
+                                <div className="mt-3 rounded-xl border p-3" style={{ background: "var(--surface)", borderColor: errors.toLocation && (!v.toLocationType || !v.toLocation) ? "#f87171" : "var(--border)" }}>
+                                  <label className="block text-sm font-semibold mb-2" style={{ color: "var(--text)" }}>To Location</label>
+                                  <div className="flex flex-wrap gap-3 mb-3">
+                                    {([
+                                      { value: "DEALER", label: "Dealer" },
+                                      { value: "DIMO", label: "DIMO" },
+                                      { value: "PROMOTION", label: "Promotion" },
+                                      { value: "FINANCE", label: "Finance Institution" },
+                                    ] as { value: Exclude<LocationType, "OTHER">; label: string }[]).map((option) => (
+                                      <label key={option.value} className="flex items-center gap-2 cursor-pointer">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            updateLtBulkVehicle(v.vehicle, { toLocationType: option.value, toLocation: "" });
+                                            setLtBulkLocationOptions((prev) => ({ ...prev, [v.vehicle]: [] }));
+                                            void loadLtBulkVehicleLocations(v.vehicle, v.matnr, "", option.value);
+                                          }}
+                                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                                          style={{ borderColor: v.toLocationType === option.value ? "#2563eb" : "var(--border)" }}
+                                          aria-label={option.label}
+                                        >
+                                          {v.toLocationType === option.value && <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                                        </button>
+                                        <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{option.label}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+
+                                  {v.toLocationType === "PROMOTION" || v.toLocationType === "FINANCE" ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(220px,360px)] gap-3 items-start">
+                                      <div>
+                                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Plant Name</label>
+                                        <div className="border rounded-xl px-4 py-2.5 text-sm min-h-[42px] flex items-center"
+                                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: v.toLocationPlant ? "var(--text)" : "var(--text-muted)" }}>
+                                          {v.toLocationPlant || <span className="italic opacity-70">Auto-filled on selection</span>}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Location</label>
+                                        <TwoColumnLocationPicker
+                                          value={v.toLocation ?? ""}
+                                          displayValue={v.toLocationStorage}
+                                          locationType={v.toLocationType}
+                                          matnr={v.matnr}
+                                          error={errors.toLocation && !v.toLocation ? errors.toLocation : undefined}
+                                          onSelect={(option) => updateLtBulkVehicle(v.vehicle, {
+                                            toLocation: option.value,
+                                            toLocationPlant: option.plantDescription ?? "",
+                                            toLocationStorage: option.storageDescription ?? "",
+                                          })}
+                                          onNewLocation={(option) => updateLtBulkVehicle(v.vehicle, {
+                                            toLocation: option.value,
+                                            toLocationPlant: option.plantDescription ?? "",
+                                            toLocationStorage: option.storageDescription ?? "",
+                                          })}
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : v.toLocationType ? (
+                                    <SearchInput
+                                      value={v.toLocation ?? ""}
+                                      onChange={(value) => {
+                                        updateLtBulkVehicle(v.vehicle, { toLocation: value });
+                                        void loadLtBulkVehicleLocations(v.vehicle, v.matnr, value, v.toLocationType);
+                                      }}
+                                      onFocus={() => void loadLtBulkVehicleLocations(v.vehicle, v.matnr, v.toLocation ?? "", v.toLocationType)}
+                                      onSelect={(option) => updateLtBulkVehicle(v.vehicle, { toLocation: option.value })}
+                                      placeholder={`Search ${v.toLocationType.toLowerCase()} destination`}
+                                      error={errors.toLocation && !v.toLocation ? errors.toLocation : undefined}
+                                      loading={ltBulkLocationLoading[v.vehicle]}
+                                      options={ltBulkLocationOptions[v.vehicle] ?? []}
+                                      renderOption={(option) => (
+                                        <div>
+                                          <p className="font-semibold truncate" style={{ color: "var(--text)" }}>{option.value}</p>
+                                          {(option.plantCode || option.storageLocation) && (
+                                            <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                                              {[option.plantCode, option.storageLocation].filter(Boolean).join(" / ")}
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+                                    />
+                                  ) : (
+                                    <div className="border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                                      Select location type first
+                                    </div>
+                                  )}
+                                  {v.currentLocation && v.toLocation === v.currentLocation && (
+                                    <p className="text-red-500 text-xs mt-1">Destination cannot equal current location.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {errors.vehicle && <p className="px-4 pb-3 text-red-500 text-xs">{errors.vehicle}</p>}
+                        {errors.toLocation && <p className="px-4 pb-3 text-red-500 text-xs">{errors.toLocation}</p>}
+                      </div>
+                    )}
+                    {selectedVehicleDetail && !ltBulkMode && (
                       <div className="mt-3 rounded-xl border px-4 py-3"
                         style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
                         <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
@@ -3249,7 +3589,7 @@ export default function CreateGatePassPage() {
               </div>
 
               {/* Location Details — shown only after a vehicle is chosen from the dropdown (not while typing) */}
-              {(!!selectedVehicleDetail || isDraftMode || isRejectEditMode) && (
+              {(!ltBulkMode && (!!selectedVehicleDetail || isDraftMode || isRejectEditMode)) && (
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Location Details</SectionTitle>
 
@@ -3269,6 +3609,9 @@ export default function CreateGatePassPage() {
                       <label key={v || "other"} className="flex items-center gap-2 cursor-pointer">
                         <div
                           onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); }}
+                          onMouseDown={() => {
+                            if (ltBulkMode) setLtBulkVehicles((prev) => prev.map((vehicle) => ({ ...vehicle, toLocation: "" })));
+                          }}
                           className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
                           style={{ borderColor: locationType === v ? "#2563eb" : "var(--border)" }}
                         >
@@ -3280,7 +3623,12 @@ export default function CreateGatePassPage() {
                   </div>
                 </div>
 
-                {(locationType === "PROMOTION" || locationType === "FINANCE") ? (
+                {ltBulkMode ? (
+                  <div className="rounded-xl border px-4 py-3 text-sm" style={{ background: "var(--surface2)", borderColor: errors.toLocation ? "#f87171" : "var(--border)", color: "var(--text-muted)" }}>
+                    Select each vehicle destination in the bulk vehicle list above.
+                    {errors.toLocation && <p className="text-red-500 text-xs mt-1">{errors.toLocation}</p>}
+                  </div>
+                ) : (locationType === "PROMOTION" || locationType === "FINANCE") ? (
                   /* ── 2-column: read-only plant (left) + picker (right) ── */
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
                     <div>
@@ -3379,14 +3727,7 @@ export default function CreateGatePassPage() {
 
                   <Field label="Approver" required error={errors.approver} className="md:col-span-2">
                     {assignedApprover ? (
-                      <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <span className="font-medium">{assignedApprover.name}</span>
-                        <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                      </div>
+                      renderAssignedApprover()
                     ) : (
                       <SearchInput
                         value={lt.approver}
@@ -3603,14 +3944,7 @@ export default function CreateGatePassPage() {
                       <SectionTitle>Approver</SectionTitle>
                       <Field label="Approver" required error={errors.approver}>
                         {assignedApprover ? (
-                          <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm"
-                            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
-                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                            </svg>
-                            <span className="font-medium">{assignedApprover.name}</span>
-                            <span className="text-xs ml-1" style={{ color: "var(--text-muted)" }}>(auto-assigned)</span>
-                          </div>
+                          renderAssignedApprover()
                         ) : (
                           <SearchInput
                             value={cd.approver}
@@ -3671,13 +4005,24 @@ export default function CreateGatePassPage() {
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Carrier Details</p>
-                    <button type="button"
-                      onClick={() => setShowAddCarrier(s => !s)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-semibold"
-                      style={{ background: "#5a9216" }}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                      Add New Carrier
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {(carrierFields.companyName || carrierFields.carrierRegNo) && (
+                        <button type="button"
+                          onClick={clearCarrierDetails}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
+                          style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          Clear
+                        </button>
+                      )}
+                      <button type="button"
+                        onClick={() => setShowAddCarrier(s => !s)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-semibold"
+                        style={{ background: "#5a9216" }}>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                        Add New Carrier
+                      </button>
+                    </div>
                   </div>
                   {/* Inline add carrier form */}
                   <AnimatePresence>
@@ -3747,7 +4092,18 @@ export default function CreateGatePassPage() {
               {/* Driver Details — for CARRIER, DRIVER, OTHER */}
               {(transportMode === "CARRIER" || transportMode === "DRIVER" || transportMode === "OTHER") && (
                 <>
-                  <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Driver Details</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Driver Details</p>
+                    {(carrierFields.driverNIC || carrierFields.driverName || carrierFields.contactNo) && (
+                      <button type="button"
+                        onClick={clearDriverDetails}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
+                        style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="DL / NIC No" required error={errors.driverNIC}>
                       <TextInput value={carrierFields.driverNIC} onChange={(v) => setCarrier("driverNIC", v)} placeholder="e.g. 123456789V or 200012345678" nicOnly maxLength={12} error={errors.driverNIC} />
@@ -3765,7 +4121,18 @@ export default function CreateGatePassPage() {
               {/* Customer Details — only for CUSTOMER mode */}
               {transportMode === "CUSTOMER" && (
                 <>
-                  <p className="text-sm font-semibold mb-3" style={{ color: "var(--text)" }}>Customer Details</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Customer Details</p>
+                    {(carrierFields.driverName || carrierFields.contactNo) && (
+                      <button type="button"
+                        onClick={clearDriverDetails}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
+                        style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="Customer Name" required error={errors.driverName}>
                       <TextInput value={carrierFields.driverName} onChange={(v) => setCarrier("driverName", v)} placeholder="Enter customer name" error={errors.driverName} />

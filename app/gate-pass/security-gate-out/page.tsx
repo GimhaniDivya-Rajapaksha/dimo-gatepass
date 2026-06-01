@@ -429,19 +429,8 @@ function PassCard({ p, mode, onConfirmed }: {
           Drag the car {isOut ? "→ right" : "← left"} to confirm vehicle {isOut ? "departure" : "arrival"}
         </p>
 
-        {/* Print + View Details */}
+        {/* View Details */}
         <div className="flex gap-2">
-          <a
-            href={`/gate-pass/${p.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-opacity hover:opacity-80"
-            style={{ borderColor: "rgba(16,185,129,0.5)", color: "#059669", background: "rgba(16,185,129,0.08)" }}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Print Gate Pass
-          </a>
           <a
             href={`/gate-pass/${p.id}`}
             className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-opacity hover:opacity-80"

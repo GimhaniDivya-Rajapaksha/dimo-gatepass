@@ -36,8 +36,10 @@ function BrandSelector({ value, onChange, multi }: { value: string; onChange: (v
 type User = {
   id: string; name: string; email: string; role: string | null;
   createdAt: string; approverId?: string | null;
+  backupApproverId?: string | null;
   defaultLocation?: string | null; brand?: string | null;
   approver?: { id: string; name: string } | null;
+  backupApprover?: { id: string; name: string } | null;
 };
 
 const ROLES = [
@@ -85,6 +87,7 @@ function AssignAttributesModal({
   const [location, setLocation] = useState(user.defaultLocation ?? "");
   const [brand, setBrand] = useState(user.brand ?? "");
   const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
   const [locations, setLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -102,6 +105,7 @@ function AssignAttributesModal({
     // Validate mandatory fields per role
     if (fields.includes("location") && !location.trim()) { setError("Location is required for this role."); return; }
     if (fields.includes("brand") && !brand.trim()) { setError("Brand is required for this role."); return; }
+    if (approverId && backupApproverId && approverId === backupApproverId) { setError("Approver 1 and Approver 2 must be different."); return; }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/assign-attributes", {
@@ -112,6 +116,7 @@ function AssignAttributesModal({
           ...(fields.includes("location") ? { defaultLocation: location } : {}),
           ...(fields.includes("brand") ? { brand } : {}),
           ...(fields.includes("approver") ? { approverId } : {}),
+          ...(fields.includes("approver") ? { backupApproverId } : {}),
         }),
       });
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
@@ -122,6 +127,10 @@ function AssignAttributesModal({
         approver: fields.includes("approver")
           ? approverId ? (approvers.find(a => a.id === approverId) ? { id: approverId, name: approvers.find(a => a.id === approverId)!.name } : null) : null
           : user.approver,
+        backupApproverId: fields.includes("approver") ? backupApproverId || null : user.backupApproverId,
+        backupApprover: fields.includes("approver")
+          ? backupApproverId ? (approvers.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approvers.find(a => a.id === backupApproverId)!.name } : null) : null
+          : user.backupApprover,
       });
       onClose();
     } catch {
@@ -203,6 +212,24 @@ function AssignAttributesModal({
               </select>
             </div>
           )}
+          {fields.includes("approver") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <select
+                value={backupApproverId} onChange={e => setBackupApproverId(e.target.value)}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                <option value="">No Approver 2 assigned</option>
+                {approvers.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                Initiators can select this approver if Approver 1 is unavailable.
+              </p>
+            </div>
+          )}
 
           <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
             <span className="font-semibold" style={{ color: "var(--text)" }}>{ROLE_LABELS[role]} requires: </span>
@@ -239,7 +266,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   onCreated: (u: User) => void;
   approvers: User[];
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", defaultLocation: "", brand: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
@@ -266,6 +293,9 @@ function AddUserModal({ onClose, onCreated, approvers }: {
     if (fields.includes("brand") && !form.brand.trim()) {
       setError(`Brand is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
     }
+    if (form.approverId && form.backupApproverId && form.approverId === form.backupApproverId) {
+      setError("Approver 1 and Approver 2 must be different."); return;
+    }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/create-user", {
@@ -276,7 +306,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to create user"); setLoading(false); return; }
       // Also save attributes if provided
-      if (data.id && (form.defaultLocation || form.brand || form.approverId)) {
+      if (data.id && (form.defaultLocation || form.brand || form.approverId || form.backupApproverId)) {
         await fetch("/api/admin/assign-attributes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -285,6 +315,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
             defaultLocation: form.defaultLocation || null,
             brand: form.brand || null,
             approverId: form.approverId || null,
+            backupApproverId: form.backupApproverId || null,
           }),
         });
       }
@@ -295,6 +326,10 @@ function AddUserModal({ onClose, onCreated, approvers }: {
         approverId: form.approverId || null,
         approver: form.approverId
           ? (approvers.find(a => a.id === form.approverId) ?? null)
+          : null,
+        backupApproverId: form.backupApproverId || null,
+        backupApprover: form.backupApproverId
+          ? (approvers.find(a => a.id === form.backupApproverId) ?? null)
           : null,
       });
       onClose();
@@ -396,6 +431,19 @@ function AddUserModal({ onClose, onCreated, approvers }: {
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No approver assigned</option>
                 {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+          {fields.includes("approver") && approvers.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <select value={form.backupApproverId} onChange={e => set("backupApproverId", e.target.value)}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                <option value="">No Approver 2 assigned</option>
+                {approvers.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           )}
@@ -970,7 +1018,10 @@ export default function AdminPage() {
                               )
                             )}
                             {ROLE_ATTRS[user.role].includes("approver") && user.approver && (
-                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>👤 {user.approver.name}</p>
+                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 1: {user.approver.name}</p>
+                            )}
+                            {ROLE_ATTRS[user.role].includes("approver") && user.backupApprover && (
+                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 2: {user.backupApprover.name}</p>
                             )}
                           </div>
                           <button
