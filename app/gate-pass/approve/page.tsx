@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
@@ -14,7 +14,30 @@ type GatePass = {
   hasImmediate: boolean | null; cashierCleared: boolean | null;
   createdBy: { name: string }; createdAt: string;
   parentPass: ParentPass | null;
+  comments: string | null;
 };
+
+type BatchGroup = {
+  id: string;
+  isBatch: true;
+  passes: GatePass[];
+  gatePassNumber: string;
+  toLocation: string | null;
+  fromLocation: string | null;
+  createdBy: { name: string };
+  departureDate: string | null;
+  status: string;
+};
+
+type ApproverRow = GatePass | BatchGroup;
+
+function getLtBatchId(pass: GatePass) {
+  return pass.comments?.match(/\[\[LT_BATCH:([^\]]+)\]\]/)?.[1] ?? null;
+}
+
+function isBatchRow(row: ApproverRow): row is BatchGroup {
+  return "isBatch" in row;
+}
 
 const statusCfg: Record<string, { label: string; bg: string; color: string }> = {
   PENDING_APPROVAL: { label: "Approval Pending", bg: "#fff7ed", color: "#c2410c" },
@@ -41,6 +64,8 @@ export default function ApproverListPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [selectedByBatch, setSelectedByBatch] = useState<Record<string, string[]>>({});
+  const [batchBusy, setBatchBusy] = useState<string | null>(null);
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({
     LOCATION_TRANSFER: 0, CUSTOMER_DELIVERY: 0, AFTER_SALES: 0,
   });
@@ -66,7 +91,7 @@ export default function ApproverListPage() {
       passType: activeType,
       status: "PENDING_APPROVAL",
       page: String(page),
-      limit: "10",
+      limit: activeType === "LOCATION_TRANSFER" ? "50" : "10",
       ...(search ? { search } : {}),
     });
     try {
@@ -85,10 +110,64 @@ export default function ApproverListPage() {
   useEffect(() => { fetchPasses(); void fetchCounts(); }, [fetchPasses, fetchCounts]);
   useEffect(() => { setPage(1); }, [activeType, search]);
 
+  const approverRows = useMemo<ApproverRow[]>(() => {
+    if (activeType !== "LOCATION_TRANSFER") return passes;
+    const groups = new Map<string, GatePass[]>();
+    const singles: GatePass[] = [];
+
+    for (const pass of passes) {
+      const batchId = getLtBatchId(pass);
+      if (!batchId) {
+        singles.push(pass);
+        continue;
+      }
+      groups.set(batchId, [...(groups.get(batchId) ?? []), pass]);
+    }
+
+    return [
+      ...Array.from(groups.entries()).map(([id, batchPasses]) => ({
+        id,
+        isBatch: true as const,
+        passes: batchPasses,
+        gatePassNumber: batchPasses.map((p) => p.gatePassNumber).join(", "),
+        toLocation: batchPasses[0]?.toLocation ?? null,
+        fromLocation: batchPasses[0]?.fromLocation ?? null,
+        createdBy: batchPasses[0]?.createdBy ?? { name: "-" },
+        departureDate: batchPasses[0]?.departureDate ?? null,
+        status: batchPasses.every((p) => p.status === batchPasses[0].status) ? batchPasses[0].status : "PENDING_APPROVAL",
+      })),
+      ...singles,
+    ];
+  }, [activeType, passes]);
+
 
   const handleView = (id: string) => {
     fetch(`/api/notifications/read`, { method: "POST" });
     router.push(`/gate-pass/${id}`);
+  };
+
+  const handleBatchAction = async (batch: BatchGroup, action: "approve" | "reject") => {
+    const selected = selectedByBatch[batch.id] ?? batch.passes.map((p) => p.id);
+    if (selected.length === 0) return;
+    const rejectionReason = action === "reject" ? window.prompt("Reason for rejection")?.trim() : "";
+    if (action === "reject" && !rejectionReason) return;
+
+    setBatchBusy(batch.id);
+    try {
+      for (const id of selected) {
+        const res = await fetch(`/api/gate-pass/${id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, rejectionReason }),
+        });
+        if (!res.ok) throw new Error("Batch action failed");
+      }
+      await fetchPasses();
+      await fetchCounts();
+      setSelectedByBatch((prev) => ({ ...prev, [batch.id]: [] }));
+    } finally {
+      setBatchBusy(null);
+    }
   };
 
   return (
@@ -380,14 +459,104 @@ export default function ApproverListPage() {
                       ))}
                     </tr>
                   ))
-                ) : passes.length === 0 ? (
+                ) : approverRows.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
                       No gate passes found
                     </td>
                   </tr>
                 ) : (
-                  passes.map((p, i) => {
+                  approverRows.map((p, i) => {
+                    if (isBatchRow(p)) {
+                      const selected = selectedByBatch[p.id] ?? p.passes.map((item) => item.id);
+                      const destinationCount = new Set(p.passes.map((item) => item.toLocation || "-")).size;
+                      return (
+                        <motion.tr
+                          key={p.id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          style={{ borderBottom: "1px solid var(--border)" }}
+                        >
+                          <td colSpan={7} className="px-4 py-4">
+                            <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "#dbeafe", color: "#1d4ed8" }}>Bulk LT</span>
+                                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+                                      {p.passes.length} vehicles - {destinationCount} destination{destinationCount === 1 ? "" : "s"}
+                                    </p>
+                                  </div>
+                                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                                    By {p.createdBy.name} · Departure {p.departureDate || "-"}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={batchBusy === p.id || selected.length === 0}
+                                    onClick={() => void handleBatchAction(p, "approve")}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+                                    style={{ background: "#16a34a" }}
+                                  >
+                                    Approve selected
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={batchBusy === p.id || selected.length === 0}
+                                    onClick={() => void handleBatchAction(p, "reject")}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+                                    style={{ background: "#dc2626" }}
+                                  >
+                                    Reject selected
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+                                {p.passes.map((item) => (
+                                  <label key={item.id} className="flex items-center gap-3 px-4 py-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={selected.includes(item.id)}
+                                      onChange={(e) => setSelectedByBatch((prev) => {
+                                        const current = prev[p.id] ?? p.passes.map((pass) => pass.id);
+                                        return {
+                                          ...prev,
+                                          [p.id]: e.target.checked
+                                            ? Array.from(new Set([...current, item.id]))
+                                            : current.filter((id) => id !== item.id),
+                                        };
+                                      })}
+                                      className="w-4 h-4 accent-blue-600"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold truncate" style={{ color: "var(--text)" }}>{item.vehicle}</p>
+                                      <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{item.chassis || "-"} · {item.gatePassNumber}</p>
+                                      <p className="text-xs truncate mt-0.5" style={{ color: "var(--text)" }}>
+                                        <span className="font-semibold">To:</span> {item.toLocation || "-"}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.preventDefault(); handleView(item.id); }}
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center border"
+                                      style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--accent)" }}
+                                      title="View"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                      </svg>
+                                    </button>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    }
                     const sc = statusCfg[p.status] || statusCfg["PENDING_APPROVAL"];
                     return (
                       <motion.tr
@@ -439,7 +608,7 @@ export default function ApproverListPage() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t" style={{ borderColor: "var(--border)" }}>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Showing {passes.length} of {total}
+              Showing {approverRows.length} of {total}
             </p>
             <div className="flex gap-2">
               <button

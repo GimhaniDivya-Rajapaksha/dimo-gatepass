@@ -1,5 +1,5 @@
 "use client";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Suspense } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import TimePicker from "@/components/ui/TimePicker";
@@ -143,7 +143,6 @@ function hasDisplayValue(value?: string | null) {
 function InitiatorGatePassDetailPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const printRef = useRef<HTMLDivElement>(null);
 
   const { data: session } = useSession();
@@ -192,12 +191,6 @@ function InitiatorGatePassDetailPageInner() {
       })
       .catch(() => { setError("Failed to load."); setLoading(false); });
   }, [id]);
-
-  useEffect(() => {
-    if (data && searchParams.get("print") === "1") {
-      setTimeout(() => window.print(), 500);
-    }
-  }, [data, searchParams]);
 
   // Fetch service orders for:
   //   1. Approver reviewing AFTER_SALES MAIN_OUT credit orders
@@ -473,7 +466,6 @@ function InitiatorGatePassDetailPageInner() {
     : rawSc;
   const isLT = data.passType === "LOCATION_TRANSFER";
   const canCancel  = data.status === "PENDING_APPROVAL" && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
-  const canPrint = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(data.status);
   const isApproverView = role === "APPROVER" || role === "ADMIN";
   const isInitiatorView = role === "INITIATOR" || role === "AREA_SALES_OFFICER";
   const isSecurityOfficer = role === "SECURITY_OFFICER";
@@ -1097,7 +1089,7 @@ function InitiatorGatePassDetailPageInner() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {/* Hide the plain print button when the green "Ready to Print" banner already shows it */}
-            {canPrint && !(isInitiatorView && data.status === "APPROVED" && data.passType === "AFTER_SALES" && data.passSubType === "MAIN_OUT") && (
+            {false && (
               <button onClick={() => window.print()}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
                 style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
@@ -1120,19 +1112,19 @@ function InitiatorGatePassDetailPageInner() {
                 </svg>
               </div>
               <div className="flex-1">
-                <p className="text-sm font-bold" style={{ color: "#15803d" }}>All Checks Complete — Gate Pass Ready to Print</p>
+                <p className="text-sm font-bold" style={{ color: "#15803d" }}>All Checks Complete - Ready for Security Gate OUT</p>
                 <p className="text-xs mt-0.5" style={{ color: "#16a34a" }}>
-                  Payment cleared & approved. Security Officer will confirm Gate OUT. Print the gate pass now.
+                  Payment cleared and approved. Security Officer will confirm Gate OUT.
                 </p>
               </div>
-              <button onClick={() => window.print()}
+              {false && <button onClick={() => window.print()}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 shadow-sm"
                 style={{ background: "linear-gradient(135deg,#15803d,#22c55e)" }}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
                 Print Now
-              </button>
+              </button>}
             </div>
           )}
 

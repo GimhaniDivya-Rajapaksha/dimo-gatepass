@@ -16,6 +16,7 @@ export async function GET() {
       role: true,
       defaultLocation: true,
       approver: { select: { id: true, name: true } },
+      backupApprover: { select: { id: true, name: true } },
     },
   });
 

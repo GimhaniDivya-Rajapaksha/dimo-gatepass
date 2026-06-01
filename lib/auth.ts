@@ -38,6 +38,7 @@ async function loadUserClaims(params: { id?: string; email?: string }) {
       role: true,
       defaultLocation: true,
       approver: { select: { name: true } },
+      backupApprover: { select: { name: true } },
     },
   });
 }
@@ -67,6 +68,7 @@ async function ensureAzureUser(params: { email: string; name?: string | null }) 
         role: true,
         defaultLocation: true,
         approver: { select: { name: true } },
+        backupApprover: { select: { name: true } },
       },
     });
     return created;
@@ -179,7 +181,7 @@ export const authOptions: NextAuthOptions = {
 
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       const lookupId =
         (user?.id as string | undefined) ??
         (typeof token.id === "string" ? token.id : undefined) ??
@@ -188,11 +190,21 @@ export const authOptions: NextAuthOptions = {
         (user?.email as string | undefined) ??
         (typeof token.email === "string" ? token.email : undefined);
 
-      const claims =
-        await loadUserClaims({
-          id: lookupId,
-          email: lookupEmail,
-        }).catch(() => null);
+      const shouldRefreshClaims =
+        !!user ||
+        trigger === "update" ||
+        !token.id ||
+        typeof token.role === "undefined" ||
+        typeof token.defaultLocation === "undefined" ||
+        typeof token.approverName === "undefined" ||
+        typeof token.backupApproverName === "undefined";
+
+      const claims = shouldRefreshClaims
+        ? await loadUserClaims({
+            id: lookupId,
+            email: lookupEmail,
+          }).catch(() => null)
+        : null;
 
       if (user) {
         token.id = claims?.id ?? user.id;
@@ -205,6 +217,11 @@ export const authOptions: NextAuthOptions = {
       if (claims) {
         token.defaultLocation = claims.defaultLocation ?? null;
         token.approverName = claims.approver?.name ?? null;
+        token.backupApproverName = claims.backupApprover?.name ?? null;
+      } else if (!shouldRefreshClaims) {
+        token.defaultLocation ??= null;
+        token.approverName ??= null;
+        token.backupApproverName ??= null;
       }
 
       return token;
@@ -215,6 +232,7 @@ export const authOptions: NextAuthOptions = {
         session.user.role = token.role;
         session.user.defaultLocation = (token.defaultLocation as string | null) ?? null;
         session.user.approverName = (token.approverName as string | null) ?? null;
+        session.user.backupApproverName = (token.backupApproverName as string | null) ?? null;
       }
       return session;
     },

@@ -27,6 +27,8 @@ type IncomingVehicle = {
   departureDate: string | null;
   requestedBy: string | null;
   serviceJobNo: string | null;
+  passType: string;
+  passSubType: string | null;
   createdBy: { name: string };
   parentPass: { id: string; gatePassNumber: string; serviceJobNo: string | null } | null;
   hasActiveSubIn?: boolean;
@@ -119,34 +121,53 @@ export default function ASODashboardClient({ user }: Props) {
   const fetchIncoming = useCallback(async () => {
     setIncomingLoading(true);
     try {
-      // Show GATE_OUT SUB_OUT passes at this ASO's destination plant.
+      // Show GATE_OUT passes at this ASO's destination plant.
       // Security workflows are plant-based, so we match by plant prefix instead of exact sub-location text.
-      const outParams = new URLSearchParams({
+      const subOutParams = new URLSearchParams({
         passType: "AFTER_SALES", passSubType: "SUB_OUT",
         status: "GATE_OUT", limit: "50", locationView: "true",
       });
+      const ltParams = new URLSearchParams({
+        passType: "LOCATION_TRANSFER",
+        status: "GATE_OUT", limit: "50", locationView: "true",
+      });
       const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
-      if (destinationPlant) outParams.set("toLocationPlant", destinationPlant);
-      else if (user.defaultLocation) outParams.set("toLocation", user.defaultLocation);
+      if (destinationPlant) {
+        subOutParams.set("toLocationPlant", destinationPlant);
+        ltParams.set("toLocationPlant", destinationPlant);
+      } else if (user.defaultLocation) {
+        subOutParams.set("toLocation", user.defaultLocation);
+        ltParams.set("toLocation", user.defaultLocation);
+      }
 
       // Also fetch APPROVED SUB_IN passes to detect which vehicles already have a sub-in created
-      const [outRes, subInRes] = await Promise.all([
-        fetch(`/api/gate-pass?${outParams}`),
+      const [subOutRes, ltRes, subInRes] = await Promise.all([
+        fetch(`/api/gate-pass?${subOutParams}`),
+        fetch(`/api/gate-pass?${ltParams}`),
         fetch("/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
       ]);
-      if (!outRes.ok) { setIncoming([]); return; }
+      if (!subOutRes.ok && !ltRes.ok) { setIncoming([]); return; }
 
-      const [outData, subInData] = await Promise.all([outRes.json(), subInRes.ok ? subInRes.json() : { passes: [] }]);
+      const [subOutData, ltData, subInData] = await Promise.all([
+        subOutRes.ok ? subOutRes.json() : { passes: [] },
+        ltRes.ok ? ltRes.json() : { passes: [] },
+        subInRes.ok ? subInRes.json() : { passes: [] },
+      ]);
 
       // Build a set of parent pass IDs that already have an APPROVED SUB_IN
       const existingSubInParents = new Set<string>(
         (subInData.passes ?? []).map((p: any) => p.parentPassId).filter(Boolean)
       );
 
-      setIncoming((outData.passes || []).map((p: IncomingVehicle) => ({
+      const incomingPasses = [
+        ...(subOutData.passes || []),
+        ...(ltData.passes || []),
+      ];
+
+      setIncoming(incomingPasses.map((p: IncomingVehicle) => ({
         ...p,
         // Mark if a SUB_IN pass already exists for this vehicle's parent MAIN_IN
-        hasActiveSubIn: existingSubInParents.has(p.parentPass?.id ?? "") || existingSubInParents.has(p.id),
+        hasActiveSubIn: p.passType === "AFTER_SALES" && (existingSubInParents.has(p.parentPass?.id ?? "") || existingSubInParents.has(p.id)),
       })));
     } catch {
       setIncoming([]);
@@ -439,7 +460,7 @@ export default function ASODashboardClient({ user }: Props) {
               <div>
                 <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>No vehicles incoming</p>
                 <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                  When a SUB OUT is created and approved for{user.defaultLocation ? ` ${user.defaultLocation}` : " your location"}, vehicles will appear here.
+                  When a vehicle is released to{user.defaultLocation ? ` ${user.defaultLocation}` : " your location"}, it will appear here.
                 </p>
               </div>
             </div>
@@ -494,6 +515,10 @@ export default function ASODashboardClient({ user }: Props) {
                               style={{ background: "#ede9fe", color: "#7c3aed" }}>
                               🚗 In Transit
                             </span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                              style={{ background: v.passType === "LOCATION_TRANSFER" ? "#dcfce7" : "#dbeafe", color: v.passType === "LOCATION_TRANSFER" ? "#15803d" : "#1d4ed8" }}>
+                              {v.passType === "LOCATION_TRANSFER" ? "Location Transfer" : "After Sales"}
+                            </span>
                           </div>
 
                           {/* Row 2: Chassis, Make, Color */}
@@ -546,7 +571,18 @@ export default function ASODashboardClient({ user }: Props) {
 
                         {/* Action */}
                         <div className="flex-shrink-0 ml-2 flex flex-col gap-1.5">
-                          {v.hasActiveSubIn ? (
+                          {v.passType === "LOCATION_TRANSFER" ? (
+                            <button
+                              onClick={() => void handlePassAction(v.id, "gate_in", "Confirm vehicle arrived at your location")}
+                              disabled={actioningId === v.id}
+                              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap disabled:opacity-50"
+                              style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                              {actioningId === v.id
+                                ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                              Confirm Arrived
+                            </button>
+                          ) : v.hasActiveSubIn ? (
                             <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
                               style={{ background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" }}>
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

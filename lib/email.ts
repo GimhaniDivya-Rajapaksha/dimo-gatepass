@@ -11,30 +11,32 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export function createApprovalToken(passId: string, action: "approve" | "reject"): string {
+export function createApprovalToken(passId: string, action: "approve" | "reject", approverId?: string): string {
   const expiry = Date.now() + 48 * 60 * 60 * 1000;
   const secret = process.env.NEXTAUTH_SECRET!;
-  const payload = `${passId}:${action}:${expiry}`;
+  const payload = `${passId}:${action}:${expiry}:${approverId ?? ""}`;
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return Buffer.from(`${payload}:${sig}`).toString("base64url");
 }
 
-export function verifyApprovalToken(token: string): { passId: string; action: string } | null {
+export function verifyApprovalToken(token: string): { passId: string; action: string; approverId?: string | null } | null {
   try {
     const decoded = Buffer.from(token, "base64url").toString();
     const parts = decoded.split(":");
     if (parts.length < 4) return null;
     const sig = parts[parts.length - 1];
-    const passId = parts[0];
-    const action = parts[1];
-    const expiryStr = parts[2];
+    const payloadParts = parts.slice(0, -1);
+    const passId = payloadParts[0];
+    const action = payloadParts[1];
+    const expiryStr = payloadParts[2];
+    const approverId = payloadParts[3] || null;
     const expiry = parseInt(expiryStr);
     if (Date.now() > expiry) return null;
     const secret = process.env.NEXTAUTH_SECRET!;
-    const payload = `${passId}:${action}:${expiryStr}`;
+    const payload = payloadParts.join(":");
     const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
     if (sig !== expectedSig) return null;
-    return { passId, action };
+    return { passId, action, approverId };
   } catch {
     return null;
   }
@@ -58,13 +60,14 @@ export async function sendApprovalRequestEmail(
   approverEmail: string,
   approverName: string,
   passId: string,
-  pass: GatePassEmailData
+  pass: GatePassEmailData,
+  approverId?: string
 ): Promise<void> {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return; // skip if not configured
 
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const approveToken = createApprovalToken(passId, "approve");
-  const rejectToken  = createApprovalToken(passId, "reject");
+  const approveToken = createApprovalToken(passId, "approve", approverId);
+  const rejectToken  = createApprovalToken(passId, "reject", approverId);
   const approveUrl = `${baseUrl}/api/gate-pass/${passId}/email-action?token=${approveToken}&action=approve`;
   const rejectUrl  = `${baseUrl}/api/gate-pass/${passId}/email-action?token=${rejectToken}&action=reject`;
   const viewUrl    = `${baseUrl}/gate-pass/${passId}`;

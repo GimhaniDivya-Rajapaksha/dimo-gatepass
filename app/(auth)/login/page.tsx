@@ -72,7 +72,7 @@ function LoginForm() {
     else if (role === "RECIPIENT") router.push("/recipient");
     else if (role === "CASHIER") router.push("/cashier");
     else if (role === "AREA_SALES_OFFICER") router.push("/aso");
-    else if (role === "SECURITY_OFFICER") router.push("/security");
+    else if (role === "SECURITY_OFFICER") router.push("/gate-pass/security-gate-out");
     else if (role === "SERVICE_ADVISOR") router.push("/initiator");
     else router.push("/");
   }
