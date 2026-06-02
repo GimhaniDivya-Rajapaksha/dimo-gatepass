@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail } from "@/lib/email";
+import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciEquals(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -24,27 +25,6 @@ function withJourneyNumber<T extends { passType?: string | null; gatePassNumber:
     return { ...pass, gatePassNumber: pass.parentPass.gatePassNumber };
   }
   return pass;
-}
-
-async function findApproversForLocation(location: string | null, selectedApproverName?: string) {
-  const baseWhere = location
-    ? { role: "APPROVER" as const, defaultLocation: location }
-    : { role: "APPROVER" as const };
-
-  if (selectedApproverName?.trim()) {
-    const exact = await prisma.user.findMany({
-      where: {
-        ...baseWhere,
-        name: { equals: selectedApproverName.trim(), mode: "insensitive" },
-      },
-    });
-    if (exact.length > 0) return exact;
-  }
-
-  const sameLocation = await prisma.user.findMany({ where: baseWhere });
-  if (sameLocation.length > 0) return sameLocation;
-
-  return prisma.user.findMany({ where: { role: "APPROVER" } });
 }
 
 async function sendApprovalEmailsToApprovers(approvers: { id: string; email: string; name: string }[], gatePass: any, createdByName: string) {
@@ -405,7 +385,7 @@ export async function POST(req: NextRequest) {
             data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
           });
           gatePass.status = "PENDING_APPROVAL";
-          const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+          const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
           if (approvers.length > 0) {
             await prisma.notification.createMany({
               data: approvers.map((a) => ({
@@ -435,7 +415,7 @@ export async function POST(req: NextRequest) {
           gatePass.status = "CASHIER_REVIEW";
           const [cashiers, approvers] = await Promise.all([
             prisma.user.findMany({ where: { role: "CASHIER" as any } }),
-            findApproversForLocation(approverLocation, selectedApproverName),
+            findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null),
           ]);
           if (cashiers.length > 0) {
             await prisma.notification.createMany({
@@ -469,7 +449,7 @@ export async function POST(req: NextRequest) {
           data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
         });
         gatePass.status = "PENDING_APPROVAL";
-        const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+        const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
         if (approvers.length > 0) {
           await prisma.notification.createMany({
             data: approvers.map((a) => ({
@@ -486,7 +466,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       console.error("[CD] SAP fetch error:", err);
-      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+      const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
@@ -632,7 +612,7 @@ export async function POST(req: NextRequest) {
 
     // Notify Approver if credit-like review is needed (credit or no SAP orders)
     if (hasCredit) {
-      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+      const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({

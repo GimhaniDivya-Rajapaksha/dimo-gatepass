@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail } from "@/lib/email";
+import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -84,10 +85,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Notify approvers (if going to PENDING_APPROVAL)
   if (nextStatus === "PENDING_APPROVAL") {
-    let approverUsers = approver
-      ? await prisma.user.findMany({ where: { role: "APPROVER", name: { equals: approver, mode: "insensitive" } } })
-      : await prisma.user.findMany({ where: { role: "APPROVER" } });
-    if (approver && approverUsers.length === 0) approverUsers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+    const approverUsers = await findApproversForLocationBrand(fromLocation || pass.fromLocation || null, approver, pass.make);
 
     if (approverUsers.length > 0) {
       await prisma.notification.createMany({
