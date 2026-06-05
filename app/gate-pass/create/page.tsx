@@ -3743,9 +3743,11 @@ export default function CreateGatePassPage() {
                       setLt(p => ({ ...p, requestedBy: v }));
                       if (!v) { setLtRequestedByOptions([]); return; }
                       setLtRequestedByLoading(true);
-                      fetch(`/api/lookups?field=requestedBy&q=${encodeURIComponent(v)}&limit=10`)
+                      fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
                         .then(r => r.json())
-                        .then((d: { options?: LookupOption[] }) => { setLtRequestedByOptions(d.options ?? []); })
+                        .then((d: { users?: { id: string; name: string; email: string }[] }) => {
+                          setLtRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
+                        })
                         .finally(() => setLtRequestedByLoading(false));
                     }}
                     placeholder="Search by name or email..."
