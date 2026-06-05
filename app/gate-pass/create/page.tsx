@@ -730,7 +730,10 @@ export default function CreateGatePassPage() {
     arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
+    requestedBy: "",
   });
+  const [ltRequestedByOptions, setLtRequestedByOptions] = useState<LookupOption[]>([]);
+  const [ltRequestedByLoading, setLtRequestedByLoading] = useState(false);
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
@@ -1980,6 +1983,7 @@ export default function CreateGatePassPage() {
           fromLocation: lt.fromLocation || null,
           outReason: lt.outReason,
           approver: lt.approver,
+          requestedBy: lt.requestedBy || null,
           departureDate: lt.departureDate,
           departureTime: lt.departureTime,
           arrivalDate: lt.arrivalDate || null,
@@ -3727,6 +3731,35 @@ export default function CreateGatePassPage() {
                     )}
                   </Field>
                 )}
+              </div>
+
+              {/* Requested By */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Requested By</SectionTitle>
+                <Field label="Requested By" className="mt-3">
+                  <SearchInput
+                    value={lt.requestedBy}
+                    onChange={(v) => {
+                      setLt(p => ({ ...p, requestedBy: v }));
+                      if (!v) { setLtRequestedByOptions([]); return; }
+                      setLtRequestedByLoading(true);
+                      fetch(`/api/lookups?field=requestedBy&q=${encodeURIComponent(v)}&limit=10`)
+                        .then(r => r.json())
+                        .then((d: { options?: LookupOption[] }) => { setLtRequestedByOptions(d.options ?? []); })
+                        .finally(() => setLtRequestedByLoading(false));
+                    }}
+                    placeholder="Search by name or email..."
+                    options={ltRequestedByOptions}
+                    loading={ltRequestedByLoading}
+                    onSelect={(o) => { setLt(p => ({ ...p, requestedBy: o.value })); setLtRequestedByOptions([]); }}
+                    renderOption={(o) => (
+                      <div>
+                        <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{o.label}</p>
+                        <p className="text-xs" style={{ color: "var(--text-muted)" }}>{(o as { email?: string }).email ?? ""}</p>
+                      </div>
+                    )}
+                  />
+                </Field>
               </div>
 
               {/* Location Details — hidden entirely for Gate IN drafts (route is already known) */}
