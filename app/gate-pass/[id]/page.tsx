@@ -29,6 +29,7 @@ type GatePassDetail = {
   hasImmediate: boolean;
   cashierCleared: boolean;
   creditApproved: boolean;
+  cashierOverrideRequested: boolean;
   createdBy: { id: string; name: string; email: string }; approvedBy: { name: string } | null;
   createdAt: string; approvedAt: string | null;
   subPasses?: SubPassSummary[];
@@ -224,6 +225,27 @@ function InitiatorGatePassDetailPageInner() {
       setCancelLoading(false);
       setError("Could not cancel. Please try again.");
     }
+  }
+
+  async function handlePrintGatePass() {
+    if (!data) return;
+    // APPROVED LT/CD: printing counts as Gate OUT — update status before printing
+    if (data.status === "APPROVED" && (data.passType === "LOCATION_TRANSFER" || data.passType === "CUSTOMER_DELIVERY")) {
+      try {
+        const res = await fetch(`/api/gate-pass/${id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "print_gate_out" }),
+        });
+        if (res.ok) {
+          const result = await res.json();
+          setData((prev) => prev ? { ...prev, status: result.gatePass.status, departureDate: result.gatePass.departureDate, departureTime: result.gatePass.departureTime } : prev);
+        }
+      } catch {
+        // Continue to print even if the status update fails
+      }
+    }
+    window.print();
   }
 
   async function handleMarkAsIn() {
@@ -508,6 +530,7 @@ function InitiatorGatePassDetailPageInner() {
   ].filter((field) => hasDisplayValue(field.value));
   const deliveryFields = [
     { label: "Requested By", value: data.createdBy.name },
+    ...(data.passType === "CUSTOMER_DELIVERY" ? [{ label: "Departure From", value: data.fromLocation }] : []),
     { label: "Departure Date", value: data.departureDate },
     { label: "Departure Time", value: data.departureTime },
   ].filter((field) => hasDisplayValue(field.value));
@@ -646,10 +669,10 @@ function InitiatorGatePassDetailPageInner() {
               <span className="w-1 h-1 rounded-full" style={{ background: "var(--border)" }} />
               <span>{new Date(data.createdAt).toLocaleString()}</span>
               <span className="px-2 py-0.5 rounded-md font-medium" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
-                {isLT ? "Location Transfer" : "Customer Delivery"}
+                {isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"}
               </span>
             </div>
-            {data.approvedBy && (
+            {data.approvedBy && data.passType !== "AFTER_SALES" && (
               <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
                 Approved by: <span className="font-semibold" style={{ color: "#15803d" }}>{data.approvedBy.name}</span>
                 {data.approvedAt && <> on {new Date(data.approvedAt).toLocaleString()}</>}
@@ -714,6 +737,19 @@ function InitiatorGatePassDetailPageInner() {
               </div>
             )}
           </div>
+          {(data.fromLocation || data.toLocation) && (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                {data.fromLocation || "?"}
+              </span>
+              <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+              <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }}>
+                {data.toLocation || "?"}
+              </span>
+            </div>
+          )}
         </Section>
 
         {isLT && locationScheduleFields.length > 0 && (
@@ -759,11 +795,17 @@ function InitiatorGatePassDetailPageInner() {
           </Section>
         )}
 
-        {data.comments && (
-          <Section title="Comments">
-            <p className="text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>{data.comments}</p>
-          </Section>
-        )}
+        {(() => {
+          const clean = data.comments
+            ?.replace(/\[\[ASSIGNED_ROLE:[^\]]*\]\]/g, "")
+            .replace(/\[\[LT_BATCH[^\]]*\]\]/g, "")
+            .trim();
+          return clean ? (
+            <Section title="Comments">
+              <p className="text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>{clean}</p>
+            </Section>
+          ) : null;
+        })()}
 
         {/* After Sales Journey Timeline */}
         {data.passSubType && (() => {
@@ -912,8 +954,8 @@ function InitiatorGatePassDetailPageInner() {
           </div>
         )}
 
-        {/* ── Payment Clearance Progress (MAIN_OUT in CASHIER_REVIEW) ── */}
-        {data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT" && data?.status === "CASHIER_REVIEW" && (
+        {/* ── Payment Clearance Progress (any mixed-payment pass in CASHIER_REVIEW) ── */}
+        {data?.status === "CASHIER_REVIEW" && (data?.hasImmediate || data?.hasCredit) && (
           <div className="mb-4 rounded-2xl border overflow-hidden no-print" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
             <div className="px-5 py-3 border-b" style={{ background: "#f8fafc", borderColor: "var(--border)" }}>
               <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Payment Clearance Progress</p>
@@ -980,10 +1022,9 @@ function InitiatorGatePassDetailPageInner() {
           </div>
         )}
 
-        {/* Resubmit Panel — shown to initiator when pass is rejected */}
-        {!isApproverView && data.status === "REJECTED" && !resubmitted && (
+        {/* Resubmit Banner — shown to initiator when pass is rejected */}
+        {!isApproverView && data.status === "REJECTED" && (
           <div className="mb-4 rounded-2xl border overflow-hidden no-print" style={{ borderColor: "#fca5a5" }}>
-            {/* Header */}
             <div className="px-5 py-3 flex items-center gap-2" style={{ background: "#fef2f2" }}>
               <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -992,75 +1033,25 @@ function InitiatorGatePassDetailPageInner() {
                 This gate pass was rejected{data.resubmitCount > 0 ? ` (attempt #${data.resubmitCount + 1})` : ""}
               </span>
             </div>
-            {/* Rejection reason */}
             {data.rejectionReason && (
               <div className="px-5 py-3 border-b" style={{ background: "var(--surface)", borderColor: "#fca5a5" }}>
                 <p className="text-xs font-semibold mb-1" style={{ color: "#991b1b" }}>Rejection Reason</p>
                 <p className="text-sm" style={{ color: "var(--text)" }}>{data.rejectionReason}</p>
               </div>
             )}
-            {/* Resubmit form */}
-            <div className="px-5 py-4" style={{ background: "var(--surface)" }}>
-              {!showResubmitPanel ? (
-                <button
-                  onClick={() => setShowResubmitPanel(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md"
-                  style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  Edit &amp; Resubmit
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>
-                      What did you fix? <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <textarea
-                      value={resubmitNote}
-                      onChange={(e) => setResubmitNote(e.target.value)}
-                      placeholder="Describe what changes you made to address the rejection..."
-                      rows={3}
-                      className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
-                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-                    />
-                  </div>
-                  {/* Optional: update departure date/time */}
-                  {data.departureDate !== undefined && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>
-                          Update Departure Date <span className="font-normal">(optional)</span>
-                        </label>
-                        <DatePicker value={resubmitDate} onChange={setResubmitDate} min={new Date().toISOString().split("T")[0]} placeholder="Pick new date" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>
-                          Update Departure Time <span className="font-normal">(optional)</span>
-                        </label>
-                        <TimePicker value={resubmitTime} onChange={setResubmitTime} placeholder="Pick new time" />
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex gap-2 justify-end pt-1">
-                    <button onClick={() => { setShowResubmitPanel(false); setResubmitNote(""); setError(""); }}
-                      className="px-4 py-2 rounded-xl text-sm font-medium border"
-                      style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
-                      Cancel
-                    </button>
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                      onClick={handleResubmit} disabled={resubmitLoading}
-                      className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
-                      {resubmitLoading
-                        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
-                      {resubmitLoading ? "Resubmitting..." : "Resubmit for Approval"}
-                    </motion.button>
-                  </div>
-                </div>
-              )}
+            <div className="px-5 py-4 flex items-center gap-3" style={{ background: "var(--surface)" }}>
+              <p className="text-xs flex-1" style={{ color: "var(--text-muted)" }}>
+                Open the full form to correct any details, then resubmit for approval. The vehicle cannot be changed.
+              </p>
+              <button
+                onClick={() => router.push(`/gate-pass/create?rejectedId=${id}`)}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md flex-shrink-0"
+                style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit &amp; Resubmit
+              </button>
             </div>
           </div>
         )}
@@ -1088,17 +1079,18 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Hide the plain print button when the green "Ready to Print" banner already shows it */}
-            {false && (
-              <button onClick={() => window.print()}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
-                style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
-                Print Gate Pass
-              </button>
-            )}
+            <button type="button" onClick={(e) => {
+                e.stopPropagation();
+                // DC prints for reference only — skip the print_gate_out side-effect
+                if (role === "DELIVERY_COORDINATOR") { window.print(); } else { void handlePrintGatePass(); }
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
+              style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Print Gate Pass
+            </button>
 
           </div>{/* end flex gap-3 */}
 
@@ -1117,7 +1109,7 @@ function InitiatorGatePassDetailPageInner() {
                   Payment cleared and approved. Security Officer will confirm Gate OUT.
                 </p>
               </div>
-              {false && <button onClick={() => window.print()}
+              {false && <button type="button" onClick={(e) => { e.stopPropagation(); window.print(); }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 shadow-sm"
                 style={{ background: "linear-gradient(135deg,#15803d,#22c55e)" }}>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1211,13 +1203,13 @@ function InitiatorGatePassDetailPageInner() {
           })()}
 
           {/* ── APPROVER: Credit Approval banner (MAIN_OUT with credit orders pending) ── */}
-          {isApproverView && !approveResult && data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT" && !data?.creditApproved && (() => {
+          {isApproverView && !approveResult && data?.hasCredit && !data?.creditApproved && data?.status === "CASHIER_REVIEW" && (() => {
             const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+            const isAfterSalesMainOut = data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT";
             const creditOrders = serviceOrders.filter((o) => {
               const t = (o.payTerm || "").toLowerCase().trim();
               return t !== "" && !immediateTerms.includes(t);
             });
-            // Fall back to showing ALL orders if no credit orders matched (payTerm format may differ)
             const ordersToShow = creditOrders.length > 0 ? creditOrders : serviceOrders;
             const immOrders = serviceOrders.filter((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()) || (o.payTerm || "").trim() === "");
             return (
@@ -1237,8 +1229,8 @@ function InitiatorGatePassDetailPageInner() {
                 </div>
               </div>
 
-              {/* Credit orders table */}
-              {serviceOrdersLoading ? (
+              {/* Credit orders table — only for After Sales (service orders not fetched for CD/LT) */}
+              {isAfterSalesMainOut && serviceOrdersLoading ? (
                 <div className="px-5 py-4 flex items-center gap-2" style={{ borderTop: "1px solid #bfdbfe" }}>
                   <svg className="animate-spin w-4 h-4" style={{ color: "#2563eb" }} fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1246,7 +1238,7 @@ function InitiatorGatePassDetailPageInner() {
                   </svg>
                   <p className="text-xs" style={{ color: "#3b82f6" }}>Loading credit orders…</p>
                 </div>
-              ) : ordersToShow.length > 0 ? (
+              ) : isAfterSalesMainOut && ordersToShow.length > 0 ? (
                 <div style={{ borderTop: "1px solid #bfdbfe" }}>
                   {/* Stats row */}
                   <div className="px-5 py-3 flex items-center gap-3" style={{ background: "#eff6ff" }}>
@@ -1298,11 +1290,7 @@ function InitiatorGatePassDetailPageInner() {
                     </table>
                   </div>
                 </div>
-              ) : !serviceOrdersLoading && serviceOrders.length === 0 ? null : (
-                <div className="px-5 py-3" style={{ borderTop: "1px solid #bfdbfe" }}>
-                  <p className="text-xs" style={{ color: "#3b82f6" }}>No credit orders found. Approve to proceed.</p>
-                </div>
-              )}
+              ) : isAfterSalesMainOut && !serviceOrdersLoading && serviceOrders.length === 0 ? null : null}
 
               <div className="px-5 py-4 flex items-center gap-3" style={{ borderTop: "1px solid #bfdbfe" }}>
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
@@ -1521,6 +1509,54 @@ function InitiatorGatePassDetailPageInner() {
               </>
             )}
 
+            {/* ── APPROVER: Payment Override Approval (CASHIER_REVIEW + cashierOverrideRequested) ── */}
+            {isApproverView && data.status === "CASHIER_REVIEW" && data.cashierOverrideRequested && !approveResult && (
+              <div className="w-full rounded-2xl border overflow-hidden mb-2"
+                style={{ borderColor: "#fdba74", background: "var(--surface)" }}>
+                <div className="px-5 py-3.5 flex items-center gap-3"
+                  style={{ background: "linear-gradient(135deg,#fff7ed,#fef3c7)" }}>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fde68a" }}>
+                    <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold" style={{ color: "#92400e" }}>Payment Override Requested</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
+                      The cashier has escalated this pass — payment cannot be cleared at this time. You can approve Gate OUT to proceed without full payment clearance.
+                    </p>
+                  </div>
+                </div>
+                <div className="px-5 py-3 flex items-center justify-end gap-3">
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                    onClick={async () => {
+                      setApproveLoading(true);
+                      try {
+                        const res = await fetch(`/api/gate-pass/${id}/status`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "cashier_override_approve" }),
+                        });
+                        if (!res.ok) throw new Error("Failed");
+                        setApproveResult("approved");
+                        setTimeout(() => router.push("/gate-pass/approve"), 2000);
+                      } catch {
+                        setApproveLoading(false);
+                        setError("Could not approve override. Please try again.");
+                      }
+                    }}
+                    disabled={approveLoading}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg,#b45309,#d97706)" }}>
+                    {approveLoading
+                      ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                      : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                    {approveLoading ? "Approving..." : "Approve Override — Allow Gate OUT"}
+                  </motion.button>
+                </div>
+              </div>
+            )}
+
             {/* ── INITIATOR / AREA_SALES_OFFICER buttons (own passes only) ── */}
             {isInitiatorView && (
               <>
@@ -1656,11 +1692,24 @@ function InitiatorGatePassDetailPageInner() {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border"
-                      style={{ background: "var(--surface)", borderColor: "#3b82f6", color: "#3b82f6", opacity: 0.7 }}>
+                      style={{
+                        background: "var(--surface)",
+                        borderColor: data.status === "COMPLETED" ? "#a78bfa" : "var(--border)",
+                        color: data.status === "COMPLETED" ? "#5b21b6" : "var(--text-muted)",
+                        opacity: 0.8,
+                      }}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        {data.status === "COMPLETED"
+                          ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
                       </svg>
-                      {data.status === "CASHIER_REVIEW" ? "Awaiting Cashier Review" : "Completed"}
+                      {data.status === "CASHIER_REVIEW"  ? "Awaiting Cashier Review"
+                        : data.status === "APPROVED"     ? "Approved — Awaiting Security"
+                        : data.status === "INITIATOR_IN" ? "At Gate — Awaiting Security Gate IN"
+                        : data.status === "INITIATOR_OUT"? "Awaiting Security Gate OUT"
+                        : data.status === "GATE_OUT"     ? "Gate Out — In Transit"
+                        : data.status === "COMPLETED"    ? "Completed"
+                        : data.status.replace(/_/g, " ")}
                     </div>
                   )
                 )}

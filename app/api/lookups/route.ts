@@ -395,6 +395,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (field === "carrier") {
+    const companyName = normalize(body.companyName ?? "");
+    const registrationNo = normalize(body.registrationNo ?? "");
+    if (!companyName || !registrationNo) {
+      return NextResponse.json({ error: "companyName and registrationNo are required" }, { status: 400 });
+    }
+    try {
+      const created = await prisma.carrierOption.upsert({
+        where: { registrationNo },
+        update: { companyName },
+        create: { companyName, registrationNo },
+      });
+      return NextResponse.json({
+        option: { id: created.id, companyName: created.companyName, registrationNo: created.registrationNo },
+      });
+    } catch (e) {
+      console.error("Carrier create error:", e);
+      return NextResponse.json({ error: "Failed to save carrier." }, { status: 500 });
+    }
+  }
+
   if (field !== "vehicle") {
     return NextResponse.json({ error: "Only vehicle creation is supported." }, { status: 400 });
   }

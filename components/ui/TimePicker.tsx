@@ -30,7 +30,6 @@ interface TimePickerProps {
 export default function TimePicker({
   value, onChange, placeholder = "Select time", error, date, minTime,
 }: TimePickerProps) {
-  // Determine if the given date is today — if so, block past times
   const nowRef = new Date();
   let isToday = false;
   if (date) {
@@ -41,37 +40,39 @@ export default function TimePicker({
                 d.getDate()     === nowRef.getDate();
     } catch { /* invalid date string */ }
   }
-  // minTime overrides the today-based floor when provided
   const minTimeH = minTime ? parseInt(minTime.split(":")[0], 10) : (isToday ? nowRef.getHours() : 0);
   const minTimeM = minTime ? parseInt(minTime.split(":")[1], 10) : (isToday ? nowRef.getMinutes() : 0);
   const hasFloor = isToday || !!minTime;
-  // Arrival must be strictly AFTER departure — add 1 min to the floor when minTime is set
   const floorH = minTime ? (minTimeM === 59 ? minTimeH + 1 : minTimeH) : minTimeH;
   const floorM = minTime ? (minTimeM === 59 ? 0 : minTimeM + 1) : minTimeM;
   const minH = floorH;
   const minM = floorM;
   const isPastHour = (h: number) => hasFloor && h < minH;
   const isPastMin  = (h: number, m: number) => hasFloor && h === minH && m < minM;
+
   const [open, setOpen] = useState(false);
   const [manualMode, setManualMode] = useState(false);
   const [manualValue, setManualValue] = useState(value);
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({});
+  // editingCol: which drum column is in inline-edit mode
+  const [editingCol, setEditingCol] = useState<"hour" | "min" | null>(null);
+  const [editInput, setEditInput] = useState("");
 
   const curH = value ? parseInt(value.split(":")[0], 10) : -1;
   const curM = value ? parseInt(value.split(":")[1], 10) : -1;
 
-  const hourRef      = useRef<HTMLDivElement>(null);
-  const minRef       = useRef<HTMLDivElement>(null);
-  const buttonRef    = useRef<HTMLButtonElement>(null);
-  const popupRef     = useRef<HTMLDivElement>(null);
+  const hourRef   = useRef<HTMLDivElement>(null);
+  const minRef    = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popupRef  = useRef<HTMLDivElement>(null);
 
   const ITEM_H = 44;
 
-  useEffect(() => {
-    setManualValue(value);
-  }, [value]);
+  useEffect(() => { setManualValue(value); }, [value]);
 
-  /* Calculate fixed popup position */
+  // Exit edit mode when popup closes
+  useEffect(() => { if (!open) setEditingCol(null); }, [open]);
+
   function calcPos() {
     if (!buttonRef.current) return;
     const r = buttonRef.current.getBoundingClientRect();
@@ -79,11 +80,9 @@ export default function TimePicker({
     const spaceBelow = window.innerHeight - r.bottom - 8;
     const spaceAbove = r.top - 8;
     const openAbove = spaceBelow < 420 && spaceAbove > spaceBelow;
-
     let left = r.left;
     if (left + popupW > window.innerWidth - 8) left = window.innerWidth - popupW - 8;
     if (left < 8) left = 8;
-
     setPopupStyle({
       position: "fixed",
       top: openAbove ? undefined : r.bottom + 8,
@@ -94,7 +93,6 @@ export default function TimePicker({
     });
   }
 
-  /* Recalculate on scroll / resize while open */
   useEffect(() => {
     if (!open) return;
     calcPos();
@@ -106,7 +104,6 @@ export default function TimePicker({
     };
   }, [open]);
 
-  /* Scroll to selected (or current time if empty) on open */
   useEffect(() => {
     if (!open) return;
     const nowD = new Date();
@@ -127,7 +124,6 @@ export default function TimePicker({
     }, 50);
   }
 
-  /* Close on outside click */
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (
@@ -144,7 +140,6 @@ export default function TimePicker({
   function selectHour(h: number) {
     if (isPastHour(h)) return;
     const m = curM >= 0 ? curM : 0;
-    // If switching to the min-hour and current minute is now past, bump minute to minM
     const safeM = (isToday && h === minH && m < minM) ? minM : m;
     onChange(`${pad(h)}:${pad(safeM)}`);
     hourRef.current?.scrollTo({ top: h * ITEM_H, behavior: "smooth" });
@@ -161,6 +156,31 @@ export default function TimePicker({
     if (pm  && h < 12)  h += 12;
     if (!pm && h >= 12) h -= 12;
     onChange(`${pad(h)}:${pad(curM >= 0 ? curM : 0)}`);
+  }
+
+  // Apply the inline-edit value and exit edit mode
+  function applyInlineEdit() {
+    const raw = editInput.trim();
+    setEditingCol(null);
+    if (!raw) return;
+    const num = parseInt(raw, 10);
+    if (isNaN(num)) return;
+    if (editingCol === "hour") {
+      const h = Math.max(0, Math.min(23, num));
+      if (!isPastHour(h)) {
+        const m = curM >= 0 ? curM : 0;
+        const safeM = (hasFloor && h === minH && m < minM) ? minM : m;
+        onChange(`${pad(h)}:${pad(safeM)}`);
+        setTimeout(() => hourRef.current?.scrollTo({ top: h * ITEM_H, behavior: "smooth" }), 50);
+      }
+    } else if (editingCol === "min") {
+      const m = Math.max(0, Math.min(59, num));
+      const h = curH >= 0 ? curH : 0;
+      if (!isPastMin(h, m)) {
+        onChange(`${pad(h)}:${pad(m)}`);
+        setTimeout(() => minRef.current?.scrollTo({ top: m * ITEM_H, behavior: "smooth" }), 50);
+      }
+    }
   }
 
   function applyManualValue(nextValue = manualValue) {
@@ -193,15 +213,8 @@ export default function TimePicker({
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => {
-          setOpen(o => !o);
-          setManualMode(false);
-        }}
-        onDoubleClick={() => {
-          setOpen(true);
-          setManualMode(true);
-          setManualValue(value || currentTimeValue());
-        }}
+        onClick={() => { setOpen(o => !o); setManualMode(false); }}
+        onDoubleClick={() => { setOpen(true); setManualMode(true); setManualValue(value || currentTimeValue()); }}
         title="Double-click to type a time"
         className="w-full flex items-center gap-3 border rounded-xl px-4 py-2.5 text-sm transition-all text-left"
         style={{
@@ -235,7 +248,8 @@ export default function TimePicker({
           </svg>
         )}
       </button>
-      {/* ── Popup — rendered at fixed position to escape overflow:hidden parents ── */}
+
+      {/* ── Popup ── */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -263,12 +277,9 @@ export default function TimePicker({
                 <p className="text-sm font-black text-white tracking-wide">Select Time</p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={selectNow}
+                <button type="button" onClick={selectNow}
                   className="px-3 py-1.5 rounded-xl text-xs font-black transition-all hover:opacity-90 active:scale-95"
-                  style={{ background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)", color: "white" }}
-                >
+                  style={{ background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)", color: "white" }}>
                   Now
                 </button>
                 <div className="px-3 py-1.5 rounded-xl"
@@ -280,7 +291,7 @@ export default function TimePicker({
               </div>
             </div>
 
-            {/* ── Drum-roll picker ── */}
+            {/* ── Manual type mode ── */}
             {manualMode && (
               <div className="px-4 py-3 flex items-end gap-2" style={{ borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>
                 <label className="flex-1">
@@ -300,20 +311,14 @@ export default function TimePicker({
                     autoFocus
                   />
                 </label>
-                <button
-                  type="button"
-                  onClick={() => applyManualValue()}
+                <button type="button" onClick={() => applyManualValue()}
                   className="px-3 py-2 rounded-xl text-xs font-black text-white"
-                  style={{ background: "#2563eb" }}
-                >
+                  style={{ background: "#2563eb" }}>
                   Set
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setManualMode(false)}
+                <button type="button" onClick={() => setManualMode(false)}
                   className="px-3 py-2 rounded-xl text-xs font-black border"
-                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
-                >
+                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}>
                   Scroll
                 </button>
               </div>
@@ -321,19 +326,21 @@ export default function TimePicker({
 
             <div className="flex items-stretch px-4 pt-3 pb-2 gap-2">
 
-              {/* Hour column */}
+              {/* ── Hour column ── */}
               <div className="flex-1 flex flex-col items-center gap-1">
                 <p className="text-[9px] font-black uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Hour</p>
                 <div className="relative w-full" style={{ height: ITEM_H * 4 }}>
                   <div className="absolute top-0 left-0 right-0 h-10 pointer-events-none z-10 rounded-t-xl"
                     style={{ background: "linear-gradient(to bottom, var(--surface), transparent)" }} />
+                  {/* Selection highlight */}
                   <div className="absolute left-0 right-0 pointer-events-none z-10 rounded-xl"
                     style={{ top: ITEM_H * 1.5, height: ITEM_H, background: "rgba(59,130,246,0.1)", border: "1.5px solid rgba(59,130,246,0.3)" }} />
                   <div
                     ref={hourRef}
                     className="absolute inset-0 overflow-y-auto scrollbar-hide"
-                    style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }}
+                    style={{ scrollSnapType: editingCol === "hour" ? "none" : "y mandatory", scrollbarWidth: "none" }}
                     onScroll={(e) => {
+                      if (editingCol === "hour") return; // don't change value while editing
                       const top = (e.target as HTMLDivElement).scrollTop;
                       let h = Math.round(top / ITEM_H);
                       if (isPastHour(h)) { h = minH; hourRef.current?.scrollTo({ top: minH * ITEM_H, behavior: "smooth" }); }
@@ -347,9 +354,14 @@ export default function TimePicker({
                         const h12v = i === 0 ? 12 : i > 12 ? i - 12 : i;
                         const sel = i === curH;
                         const past = isPastHour(i);
+                        const isEditing = sel && editingCol === "hour";
                         return (
                           <div key={i}
-                            onClick={() => selectHour(i)}
+                            onClick={() => { if (!isEditing) selectHour(i); }}
+                            onDoubleClick={(e) => {
+                              e.preventDefault();
+                              if (sel && !past) { setEditingCol("hour"); setEditInput(pad(h12v)); }
+                            }}
                             className="flex items-center justify-center transition-all"
                             style={{
                               height: ITEM_H,
@@ -358,10 +370,28 @@ export default function TimePicker({
                               fontSize: sel ? "17px" : "13px",
                               color: past ? "var(--text-muted)" : sel ? "#2563eb" : "var(--text-muted)",
                               opacity: past ? 0.3 : 1,
-                              cursor: past ? "not-allowed" : "pointer",
+                              cursor: past ? "not-allowed" : sel ? "text" : "pointer",
                               transform: sel ? "scale(1.1)" : "scale(1)",
                             }}>
-                            <span style={{ fontVariantNumeric: "tabular-nums" }}>{pad(h12v)}</span>
+                            {isEditing ? (
+                              <input
+                                autoFocus
+                                type="text"
+                                inputMode="numeric"
+                                value={editInput}
+                                onChange={e => setEditInput(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                                onKeyDown={e => {
+                                  e.stopPropagation();
+                                  if (e.key === "Enter") applyInlineEdit();
+                                  if (e.key === "Escape") setEditingCol(null);
+                                }}
+                                onBlur={applyInlineEdit}
+                                className="border-none outline-none bg-transparent font-black text-center text-blue-600"
+                                style={{ width: "3ch", fontSize: 17, fontVariantNumeric: "tabular-nums" }}
+                              />
+                            ) : (
+                              <span style={{ fontVariantNumeric: "tabular-nums" }}>{pad(h12v)}</span>
+                            )}
                           </div>
                         );
                       })}
@@ -372,24 +402,26 @@ export default function TimePicker({
                 </div>
               </div>
 
-              {/* Colon divider */}
+              {/* Colon */}
               <div className="flex items-center justify-center w-5 pb-1">
                 <span className="text-2xl font-black" style={{ color: "var(--text-muted)" }}>:</span>
               </div>
 
-              {/* Minute column */}
+              {/* ── Minute column ── */}
               <div className="flex-1 flex flex-col items-center gap-1">
                 <p className="text-[9px] font-black uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Min</p>
                 <div className="relative w-full" style={{ height: ITEM_H * 4 }}>
                   <div className="absolute top-0 left-0 right-0 h-10 pointer-events-none z-10 rounded-t-xl"
                     style={{ background: "linear-gradient(to bottom, var(--surface), transparent)" }} />
+                  {/* Selection highlight */}
                   <div className="absolute left-0 right-0 pointer-events-none z-10 rounded-xl"
                     style={{ top: ITEM_H * 1.5, height: ITEM_H, background: "rgba(59,130,246,0.1)", border: "1.5px solid rgba(59,130,246,0.3)" }} />
                   <div
                     ref={minRef}
                     className="absolute inset-0 overflow-y-auto"
-                    style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }}
+                    style={{ scrollSnapType: editingCol === "min" ? "none" : "y mandatory", scrollbarWidth: "none" }}
                     onScroll={(e) => {
+                      if (editingCol === "min") return; // don't change value while editing
                       const top = (e.target as HTMLDivElement).scrollTop;
                       let m = Math.round(top / ITEM_H);
                       const h = curH >= 0 ? curH : 0;
@@ -401,9 +433,14 @@ export default function TimePicker({
                       {Array.from({ length: 60 }, (_, i) => {
                         const sel = i === curM;
                         const past = isPastMin(curH >= 0 ? curH : 0, i);
+                        const isEditing = sel && editingCol === "min";
                         return (
                           <div key={i}
-                            onClick={() => selectMin(i)}
+                            onClick={() => { if (!isEditing) selectMin(i); }}
+                            onDoubleClick={(e) => {
+                              e.preventDefault();
+                              if (sel && !past) { setEditingCol("min"); setEditInput(pad(i)); }
+                            }}
                             className="flex items-center justify-center transition-all"
                             style={{
                               height: ITEM_H,
@@ -412,11 +449,29 @@ export default function TimePicker({
                               fontSize: sel ? "17px" : "13px",
                               color: past ? "var(--text-muted)" : sel ? "#2563eb" : "var(--text-muted)",
                               opacity: past ? 0.3 : 1,
-                              cursor: past ? "not-allowed" : "pointer",
+                              cursor: past ? "not-allowed" : sel ? "text" : "pointer",
                               transform: sel ? "scale(1.1)" : "scale(1)",
                               fontVariantNumeric: "tabular-nums",
                             }}>
-                            {pad(i)}
+                            {isEditing ? (
+                              <input
+                                autoFocus
+                                type="text"
+                                inputMode="numeric"
+                                value={editInput}
+                                onChange={e => setEditInput(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                                onKeyDown={e => {
+                                  e.stopPropagation();
+                                  if (e.key === "Enter") applyInlineEdit();
+                                  if (e.key === "Escape") setEditingCol(null);
+                                }}
+                                onBlur={applyInlineEdit}
+                                className="border-none outline-none bg-transparent font-black text-center text-blue-600"
+                                style={{ width: "3ch", fontSize: 17, fontVariantNumeric: "tabular-nums" }}
+                              />
+                            ) : (
+                              pad(i)
+                            )}
                           </div>
                         );
                       })}
@@ -432,15 +487,10 @@ export default function TimePicker({
                 <p className="text-[9px] font-black uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>Period</p>
                 <div className="flex flex-col gap-2 mt-6 w-full">
                   {[false, true].map((pm) => (
-                    <button
-                      key={String(pm)}
-                      type="button"
-                      onClick={() => selectPeriod(pm)}
+                    <button key={String(pm)} type="button" onClick={() => selectPeriod(pm)}
                       className="w-full py-2 rounded-xl text-xs font-black transition-all"
                       style={{
-                        background: (pm ? isPM : !isPM) && value
-                          ? "linear-gradient(135deg,#1e3a8a,#2563eb)"
-                          : "var(--surface2)",
+                        background: (pm ? isPM : !isPM) && value ? "linear-gradient(135deg,#1e3a8a,#2563eb)" : "var(--surface2)",
                         color: (pm ? isPM : !isPM) && value ? "white" : "var(--text-muted)",
                         border: `1.5px solid ${(pm ? isPM : !isPM) && value ? "#2563eb" : "var(--border)"}`,
                         boxShadow: (pm ? isPM : !isPM) && value ? "0 2px 8px rgba(37,99,235,0.4)" : "none",
@@ -461,10 +511,7 @@ export default function TimePicker({
                   const [ph, pm2] = p.value.split(":").map(Number);
                   const pastPreset = isPastHour(ph) || isPastMin(ph, pm2);
                   return (
-                    <button
-                      key={p.value}
-                      type="button"
-                      disabled={pastPreset}
+                    <button key={p.value} type="button" disabled={pastPreset}
                       onClick={() => { if (!pastPreset) { onChange(p.value); setOpen(false); } }}
                       className="py-2 rounded-xl text-[11px] font-bold transition-all"
                       style={{

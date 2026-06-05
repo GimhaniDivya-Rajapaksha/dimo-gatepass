@@ -2,7 +2,8 @@ export type NavItem = {
   label: string;
   href: string;
   icon: React.ReactNode;
-  showDraftBadge?: boolean; // shows live DRAFT count badge in sidebar
+  showDraftBadge?: boolean;    // shows live DRAFT count badge in sidebar
+  showOverrideBadge?: boolean; // shows live payment-override count badge in sidebar (APPROVER only)
 };
 
 const DashboardIcon = () => (
@@ -110,6 +111,16 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   APPROVER: [
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
     { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon /> },
+    {
+      label: "Payment Overrides",
+      href: "/gate-pass?status=CASHIER_REVIEW&cashierOverride=true",
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      ),
+      showOverrideBadge: true,
+    },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
@@ -129,5 +140,22 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Create Pass", href: "/gate-pass/create", icon: <BoxIcon /> },
     { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
+  ],
+  DELIVERY_COORDINATOR: [
+    { label: "Dashboard", href: "/delivery-coordinator", icon: <DashboardIcon /> },
+    { label: "How It Works", href: "/delivery-coordinator/guide", icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    )},
+    { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
+    { label: "Gate Out", href: "/gate-pass?status=GATE_OUT", icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+      </svg>
+    )},
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
 };

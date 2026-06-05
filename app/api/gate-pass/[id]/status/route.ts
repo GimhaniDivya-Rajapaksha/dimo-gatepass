@@ -35,8 +35,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
-    if (gatePass.passSubType !== "MAIN_OUT") {
-      return NextResponse.json({ error: "credit_approve only valid for MAIN_OUT" }, { status: 400 });
+    const eligibleForCreditApprove =
+      gatePass.passSubType === "MAIN_OUT" ||
+      (gatePass.hasCredit && gatePass.status === "CASHIER_REVIEW");
+    if (!eligibleForCreditApprove) {
+      return NextResponse.json({ error: "credit_approve only valid for mixed-payment passes" }, { status: 400 });
     }
 
     // Mark credit as approved
@@ -102,8 +105,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    // ── Standard approve / reject flow (LT, AFTER_SALES, CD-CREDIT) ──
-    const newStatus = action === "approve" ? "APPROVED" : "REJECTED";
+    // If the pass was originally created by a Security Officer, the vehicle is already
+    // physically at the gate — skip APPROVED and jump straight to COMPLETED on approval.
+    let isSecurityInitiated = false;
+    if (action === "approve") {
+      const creator = await prisma.user.findUnique({
+        where: { id: gatePass.createdById },
+        select: { role: true },
+      });
+      isSecurityInitiated = creator?.role === "SECURITY_OFFICER";
+    }
+
+    const newStatus = action === "reject"
+      ? "REJECTED"
+      : isSecurityInitiated
+      ? "COMPLETED"
+      : "APPROVED";
+
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
@@ -114,20 +132,46 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    // Notify the pass creator (security officer or initiator)
     await prisma.notification.create({
       data: {
         userId: gatePass.createdById,
         type: action === "approve" ? "GATE_PASS_APPROVED" : "GATE_PASS_REJECTED",
-        title: action === "approve" ? "Gate Pass Approved" : "Gate Pass Rejected",
+        title: action === "approve"
+          ? (isSecurityInitiated ? "Gate Pass Approved & Completed" : "Gate Pass Approved")
+          : "Gate Pass Rejected",
         message:
           action === "approve"
-            ? `Your gate pass ${gatePass.gatePassNumber} has been approved.`
+            ? isSecurityInitiated
+              ? `Gate pass ${gatePass.gatePassNumber} has been approved and automatically completed — vehicle was already confirmed at the gate.`
+              : `Your gate pass ${gatePass.gatePassNumber} has been approved.`
             : `Your gate pass ${gatePass.gatePassNumber} was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : ""}`,
         gatePassId: gatePass.id,
       },
     });
 
-    // Notify Security Officers at fromLocation when LT, MAIN_OUT, or CD-INVOICED is approved
+    // For security-initiated passes: also notify admins & the initiator who completed the form
+    if (isSecurityInitiated && action === "approve") {
+      const [admins, initiators] = await Promise.all([
+        prisma.user.findMany({ where: { role: "ADMIN" } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", defaultLocation: ciLocation(gatePass.fromLocation) } }),
+      ]);
+      const extraRecipients = [...admins, ...initiators].filter((u: { id: string }) => u.id !== gatePass.createdById);
+      if (extraRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: extraRecipients.map((u: { id: string }) => ({
+            userId: u.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Gate Pass Completed (Security Initiated)",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — approved and completed. Security Officer created this pass; vehicle was already at the gate.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+      return NextResponse.json({ gatePass: updated });
+    }
+
+    // Normal approval: notify Security Officers at fromLocation (LT, MAIN_OUT, CD)
     const needsSecurityNotify = (
       (action === "approve" && gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||
       (action === "approve" && gatePass.passType === "LOCATION_TRANSFER") ||
@@ -557,7 +601,78 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // INITIATOR / AREA_SALES_OFFICER: mark as gate out (only for their own APPROVED passes, not MAIN_OUT — those go via Security Officer)
+  // Print Gate OUT: initiator printing the gate pass counts as Gate OUT confirmation.
+  // Security no longer needs to confirm Gate OUT for LT and CD when initiator prints.
+  if (action === "print_gate_out") {
+    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR";
+    if (!canPrintRelease || gatePass.createdById !== session.user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (!["APPROVED", "GATE_OUT", "COMPLETED"].includes(gatePass.status)) {
+      return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
+    }
+    if (gatePass.passType !== "LOCATION_TRANSFER" && gatePass.passType !== "CUSTOMER_DELIVERY") {
+      return NextResponse.json({ error: "Print Gate OUT is only available for Location Transfer and Customer Delivery" }, { status: 400 });
+    }
+
+    // Already past APPROVED — just return, status is fine
+    if (gatePass.status !== "APPROVED") {
+      return NextResponse.json({ gatePass });
+    }
+
+    // Printing = Gate OUT for initiator (bypasses security gate out step)
+    const now = new Date();
+    const isCdPass = gatePass.passType === "CUSTOMER_DELIVERY";
+    const updated = await prisma.gatePass.update({
+      where: { id },
+      data: {
+        status: isCdPass ? "COMPLETED" : "GATE_OUT",
+        departureDate: now.toISOString().split("T")[0],
+        departureTime: now.toTimeString().slice(0, 5),
+      },
+    });
+
+    // Notify creator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_APPROVED",
+        title: isCdPass ? "Gate Pass Printed — Delivery Complete" : "Gate Pass Printed — Vehicle Released",
+        message: isCdPass
+          ? `${gatePass.gatePassNumber} — Gate pass printed. Customer delivery is complete.`
+          : `${gatePass.gatePassNumber} — Gate pass printed. Vehicle has been released and is in transit.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    // For LT: notify destination security + initiators that vehicle is en route
+    if (gatePass.passType === "LOCATION_TRANSFER") {
+      const toLoc = gatePass.toLocation as string | null;
+      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+      const [destSecurity, destInitiators] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
+      ]);
+      const allDestUsers = [...destSecurity, ...destInitiators];
+      if (allDestUsers.length > 0) {
+        const destSOIds = new Set(destSecurity.map((s: { id: string }) => s.id));
+        await prisma.notification.createMany({
+          data: allDestUsers.map((u: { id: string }) => ({
+            userId: u.id,
+            type: "GATE_PASS_RECEIVED",
+            title: destSOIds.has(u.id) ? "Incoming Vehicle — Confirm Gate IN on Arrival" : "Vehicle Arriving — Confirm Gate IN When It Reaches You",
+            message: destSOIds.has(u.id)
+              ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — initiator printed and released. Vehicle is en route to ${toLoc ?? "your location"}. Please confirm Gate IN when it arrives.`
+              : `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm when it arrives.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
+    return NextResponse.json({ gatePass: updated });
+  }
+
   if (action === "gate_out") {
     const canGateOut = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER";
     if (!canGateOut) {
@@ -619,20 +734,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         });
         const toLoc = gatePass.toLocation as string | null;
         const destFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
-        const [destSOs, destInitiators] = await Promise.all([
+        const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
+        const [destSOs, destInitiators, destASOs] = await Promise.all([
           prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destFilter } }),
           prisma.user.findMany({ where: { role: "INITIATOR", ...destFilter } }),
+          prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, ...asoPlantFilter } }),
         ]);
-        const allDest = [...destSOs, ...destInitiators];
+        const allDest = [...destSOs, ...destInitiators, ...destASOs];
         if (allDest.length > 0) {
-          const destSOIds = new Set(destSOs.map((s: { id: string }) => s.id));
+          const destSOIds  = new Set(destSOs.map((s: { id: string }) => s.id));
+          const destASOIds = new Set(destASOs.map((a: { id: string }) => a.id));
           await prisma.notification.createMany({
             data: allDest.map((u: { id: string }) => ({
               userId: u.id,
               type: destSOIds.has(u.id) ? "GATE_PASS_APPROVED" : "GATE_PASS_RECEIVED",
-              title: destSOIds.has(u.id) ? "Incoming Vehicle — Confirm Gate IN on Arrival" : "Vehicle Arriving — Check Vehicle Arrivals",
+              title: destSOIds.has(u.id)
+                ? "Incoming Vehicle — Confirm Gate IN on Arrival"
+                : destASOIds.has(u.id)
+                ? "Vehicle Heading Your Way — Confirm Sub IN on Arrival"
+                : "Vehicle Arriving — Check Vehicle Arrivals",
               message: destSOIds.has(u.id)
                 ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle en route from ${fromLoc ?? "source"}. No source gate security. Please confirm Gate IN on arrival.`
+                : destASOIds.has(u.id)
+                ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Open your dashboard to confirm when it arrives.`
                 : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals.`,
               gatePassId: gatePass.id,
             })),
@@ -885,11 +1009,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // Notify all approvers
-    const approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-    if (approvers.length > 0) {
+    // Notify all approvers and admins
+    const [approvers, admins] = await Promise.all([
+      prisma.user.findMany({ where: { role: "APPROVER" } }),
+      prisma.user.findMany({ where: { role: "ADMIN" } }),
+    ]);
+    const resubmitRecipients = [...approvers, ...admins];
+    if (resubmitRecipients.length > 0) {
       await prisma.notification.createMany({
-        data: approvers.map((a) => ({
+        data: resubmitRecipients.map((a) => ({
           userId: a.id,
           type: "GATE_PASS_RESUBMITTED",
           title: "Gate Pass Resubmitted",
@@ -919,6 +1047,106 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { status: "CANCELLED" as any },
     });
+
+    return NextResponse.json({ gatePass: updated });
+  }
+
+  // CASHIER: request payment override from their assigned approver
+  if (action === "cashier_override_request") {
+    if (session.user.role !== "CASHIER") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !gatePass.hasImmediate || gatePass.cashierCleared) {
+      return NextResponse.json({ error: "Pass is not eligible for override request" }, { status: 400 });
+    }
+    if ((gatePass as any).cashierOverrideRequested) {
+      return NextResponse.json({ error: "Override already requested" }, { status: 400 });
+    }
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: { cashierOverrideRequested: true } as any,
+    });
+
+    // Find this cashier's assigned approver (approverId on the cashier user)
+    const cashierUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { approverId: true, name: true },
+    });
+
+    if (cashierUser?.approverId) {
+      await prisma.notification.create({
+        data: {
+          userId: cashierUser.approverId,
+          type: "GATE_PASS_SUBMITTED",
+          title: "Payment Override Requested — Action Required",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Cashier ${cashierUser.name ?? ""} has requested a payment override. Please review and approve if the vehicle can proceed to Gate OUT without full payment clearance.`,
+          gatePassId: gatePass.id,
+        },
+      });
+    }
+
+    // Also notify the pass creator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_SUBMITTED",
+        title: "Payment Override Requested",
+        message: `${gatePass.gatePassNumber} — The cashier has escalated the payment clearance to an approver for override approval. You will be notified when approved.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    return NextResponse.json({ ok: true, cashierOverrideRequested: true });
+  }
+
+  // APPROVER / ADMIN: approve the cashier payment override → mark cleared → APPROVED
+  if (action === "cashier_override_approve") {
+    if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !(gatePass as any).cashierOverrideRequested) {
+      return NextResponse.json({ error: "Pass is not eligible for override approval" }, { status: 400 });
+    }
+
+    const updated = await prisma.gatePass.update({
+      where: { id },
+      data: {
+        status: "APPROVED",
+        cashierCleared: true,
+        approvedById: session.user.id,
+        approvedAt: new Date(),
+      } as any,
+    });
+
+    // Notify the pass creator (initiator)
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_APPROVED",
+        title: "Payment Override Approved — Vehicle Ready for Gate OUT",
+        message: `Gate pass ${gatePass.gatePassNumber} — the approver has overridden the payment clearance requirement. Security Officer will confirm Gate OUT.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    // Notify Security Officers at fromLocation
+    const fromLoc = gatePass.fromLocation as string | null;
+    const secWhere = fromLoc
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    if (secOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Payment Override — Vehicle Cleared for Gate OUT",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — an approver has overridden the cashier payment clearance. Please confirm Gate OUT.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
 
     return NextResponse.json({ gatePass: updated });
   }

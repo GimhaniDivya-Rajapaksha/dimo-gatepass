@@ -37,6 +37,7 @@ async function loadUserClaims(params: { id?: string; email?: string }) {
       email: true,
       role: true,
       defaultLocation: true,
+      isDisabled: true,
       approver: { select: { name: true } },
       backupApprover: { select: { name: true } },
     },
@@ -71,6 +72,25 @@ async function ensureAzureUser(params: { email: string; name?: string | null }) 
         backupApprover: { select: { name: true } },
       },
     });
+
+    // Notify admins only — approvers don't manage user roles
+    try {
+      const recipients = await prisma.user.findMany({
+        where: { role: "ADMIN" },
+        select: { id: true },
+      });
+      if (recipients.length > 0) {
+        await prisma.notification.createMany({
+          data: recipients.map((r) => ({
+            userId: r.id,
+            type: "NEW_USER_REGISTERED",
+            title: "New User Registered",
+            message: `${name} (${email}) signed in with Microsoft for the first time and needs a role assigned.`,
+          })),
+        });
+      }
+    } catch { /* non-critical */ }
+
     return created;
   } catch {
     return loadUserClaims({ email }).catch(() => null);
@@ -140,10 +160,10 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        let rows: { id: string; name: string; email: string; passwordHash: string; role: string | null }[];
+        let rows: { id: string; name: string; email: string; passwordHash: string; role: string | null; isDisabled: boolean }[];
         try {
-          rows = await prisma.$queryRaw<{ id: string; name: string; email: string; passwordHash: string; role: string | null }[]>`
-            SELECT id, name, email, "passwordHash", role::text FROM "User" WHERE email = ${credentials.email} LIMIT 1
+          rows = await prisma.$queryRaw<{ id: string; name: string; email: string; passwordHash: string; role: string | null; isDisabled: boolean }[]>`
+            SELECT id, name, email, "passwordHash", role::text, "isDisabled" FROM "User" WHERE email = ${credentials.email} LIMIT 1
           `;
         } catch (e) {
           console.error("[auth] DB error during login:", e instanceof Error ? e.message : e);
@@ -152,6 +172,7 @@ export const authOptions: NextAuthOptions = {
 
         const user = rows[0];
         if (!user) return null;
+        if (user.isDisabled) throw new Error("AccountDisabled");
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
         if (!isValid) return null;
@@ -178,6 +199,9 @@ export const authOptions: NextAuthOptions = {
       }).catch(() => null);
 
       if (!ensuredUser) return "/login?error=AccountProvisioningFailed";
+
+      // Block disabled Azure users
+      if ((ensuredUser as any).isDisabled) return "/login?error=AccountDisabled";
 
       return true;
     },

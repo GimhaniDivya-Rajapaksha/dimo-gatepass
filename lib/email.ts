@@ -1,15 +1,73 @@
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "587"),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
+const GRAPH_MAIL_FROM = "digital.service01@dimolanka.com";
+
+function getGraphConfig() {
+  const tenantId = process.env.GRAPH_TENANT_ID || process.env.AZURE_AD_TENANT_ID;
+  const clientId = process.env.GRAPH_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID;
+  const clientSecret = process.env.GRAPH_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET;
+  const sender = (process.env.GRAPH_MAIL_FROM || GRAPH_MAIL_FROM).trim().toLowerCase();
+
+  if (!tenantId || !clientId || !clientSecret) return null;
+  if (sender !== GRAPH_MAIL_FROM) {
+    throw new Error(`GRAPH_MAIL_FROM must be ${GRAPH_MAIL_FROM}`);
+  }
+
+  return { tenantId, clientId, clientSecret, sender };
+}
+
+async function getGraphAccessToken(config: NonNullable<ReturnType<typeof getGraphConfig>>) {
+  const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    scope: GRAPH_SCOPE,
+    grant_type: "client_credentials",
+  });
+
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    throw new Error(`Graph token request failed (${res.status}): ${JSON.stringify(data)}`);
+  }
+
+  return data.access_token as string;
+}
+
+async function sendGraphMail(to: string, subject: string, html: string) {
+  const config = getGraphConfig();
+  if (!config) return; // Email is disabled until Graph env vars are configured.
+
+  const token = await getGraphAccessToken(config);
+  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.sender)}/sendMail`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: {
+        subject,
+        body: { contentType: "HTML", content: html },
+        toRecipients: [
+          { emailAddress: { address: to } },
+        ],
+      },
+      saveToSentItems: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Graph sendMail failed (${res.status}): ${text}`);
+  }
+}
 
 export function createApprovalToken(passId: string, action: "approve" | "reject", approverId?: string): string {
   const expiry = Date.now() + 48 * 60 * 60 * 1000;
@@ -63,8 +121,6 @@ export async function sendApprovalRequestEmail(
   pass: GatePassEmailData,
   approverId?: string
 ): Promise<void> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return; // skip if not configured
-
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const approveToken = createApprovalToken(passId, "approve", approverId);
   const rejectToken  = createApprovalToken(passId, "reject", approverId);
@@ -169,12 +225,11 @@ export async function sendApprovalRequestEmail(
 </body>
 </html>`;
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `DIMO Gate Pass <${process.env.SMTP_USER}>`,
-    to: approverEmail,
-    subject: `[Action Required] Gate Pass ${pass.gatePassNumber} needs your approval`,
-    html,
-  });
+  await sendGraphMail(
+    approverEmail,
+    `[Action Required] Gate Pass ${pass.gatePassNumber} needs your approval`,
+    html
+  );
 }
 
 export async function sendRejectionNotificationEmail(
@@ -182,8 +237,6 @@ export async function sendRejectionNotificationEmail(
   initiatorName: string,
   pass: GatePassEmailData & { rejectionReason?: string | null; approverName: string }
 ): Promise<void> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return;
-
   const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
   const viewUrl = `${baseUrl}/gate-pass/${pass.gatePassNumber}`;
 
@@ -221,10 +274,9 @@ export async function sendRejectionNotificationEmail(
 </body>
 </html>`;
 
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || `DIMO Gate Pass <${process.env.SMTP_USER}>`,
-    to: initiatorEmail,
-    subject: `Gate Pass ${pass.gatePassNumber} was rejected`,
-    html,
-  });
+  await sendGraphMail(
+    initiatorEmail,
+    `Gate Pass ${pass.gatePassNumber} was rejected`,
+    html
+  );
 }

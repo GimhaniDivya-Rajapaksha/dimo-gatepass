@@ -10,7 +10,7 @@ type OrderItem = {
 };
 
 type VehicleRow = {
-  id: string; gatePassNumber: string; vehicle: string;
+  id: string; gatePassNumber: string; passType: string; passSubType: string | null; vehicle: string;
   chassis: string | null; make: string | null; status: string;
   hasCredit: boolean; hasImmediate: boolean;
   cashierCleared: boolean; creditApproved: boolean; hasOrders: boolean;
@@ -152,7 +152,7 @@ export default function OrdersReportPage() {
         <div className="mb-6">
           <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>Vehicle Orders Report</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
-            After Sales MAIN OUT gate passes — credit &amp; immediate SAP order breakdown
+            After Sales MAIN OUT &amp; Customer Delivery passes — credit &amp; immediate SAP order breakdown
           </p>
         </div>
 
@@ -263,7 +263,7 @@ export default function OrdersReportPage() {
                 <thead>
                   <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
                     {[
-                      "Vehicle", "Gate Pass", "Chassis", "Status",
+                      "Vehicle", "Gate Pass", "Type", "Chassis", "Status",
                       "Departure Date", "Departure Time",
                       "From Location", "Live Location",
                       "Credit Orders", "Immediate Orders",
@@ -296,6 +296,19 @@ export default function OrdersReportPage() {
                           {row.gatePassNumber}
                         </Link>
                         {row.serviceJobNo && <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Job: {row.serviceJobNo}</p>}
+                      </td>
+
+                      {/* Pass Type */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {row.passType === "CUSTOMER_DELIVERY" ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#f0fdf4", color: "#15803d" }}>
+                            CD
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                            AS Main Out
+                          </span>
+                        )}
                       </td>
 
                       {/* Chassis */}

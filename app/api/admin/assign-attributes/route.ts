@@ -17,14 +17,35 @@ export async function POST(req: NextRequest) {
   try { await prisma.$executeRaw`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "brand" TEXT`; } catch { /* ignore */ }
   try { await prisma.$executeRaw`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "backupApproverId" TEXT`; } catch { /* ignore */ }
 
-  await (prisma.user as any).update({
-    where: { id: userId },
-    data: {
-      ...(defaultLocation !== undefined ? { defaultLocation: defaultLocation || null } : {}),
-      ...(brand !== undefined ? { brand: brand || null } : {}),
-      ...(approverId !== undefined ? { approverId: approverId || null } : {}),
-      ...(backupApproverId !== undefined ? { backupApproverId: backupApproverId || null } : {}),
-    },
-  });
+  // Build SET clause dynamically and execute as raw SQL so Prisma never tries
+  // to deserialize the user row (which may contain enum values added after the
+  // last prisma generate, e.g. DELIVERY_COORDINATOR).
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let paramIdx = 1;
+
+  if (defaultLocation !== undefined) {
+    setClauses.push(`"defaultLocation" = $${paramIdx++}`);
+    values.push(defaultLocation || null);
+  }
+  if (brand !== undefined) {
+    setClauses.push(`brand = $${paramIdx++}`);
+    values.push(brand || null);
+  }
+  if (approverId !== undefined) {
+    setClauses.push(`"approverId" = $${paramIdx++}`);
+    values.push(approverId || null);
+  }
+  if (backupApproverId !== undefined) {
+    setClauses.push(`"backupApproverId" = $${paramIdx++}`);
+    values.push(backupApproverId || null);
+  }
+
+  if (setClauses.length > 0) {
+    values.push(userId);
+    const sql = `UPDATE "User" SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`;
+    await prisma.$executeRawUnsafe(sql, ...values);
+  }
+
   return NextResponse.json({ success: true });
 }
