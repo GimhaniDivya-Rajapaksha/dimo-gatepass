@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { fetchPlantVehicleRows, findPlantVehicleRow, formatPlantLocationLabel } from "@/lib/location-api";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -26,9 +27,24 @@ export async function POST(req: NextRequest) {
     const lastNum  = lastPass ? parseInt(lastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
     const gatePassNumber = `GP-${String(lastNum + 1).padStart(4, "0")}`;
 
-    const fromLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
+    const securityLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
     const vehicleUpper = vehicle.trim().toUpperCase();
     const draftAssignmentMarker = `[[ASSIGNED_ROLE:${notifyRole}]]`;
+
+    // Gate IN: vehicle arriving AT security's gate → toLocation = security's location, fromLocation = vehicle's current SAP location
+    // Gate OUT: vehicle leaving FROM security's gate → fromLocation = security's location, toLocation = unknown (initiator picks)
+    let fromLocation = gateDirection === "OUT" ? securityLocation : null;
+    const toLocation = gateDirection === "IN"  ? securityLocation : null;
+
+    if (gateDirection === "IN") {
+      try {
+        const rows = await fetchPlantVehicleRows();
+        const match = findPlantVehicleRow(rows, [vehicleUpper, chassis ?? null]);
+        if (match) fromLocation = formatPlantLocationLabel(match);
+      } catch {
+        // SAP unavailable — fromLocation stays null
+      }
+    }
 
     // ── Step 1: create the pass with DRAFT status ──
     const gatePass = await (prisma.gatePass as any).create({
@@ -41,6 +57,7 @@ export async function POST(req: NextRequest) {
         make:         make      || null,
         vehicleColor: vehicleColor || null,
         fromLocation,
+        toLocation,
         createdById:  session.user.id,
         comments:     draftAssignmentMarker,
       },
@@ -55,9 +72,14 @@ export async function POST(req: NextRequest) {
       WHERE id = ${gatePass.id}
     `;
 
-    // ── Notify assigned role ──
+    // ── Notify assigned role — only initiators at the Security Officer's location ──
+    // securityLocation is like "Mercedeze Centre 800 - DIMO 800"; match by plant prefix
+    const plantPrefix = securityLocation ? securityLocation.split(" - ")[0].trim() : null;
     const recipients = await prisma.user.findMany({
-      where: { role: notifyRole as any },
+      where: {
+        role: notifyRole as any,
+        ...(plantPrefix ? { defaultLocation: { startsWith: plantPrefix } } : {}),
+      },
     });
 
     if (recipients.length > 0) {

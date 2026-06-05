@@ -38,7 +38,7 @@ export default function CreateMainOutClient({ mainIn }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!toLocation.trim()) { setError("Destination is required."); return; }
 
@@ -46,19 +46,11 @@ export default function CreateMainOutClient({ mainIn }: Props) {
     setError(null);
 
     try {
-      const res = await fetch("/api/gate-pass", {
-        method: "POST",
+      // Convert the existing MAIN_IN pass to MAIN_OUT in-place — same GP number, no new pass created
+      const res = await fetch(`/api/gate-pass/${mainIn.id}/to-main-out`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          passType: "AFTER_SALES",
-          passSubType: "MAIN_OUT",
-          parentPassId: mainIn.id,
-          vehicle: mainIn.vehicle,
-          chassis: mainIn.chassis || null,
-          make: mainIn.make || null,
-          vehicleColor: mainIn.vehicleColor || null,
-          serviceJobNo: mainIn.serviceJobNo || null,
-          fromLocation: mainIn.toLocation || null,
           toLocation: toLocation.trim(),
           requestedBy: requestedBy.trim() || null,
           driverName: driverName.trim() || null,
@@ -70,10 +62,10 @@ export default function CreateMainOutClient({ mainIn }: Props) {
       });
 
       const d = await res.json();
-      if (!res.ok) { setError(d.error ?? "Failed to create MAIN OUT pass."); return; }
+      if (!res.ok) { setError(d.error ?? "Failed to issue MAIN OUT."); return; }
 
-      // Navigate to the created pass
-      router.push(`/gate-pass/${d.gatePass?.id ?? ""}`);
+      // Navigate to the same gate pass (now in MAIN_OUT state)
+      router.push(`/gate-pass/${d.gatePass?.id ?? mainIn.id}`);
     } finally {
       setSubmitting(false);
     }

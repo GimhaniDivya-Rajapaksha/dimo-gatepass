@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail } from "@/lib/email";
+import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciEquals(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -26,25 +27,25 @@ function withJourneyNumber<T extends { passType?: string | null; gatePassNumber:
   return pass;
 }
 
-async function findApproversForLocation(location: string | null, selectedApproverName?: string) {
-  const baseWhere = location
-    ? { role: "APPROVER" as const, defaultLocation: location }
-    : { role: "APPROVER" as const };
-
-  if (selectedApproverName?.trim()) {
-    const exact = await prisma.user.findMany({
-      where: {
-        ...baseWhere,
-        name: { equals: selectedApproverName.trim(), mode: "insensitive" },
-      },
-    });
-    if (exact.length > 0) return exact;
+async function sendApprovalEmailsToApprovers(approvers: { id: string; email: string; name: string }[], gatePass: any, createdByName: string) {
+  try {
+    for (const approver of approvers) {
+      await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        passType: gatePass.passType,
+        passSubType: gatePass.passSubType,
+        vehicle: gatePass.vehicle,
+        chassis: gatePass.chassis,
+        toLocation: gatePass.toLocation,
+        fromLocation: gatePass.fromLocation,
+        departureDate: gatePass.departureDate,
+        departureTime: gatePass.departureTime,
+        createdByName,
+      }, approver.id);
+    }
+  } catch (emailErr) {
+    console.error("[email] Failed to send approval email:", emailErr);
   }
-
-  const sameLocation = await prisma.user.findMany({ where: baseWhere });
-  if (sameLocation.length > 0) return sameLocation;
-
-  return prisma.user.findMany({ where: { role: "APPROVER" } });
 }
 
 export async function GET(req: NextRequest) {
@@ -65,19 +66,37 @@ export async function GET(req: NextRequest) {
   if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
     const locationView = searchParams.get("locationView") === "true";
     if (status === "DRAFT") {
-      // Security-created drafts are assigned to a role and should only appear
-      // in that role's Pending Forms queue.
+      // Security-created drafts: only show to the role at the SAME location as the Security Officer.
+      // Filter by matching the creator's defaultLocation plant prefix — more reliable than
+      // fromLocation/toLocation which can be null on older passes.
+      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
+      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
       where.AND = [
         { status: "DRAFT" },
         { comments: { contains: `[[ASSIGNED_ROLE:${role}]]` } },
+        plantPrefix
+          ? { createdBy: { defaultLocation: { startsWith: plantPrefix } } }
+          : {},
       ];
-    } else if (role === "INITIATOR" && !locationView) {
+    } else if (role === "INITIATOR" && !locationView && !(passType === "AFTER_SALES" && search)) {
       // INITIATOR sees own passes AND sub-passes linked to their main passes
+      // Exception: bypass when searching After Sales by GP number (e.g. "Find Gate IN Pass" on create screen)
+      // so passes created by Service Advisors or Security Officers are findable.
       const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
+      // Security-created passes (any non-DRAFT status) from Security Officers at the same location
+      // should be visible to the Initiator who completed them, showing real status.
+      if (plantPrefix) {
+        orClauses.push({
+          securityCreated: true,
+          status: { not: "DRAFT" },
+          createdBy: { defaultLocation: { startsWith: plantPrefix } },
+        });
+      }
       // Also show incoming After Sales SUB_OUT passes that have already been
       // confirmed at this initiator's location, so the destination team can
       // track the received vehicle in "My Gate Passes".
@@ -111,6 +130,10 @@ export async function GET(req: NextRequest) {
         const plantLocation = ciStartsWithPlant(asoLocation);
         orClauses.push({ passType: "AFTER_SALES", toLocation: plantLocation });
         orClauses.push({ passType: "AFTER_SALES", fromLocation: plantLocation });
+        // COMPLETED LT passes where ASO confirmed arrival — show in My Gate Passes & Completed.
+        // status: "COMPLETED" inside the OR clause is safe: Prisma ANDs it with any outer
+        // status filter, so it cannot bleed into PENDING_APPROVAL or GATE_OUT lists.
+        orClauses.push({ passType: "LOCATION_TRANSFER", toLocation: plantLocation, status: "COMPLETED" });
       }
       where.AND = [{ OR: orClauses }];
     }
@@ -122,6 +145,18 @@ export async function GET(req: NextRequest) {
         { status: "DRAFT" },
         { createdById: session.user.id },
       ];
+    }
+  } else if (role === "DELIVERY_COORDINATOR") {
+    // DC sees all passes at their location (either departing from or arriving to)
+    const dcLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+    if (dcLocation) {
+      const plant = dcLocation.split(" - ")[0].trim();
+      where.AND = [{
+        OR: [
+          { fromLocation: { startsWith: plant, mode: "insensitive" as const } },
+          { toLocation:   { startsWith: plant, mode: "insensitive" as const } },
+        ],
+      }];
     }
   }
   // APPROVER and ADMIN see all
@@ -143,9 +178,9 @@ export async function GET(req: NextRequest) {
   const parentOnly = searchParams.get("parentOnly") === "true";
   if (passType === "AFTER_SALES" && parentOnly) {
     where.parentPassId = null;
-  } else if (!passType && role !== "INITIATOR" && !status) {
+  } else if (!passType && role !== "INITIATOR" && role !== "AREA_SALES_OFFICER" && !status) {
     // In "All" view (no specific status filter), hide AFTER_SALES sub-passes to reduce clutter.
-    // But when filtering by status (e.g. PENDING_APPROVAL for approver queue), show everything.
+    // Exempt INITIATOR and ASO — both need to see sub-passes in their own lists.
     where.NOT = { AND: [{ passType: "AFTER_SALES" }, { parentPassId: { not: null } }] };
   }
 
@@ -159,11 +194,10 @@ export async function GET(req: NextRequest) {
     where.status = status;
   }
 
-  // CD approver queue: only PENDING_APPROVAL (credit passes routed here at creation)
-  // IMMEDIATE passes go directly to CASHIER_REVIEW; INVOICED go directly to APPROVED
-
-  // For approver AFTER_SALES queue: include CASHIER_REVIEW passes with credit pending
-  if (passType === "AFTER_SALES" && status === "PENDING_APPROVAL") {
+  // Approver queue: when querying PENDING_APPROVAL, also surface CASHIER_REVIEW passes
+  // that have a pending credit component (mixed payment). Applies to all pass types so
+  // that CUSTOMER_DELIVERY mixed-payment passes are visible alongside After Sales ones.
+  if (role === "APPROVER" && status === "PENDING_APPROVAL") {
     delete (where as any).status;
     const andArr: unknown[] = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
     andArr.push({
@@ -175,11 +209,14 @@ export async function GET(req: NextRequest) {
     (where as any).AND = andArr;
   }
 
-  // Cashier pending filter: only passes where cashier still has work (cashierCleared = false)
+  // Cashier filters
   const cashierPending = searchParams.get("cashierPending") === "true";
-  if (cashierPending) {
-    (where as any).cashierCleared = false;
-  }
+  if (cashierPending) (where as any).cashierCleared = false;
+  const cashierClearedParam = searchParams.get("cashierCleared");
+  if (cashierClearedParam === "true")  (where as any).cashierCleared = true;
+  if (cashierClearedParam === "false") (where as any).cashierCleared = false;
+  const cashierOverride = searchParams.get("cashierOverride") === "true";
+  if (cashierOverride) (where as any).cashierOverrideRequested = true;
 
   if (search) {
     where.OR = [
@@ -257,6 +294,26 @@ export async function POST(req: NextRequest) {
   if (session.user.role === "AREA_SALES_OFFICER") {
     if (body.passType !== "AFTER_SALES" || !["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
       return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
+    }
+  }
+
+  // Block duplicate active gate passes for the same chassis within the same pass type.
+  // LT and CD are independent workflows — an active LT does not block a new CD and vice versa.
+  // Sub-passes (parentPassId set) are part of an existing journey — skip the check for those.
+  if (body.chassis && !body.parentPassId) {
+    const activeStatuses = ["PENDING_APPROVAL", "APPROVED", "GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "CASHIER_REVIEW", "DRAFT"];
+    const existing = await (prisma.gatePass as any).findFirst({
+      where: {
+        chassis:  { equals: body.chassis.trim(), mode: "insensitive" },
+        passType: body.passType,
+        status:   { in: activeStatuses },
+      },
+      select: { gatePassNumber: true, status: true },
+    });
+    if (existing) {
+      return NextResponse.json({
+        error: `An active ${(body.passType as string).replace(/_/g, " ")} gate pass (${existing.gatePassNumber}) already exists for this chassis. Complete or cancel it before creating a new one.`,
+      }, { status: 409 });
     }
   }
 
@@ -384,7 +441,7 @@ export async function POST(req: NextRequest) {
             data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
           });
           gatePass.status = "PENDING_APPROVAL";
-          const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+          const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
           if (approvers.length > 0) {
             await prisma.notification.createMany({
               data: approvers.map((a) => ({
@@ -395,6 +452,7 @@ export async function POST(req: NextRequest) {
                 gatePassId: gatePass.id,
               })),
             });
+            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
           }
           return NextResponse.json({ gatePass }, { status: 201 });
         } else if (hasImmediate && hasCredit) {
@@ -413,7 +471,7 @@ export async function POST(req: NextRequest) {
           gatePass.status = "CASHIER_REVIEW";
           const [cashiers, approvers] = await Promise.all([
             prisma.user.findMany({ where: { role: "CASHIER" as any } }),
-            findApproversForLocation(approverLocation, selectedApproverName),
+            findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null),
           ]);
           if (cashiers.length > 0) {
             await prisma.notification.createMany({
@@ -436,6 +494,7 @@ export async function POST(req: NextRequest) {
                 gatePassId: gatePass.id,
               })),
             });
+            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
           }
           return NextResponse.json({ gatePass }, { status: 201 });
         }
@@ -446,7 +505,7 @@ export async function POST(req: NextRequest) {
           data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
         });
         gatePass.status = "PENDING_APPROVAL";
-        const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+        const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
         if (approvers.length > 0) {
           await prisma.notification.createMany({
             data: approvers.map((a) => ({
@@ -457,12 +516,13 @@ export async function POST(req: NextRequest) {
               gatePassId: gatePass.id,
             })),
           });
+          await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
         }
         return NextResponse.json({ gatePass }, { status: 201 });
       }
     } catch (err) {
       console.error("[CD] SAP fetch error:", err);
-      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+      const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
@@ -473,6 +533,7 @@ export async function POST(req: NextRequest) {
             gatePassId: gatePass.id,
           })),
         });
+        await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
       }
       return NextResponse.json({ gatePass }, { status: 201 });
     }
@@ -607,7 +668,7 @@ export async function POST(req: NextRequest) {
 
     // Notify Approver if credit-like review is needed (credit or no SAP orders)
     if (hasCredit) {
-      const approvers = await findApproversForLocation(approverLocation, selectedApproverName);
+      const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
           data: approvers.map((a) => ({
@@ -618,6 +679,7 @@ export async function POST(req: NextRequest) {
             gatePassId: gatePass.id,
           })),
         });
+        await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
       }
     }
 
@@ -651,26 +713,21 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  try {
-    const approversEmail = await prisma.user.findMany({ where: { role: "APPROVER" }, select: { id: true, name: true, email: true } });
-    const createdByUser = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true } });
-    for (const approver of approversEmail) {
-      await sendApprovalRequestEmail(approver.email, approver.name, gatePass.id, {
-        gatePassNumber: gatePass.gatePassNumber,
-        passType: gatePass.passType,
-        passSubType: gatePass.passSubType,
-        vehicle: gatePass.vehicle,
-        chassis: gatePass.chassis,
-        toLocation: gatePass.toLocation,
-        fromLocation: gatePass.fromLocation,
-        departureDate: gatePass.departureDate,
-        departureTime: gatePass.departureTime,
-        createdByName: createdByUser?.name || session.user.name || "Unknown",
-      });
-    }
-  } catch (emailErr) {
-    console.error("[email] Failed to send approval email:", emailErr);
+  // Notify ADMIN users so the dot indicator appears on their dashboard
+  const admins = await prisma.user.findMany({ where: { role: "ADMIN" } });
+  if (admins.length > 0) {
+    await prisma.notification.createMany({
+      data: admins.map((a) => ({
+        userId: a.id,
+        type: "GATE_PASS_SUBMITTED",
+        title: "New Gate Pass Submitted",
+        message: `${session.user.name} submitted ${gatePassNumber} for approval.`,
+        gatePassId: gatePass.id,
+      })),
+    });
   }
+
+  await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
 
   return NextResponse.json({ gatePass }, { status: 201 });
   } catch (err) {
