@@ -134,13 +134,16 @@ export async function GET(req: NextRequest) {
     }
 
     if (field === "requestedBy") {
-      const options = await prisma.requestedByOption.findMany({
-        where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
+      const users = await prisma.user.findMany({
+        where: q
+          ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] }
+          : undefined,
         orderBy: { name: "asc" },
+        select: { id: true, name: true, email: true },
         take,
       });
       return NextResponse.json({
-        options: options.map((row) => ({ id: row.id, value: row.name, label: row.name })),
+        options: users.map((u) => ({ id: u.id, value: u.name, label: u.name, email: u.email })),
       });
     }
 
