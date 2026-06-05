@@ -562,7 +562,7 @@ function InitiatorGatePassDetailPageInner() {
       <style>{`
         @page {
           size: A4 portrait;
-          margin: 8mm 10mm;
+          margin: 8mm 12mm;
         }
         @media print {
           html, body { height: auto !important; }
@@ -1079,10 +1079,10 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {isInitiatorView && (
             <button type="button" onClick={(e) => {
                 e.stopPropagation();
-                // DC prints for reference only — skip the print_gate_out side-effect
-                if (role === "DELIVERY_COORDINATOR") { window.print(); } else { void handlePrintGatePass(); }
+                void handlePrintGatePass();
               }}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
               style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
@@ -1091,7 +1091,7 @@ function InitiatorGatePassDetailPageInner() {
               </svg>
               Print Gate Pass
             </button>
-
+            )}
           </div>{/* end flex gap-3 */}
 
           {/* ── INITIATOR: Print Ready banner (APPROVED = all checks done) ── */}
