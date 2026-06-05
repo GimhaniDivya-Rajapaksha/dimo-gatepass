@@ -33,6 +33,7 @@ export interface GatePass {
   receivedBy?: string;
   receivedAt?: string;
   updatedChassisNumber?: string;
+  subPasses?: { passSubType: string | null }[];
 }
 
 export interface CreateGatePassInput {
