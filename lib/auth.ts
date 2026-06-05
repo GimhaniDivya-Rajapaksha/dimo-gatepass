@@ -50,7 +50,10 @@ async function ensureAzureUser(params: { email: string; name?: string | null }) 
   if (!email) return null;
   const name = normalizeEnv(params.name ?? undefined) || email;
 
-  const existing = await loadUserClaims({ email }).catch(() => null);
+  const existing = await loadUserClaims({ email }).catch((e) => {
+    console.error("[ensureAzureUser] loadUserClaims error:", e);
+    return null;
+  });
   if (existing) return existing;
 
   const passwordHash = await bcrypt.hash(randomBytes(24).toString("hex"), 10);
@@ -92,8 +95,12 @@ async function ensureAzureUser(params: { email: string; name?: string | null }) 
     } catch { /* non-critical */ }
 
     return created;
-  } catch {
-    return loadUserClaims({ email }).catch(() => null);
+  } catch (e) {
+    console.error("[ensureAzureUser] user.create error:", e);
+    return loadUserClaims({ email }).catch((e2) => {
+      console.error("[ensureAzureUser] fallback loadUserClaims error:", e2);
+      return null;
+    });
   }
 }
 
