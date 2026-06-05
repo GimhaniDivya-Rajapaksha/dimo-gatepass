@@ -12,6 +12,7 @@ type GatePass = {
   make: string | null; vehicleColor: string | null;
   createdBy: { name: string }; createdAt: string;
   parentPass: { id: string; gatePassNumber: string; passSubType: string | null } | null;
+  subPasses?: { passSubType: string | null }[];
 };
 
 function collapseJourneyRows(items: GatePass[]) {
