@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles } from "@/lib/sap";
 import { fetchPlantLocationOptions, fetchPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
 
-type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
+type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier";
 
 function normalize(text: string) {
   return text.trim();
