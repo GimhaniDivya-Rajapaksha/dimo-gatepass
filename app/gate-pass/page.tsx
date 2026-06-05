@@ -460,7 +460,7 @@ function GatePassListPageInner() {
                   // dead-end branches that should not appear as active steps in the timeline.
                   const subs = (p.subPasses ?? []).filter(s => !["CANCELLED", "REJECTED"].includes(s.status));
                   const isExpanded = expandedId === p.id;
-                  const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
+                  const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status) && !isDC;
                   const canCancel = p.status === "PENDING_APPROVAL";
                   const totalSteps = subs.length + 1; // include main
                   const completedSteps = [p, ...subs].filter(s => ["COMPLETED", "GATE_OUT", "APPROVED"].includes(s.status)).length;
@@ -683,7 +683,7 @@ function GatePassListPageInner() {
                 ) : (
                   passes.map((p, i) => {
                     const sc = getJourneyStageBadge(p);
-                    const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
+                    const canPrint   = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status) && !isDC;
                     const canCancel  = p.status === "PENDING_APPROVAL";
                     // LT, CD, MAIN_OUT, MAIN_IN, and SUB_OUT all go directly to Security
                     // ASO can gate_out SUB_OUT_IN (vehicle returning from sub-location)
