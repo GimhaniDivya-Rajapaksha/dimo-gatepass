@@ -43,7 +43,7 @@ export default function CreateAsoMainOutClient({ subIn }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!toLocation.trim()) { setError("Customer destination is required."); return; }
 
@@ -51,19 +51,12 @@ export default function CreateAsoMainOutClient({ subIn }: Props) {
     setError(null);
 
     try {
-      const res = await fetch("/api/gate-pass", {
-        method: "POST",
+      // Convert the root MAIN_IN pass to MAIN_OUT in-place (pass the SUB_IN id — API resolves to root MAIN_IN automatically)
+      const targetId = subIn.parentPass?.id ?? subIn.id;
+      const res = await fetch(`/api/gate-pass/${targetId}/to-main-out`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          passType: "AFTER_SALES",
-          passSubType: "MAIN_OUT",
-          parentPassId: subIn.parentPass?.id || null,
-          vehicle: subIn.vehicle,
-          chassis: subIn.chassis || null,
-          make: subIn.make || null,
-          vehicleColor: subIn.vehicleColor || null,
-          serviceJobNo: subIn.serviceJobNo || subIn.parentPass?.serviceJobNo || null,
-          fromLocation: subIn.toLocation || null, // ASO sub-location
           toLocation: toLocation.trim(),
           requestedBy: requestedBy.trim() || null,
           driverName: driverName.trim() || null,
@@ -75,9 +68,9 @@ export default function CreateAsoMainOutClient({ subIn }: Props) {
       });
 
       const d = await res.json();
-      if (!res.ok) { setError(d.error ?? "Failed to create MAIN OUT pass."); return; }
+      if (!res.ok) { setError(d.error ?? "Failed to issue MAIN OUT."); return; }
 
-      router.push(`/gate-pass/${d.gatePass?.id ?? ""}`);
+      router.push(`/gate-pass/${d.gatePass?.id ?? targetId}`);
     } finally {
       setSubmitting(false);
     }

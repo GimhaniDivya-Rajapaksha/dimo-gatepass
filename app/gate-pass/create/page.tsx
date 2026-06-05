@@ -650,6 +650,8 @@ export default function CreateGatePassPage() {
   const rejectedId = searchParams.get("rejectedId");
   const isDraftMode = !!draftId;
   const isRejectEditMode = !!rejectedId;
+  const [resubmitNote, setResubmitNote] = useState("");
+  const [rejectedPassInfo, setRejectedPassInfo] = useState<{ reason: string | null; gatePassNumber: string } | null>(null);
   const [passType, setPassType] = useState<PassType>("LOCATION_TRANSFER");
   const [locationType, setLocationType] = useState<LocationType | "">("");
   const [ltBulkMode, setLtBulkMode] = useState(false);
@@ -671,6 +673,23 @@ export default function CreateGatePassPage() {
     matnr?: string;
     currentLocation?: string;
   } | null>(null);
+  const [activePassWarning, setActivePassWarning] = useState<{ gatePassNumber: string; status: string; id: string } | null>(null);
+
+  async function checkActivePass(chassis: string) {
+    setActivePassWarning(null);
+    if (!chassis) return;
+    try {
+      const res = await fetch(`/api/gate-pass?search=${encodeURIComponent(chassis)}&limit=5`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const activeStatuses = ["PENDING_APPROVAL", "APPROVED", "GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "CASHIER_REVIEW", "DRAFT"];
+      const active = (data.passes ?? []).find(
+        (p: { chassis?: string; status: string; gatePassNumber: string; id: string }) =>
+          p.chassis?.toLowerCase() === chassis.toLowerCase() && activeStatuses.includes(p.status)
+      );
+      if (active) setActivePassWarning({ gatePassNumber: active.gatePassNumber, status: active.status, id: active.id });
+    } catch { /* non-critical */ }
+  }
   const [ltBulkVehicles, setLtBulkVehicles] = useState<Array<{
     vehicle: string;
     chassisNo: string;
@@ -688,7 +707,7 @@ export default function CreateGatePassPage() {
   const [ltBulkLocationOptions, setLtBulkLocationOptions] = useState<Record<string, LookupOption[]>>({});
   const [ltBulkLocationLoading, setLtBulkLocationLoading] = useState<Record<string, boolean>>({});
   const [selectedCdVehicleDetail, setSelectedCdVehicleDetail] = useState<{
-    vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
+    vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string; currentLocation?: string;
   } | null>(null);
   const [selectedSrVehicleDetail, setSelectedSrVehicleDetail] = useState<{
     vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
@@ -700,6 +719,7 @@ export default function CreateGatePassPage() {
     approver: [], companyName: [], carrierRegNo: [],
   });
   const [locationLoading, setLocationLoading] = useState(false);
+  const [draftGateDirection, setDraftGateDirection] = useState<string | null>(null);
 
   const today = currentDateValue(); // "YYYY-MM-DD" for min date constraint
 
@@ -714,7 +734,8 @@ export default function CreateGatePassPage() {
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
-    approver: "", vehicle: "", departureDate: currentDateValue(), departureTime: currentTimeValue(),
+    approver: "", vehicle: "", fromLocation: "",
+    departureDate: currentDateValue(), departureTime: currentTimeValue(),
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
     contactNo: "", mileage: "", insurance: "", garagePlate: "",
   });
@@ -777,6 +798,13 @@ export default function CreateGatePassPage() {
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
 
+  // Auto-dismiss form-level error toast after 6 seconds
+  useEffect(() => {
+    if (!errors.form) return;
+    const t = setTimeout(() => setErrors(prev => { const n = { ...prev }; delete n.form; return n; }), 6000);
+    return () => clearTimeout(t);
+  }, [errors.form]);
+
   useEffect(() => {
     if (!isDraftMode || status !== "authenticated" || !draftId) return;
     let active = true;
@@ -794,27 +822,52 @@ export default function CreateGatePassPage() {
         if (!active) return;
 
         setPassType(pass.passType);
+        setDraftGateDirection(pass.gateDirection ?? null);
+
+        // Auto-populate departure/arrival date+time from the security officer's creation
+        // time so the initiator doesn't have to re-enter it (vehicle is already at the gate).
+        const createdAt = new Date(pass.createdAt);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const autoDate = pass.departureDate
+          || `${createdAt.getFullYear()}-${pad(createdAt.getMonth() + 1)}-${pad(createdAt.getDate())}`;
+        const autoTime = pass.departureTime
+          || `${pad(createdAt.getHours())}:${pad(createdAt.getMinutes())}`;
 
         if (pass.passType === "LOCATION_TRANSFER") {
+          // For Gate IN drafts: fromLocation is auto-fetched from SAP at creation; only fall back to live SAP if still null
+          const sapLocation = !pass.fromLocation
+            ? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "")
+            : undefined;
+          if (!active) return;
+          const resolvedFromLocation = pass.fromLocation ?? sapLocation ?? "";
+          // For Gate IN: toLocation = Security's gate location; fall back to the creator's defaultLocation if not saved
+          const resolvedToLocation = pass.toLocation ?? (pass.gateDirection === "IN" ? (pass.createdBy?.defaultLocation ?? "") : "");
           setLt((prev) => ({
             ...prev,
-            vehicle: pass.vehicle ?? "",
-            fromLocation: pass.fromLocation ?? "",
-            toLocation: pass.toLocation ?? "",
-            outReason: pass.outReason ?? "",
+            vehicle:       pass.vehicle ?? "",
+            fromLocation:  resolvedFromLocation,
+            toLocation:    resolvedToLocation,
+            outReason:     pass.outReason ?? "",
+            departureDate: autoDate,
+            departureTime: autoTime,
+            arrivalDate:   pass.arrivalDate ?? prev.arrivalDate,
+            arrivalTime:   pass.arrivalTime ?? prev.arrivalTime,
           }));
-          const currentLocation = pass.fromLocation ?? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "");
-          if (!active) return;
           setSelectedVehicleDetail({
-            chassisNo: pass.chassis ?? "",
-            model: "",
-            make: pass.make ?? "",
+            chassisNo:    pass.chassis ?? "",
+            model:        "",
+            make:         pass.make ?? "",
             colourFamily: "",
-            colour: pass.vehicleColor ?? "",
-            currentLocation: currentLocation ?? undefined,
+            colour:       pass.vehicleColor ?? "",
+            currentLocation: resolvedFromLocation || undefined,
           });
         } else if (pass.passType === "CUSTOMER_DELIVERY") {
-          setCd((prev) => ({ ...prev, vehicle: pass.vehicle ?? "" }));
+          setCd((prev) => ({
+            ...prev,
+            vehicle:       pass.vehicle ?? "",
+            departureDate: autoDate,
+            departureTime: autoTime,
+          }));
           setSelectedCdVehicleDetail({
             vehicleNo: pass.vehicle ?? "",
             chassisNo: pass.chassis ?? "",
@@ -824,10 +877,23 @@ export default function CreateGatePassPage() {
             colour: pass.vehicleColor ?? "",
           });
         } else if (pass.passType === "AFTER_SALES") {
-          setSrMode(pass.gateDirection === "OUT" ? "out" : "in");
+          const gateDir = pass.gateDirection === "OUT" ? "out" : "in";
+          setSrMode(gateDir);
           setS("vehicle", pass.vehicle ?? "");
           setS("receivingLocation", pass.toLocation ?? "");
           setS("serviceJobNo", pass.serviceJobNo ?? "");
+          // Gate IN (vehicle arriving for service): set arrival date/time from creation
+          if (gateDir === "in") {
+            setS("arrivalDate", pass.arrivalDate || autoDate);
+            setS("arrivalTime", pass.arrivalTime || autoTime);
+          } else {
+            // Gate OUT (MAIN_OUT / vehicle departure): set departure date/time from creation
+            setCd((prev) => ({
+              ...prev,
+              departureDate: pass.departureDate || autoDate,
+              departureTime: pass.departureTime || autoTime,
+            }));
+          }
           setSelectedSrVehicleDetail({
             vehicleNo: pass.vehicle ?? "",
             chassisNo: pass.chassis ?? "",
@@ -876,6 +942,7 @@ export default function CreateGatePassPage() {
         }
         if (!active) return;
 
+        setRejectedPassInfo({ reason: pass.rejectionReason ?? null, gatePassNumber: pass.gatePassNumber });
         setPassType(pass.passType);
 
         if (pass.passType === "LOCATION_TRANSFER") {
@@ -914,6 +981,7 @@ export default function CreateGatePassPage() {
           setCd(prev => ({
             ...prev,
             vehicle: pass.vehicle ?? "",
+            fromLocation: pass.fromLocation ?? "",
             departureDate: pass.departureDate ?? "",
             departureTime: pass.departureTime ?? "",
             companyName: pass.companyName ?? "",
@@ -1631,24 +1699,30 @@ export default function CreateGatePassPage() {
     const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
 
     if (isLtLike) {
-      if (ltBulkMode) {
-        if (ltBulkVehicles.length === 0) e.vehicle = "Add at least one vehicle to the bulk list";
-        else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocationType)) e.toLocation = "Select a location type for every bulk vehicle";
-        else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocation)) e.toLocation = "Select a destination for every bulk vehicle";
-        else if (ltBulkVehicles.some((vehicle) => vehicle.currentLocation && vehicle.toLocation === vehicle.currentLocation)) e.toLocation = "A vehicle destination cannot be the same as its current location";
-      } else if (!lt.toLocation) e.toLocation = "Destination location is required";
-      else if (selectedVehicleDetail?.currentLocation && lt.toLocation === selectedVehicleDetail.currentLocation) e.toLocation = "To Location cannot be the same as the vehicle's current location";
-      if (!lt.outReason) e.outReason = "Reason for going out is required";
+      const isGateInDraft = isDraftMode && draftGateDirection === "IN";
+      if (!isGateInDraft) {
+        if (ltBulkMode) {
+          if (ltBulkVehicles.length === 0) e.vehicle = "Add at least one vehicle to the bulk list";
+          else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocationType)) e.toLocation = "Select a location type for every bulk vehicle";
+          else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocation)) e.toLocation = "Select a destination for every bulk vehicle";
+          else if (ltBulkVehicles.some((vehicle) => vehicle.currentLocation && vehicle.toLocation === vehicle.currentLocation)) e.toLocation = "A vehicle destination cannot be the same as its current location";
+        } else if (!lt.toLocation) e.toLocation = "Destination location is required";
+        else if (selectedVehicleDetail?.currentLocation && lt.toLocation === selectedVehicleDetail.currentLocation) e.toLocation = "To Location cannot be the same as the vehicle's current location";
+        if (!lt.outReason) e.outReason = "Reason for going out is required";
+      }
       if (!ltBulkMode && !lt.vehicle) e.vehicle = "Vehicle is required";
       if (!lt.approver) e.approver = "Approver is required";
-      if (!lt.departureDate) e.departureDate = "Departure date is required";
-      else if (parseDate(lt.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
-      if (!lt.departureTime) e.departureTime = "Departure time is required";
-      else if (!e.departureDate && isPastDateTime(lt.departureDate, lt.departureTime)) e.departureTime = "Departure time cannot be in the past";
-      if (!lt.arrivalDate) e.arrivalDate = "Expected arrival date is required";
-      if (lt.arrivalDate && lt.arrivalTime && lt.departureDate && lt.departureTime &&
-          lt.arrivalDate === lt.departureDate && lt.arrivalTime <= lt.departureTime) {
-        e.arrivalTime = "Arrival time must be after the departure time";
+      // In draft mode the date/time is auto-filled from the security officer's creation time — skip validation
+      if (!isDraftMode) {
+        if (!lt.departureDate) e.departureDate = "Departure date is required";
+        else if (parseDate(lt.departureDate) < today) e.departureDate = "Departure date cannot be in the past";
+        if (!lt.departureTime) e.departureTime = "Departure time is required";
+        else if (!e.departureDate && isPastDateTime(lt.departureDate, lt.departureTime)) e.departureTime = "Departure time cannot be in the past";
+        if (!lt.arrivalDate) e.arrivalDate = "Expected arrival date is required";
+        if (lt.arrivalDate && lt.arrivalTime && lt.departureDate && lt.departureTime &&
+            lt.arrivalDate === lt.departureDate && lt.arrivalTime <= lt.departureTime) {
+          e.arrivalTime = "Arrival time must be after the departure time";
+        }
       }
     } else if (isSr && srMode === "out") {
       if (!asFoundPass) e.asGateIn = "Please find a valid Gate IN pass first";
@@ -1708,6 +1782,10 @@ export default function CreateGatePassPage() {
       if (!src.driverName) e.driverName = "Customer name is required";
       if (!src.contactNo) e.contactNo = "Customer contact number is required";
       else if (!validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
+    }
+
+    if (isRejectEditMode && !resubmitNote.trim()) {
+      e.resubmitNote = "Please describe what you changed to address the rejection";
     }
 
     return e;
@@ -1842,7 +1920,7 @@ export default function CreateGatePassPage() {
         const res = await fetch(`/api/gate-pass/${rejectedId}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "resubmit", ...resubmitPayload }),
+          body: JSON.stringify({ action: "resubmit", resubmitNote: resubmitNote.trim(), ...resubmitPayload }),
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to resubmit"); }
         setSubmitted(true);
@@ -1936,6 +2014,7 @@ export default function CreateGatePassPage() {
           chassis: selectedCdVehicleDetail?.chassisNo || null,
           make: selectedCdVehicleDetail?.make || null,
           vehicleColor: selectedCdVehicleDetail?.colour || null,
+          fromLocation: cd.fromLocation || selectedCdVehicleDetail?.currentLocation || null,
           approver: cd.approver,
           departureDate: cd.departureDate,
           departureTime: cd.departureTime,
@@ -2024,6 +2103,52 @@ export default function CreateGatePassPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+
+      {/* Form-level error toast — fixed, centered, auto-dismisses */}
+      <AnimatePresence>
+        {errors.form && (
+          <motion.div
+            initial={{ opacity: 0, y: -70, scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.94 }}
+            transition={{ type: "spring", stiffness: 380, damping: 28 }}
+            style={{ position: "fixed", top: 24, left: "50%", x: "-50%", zIndex: 9999, width: "100%", maxWidth: 480 }}
+          >
+            <div className="mx-4 flex items-start gap-3 px-5 py-4 rounded-2xl"
+              style={{
+                background: "linear-gradient(135deg, #18122B 0%, #1e1b2e 100%)",
+                border: "1px solid rgba(239,68,68,0.35)",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(239,68,68,0.15), inset 0 1px 0 rgba(255,255,255,0.05)",
+              }}>
+              {/* Icon */}
+              <div className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5"
+                style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)" }}>
+                <svg className="w-5 h-5" style={{ color: "#f87171" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              {/* Text */}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#f87171" }}>Action Blocked</p>
+                <p className="text-sm leading-snug" style={{ color: "#fca5a5" }}>{errors.form}</p>
+              </div>
+              {/* Close */}
+              <button
+                onClick={() => setErrors(prev => { const n = { ...prev }; delete n.form; return n; })}
+                className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
+                style={{ color: "#6b7280" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Modals */}
       <AnimatePresence>
         {showAddVehicle && (
@@ -2048,6 +2173,7 @@ export default function CreateGatePassPage() {
                   colour:       opt.colour       ?? "",
                 });
                 void fetchLookup("vehicle", opt.value);
+                void checkActivePass(opt.chassisNo ?? "");
               }
             }}
           />
@@ -3335,6 +3461,7 @@ export default function CreateGatePassPage() {
                             void fetchLookup("vehicle", v);
                             if (selectedVehicleDetail && v !== lt.vehicle) {
                               setSelectedVehicleDetail(null);
+                              setActivePassWarning(null);
                               setErrors(p => { const n = { ...p }; delete n.toLocation; return n; });
                             }
                           }}
@@ -3551,7 +3678,21 @@ export default function CreateGatePassPage() {
                     )}
                     {selectedVehicleDetail && !ltBulkMode && (
                       <div className="mt-3 rounded-xl border px-4 py-3"
-                        style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                        style={{ background: "var(--surface2)", borderColor: activePassWarning ? "#f87171" : "var(--border)" }}>
+                        {activePassWarning && (
+                          <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
+                            style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <p className="text-xs font-semibold flex-1" style={{ color: "#991b1b" }}>
+                              Active gate pass <strong>{activePassWarning.gatePassNumber}</strong> already exists for this vehicle
+                              <span className="ml-1 font-normal opacity-75">({activePassWarning.status.replace(/_/g, " ").toLowerCase()})</span>
+                            </p>
+                            <a href={`/gate-pass/${activePassWarning.id}`} target="_blank" rel="noreferrer"
+                              className="text-xs font-bold underline flex-shrink-0" style={{ color: "#dc2626" }}>View</a>
+                          </div>
+                        )}
                         <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
                           <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -3588,17 +3729,60 @@ export default function CreateGatePassPage() {
                 )}
               </div>
 
-              {/* Location Details — shown only after a vehicle is chosen from the dropdown (not while typing) */}
-              {(!ltBulkMode && (!!selectedVehicleDetail || isDraftMode || isRejectEditMode)) && (
+              {/* Location Details — hidden entirely for Gate IN drafts (route is already known) */}
+              {isDraftMode && draftGateDirection === "IN" ? (
+                <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "#bbf7d0" }}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <svg className="w-4 h-4" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    <SectionTitle>Vehicle Route</SectionTitle>
+                  </div>
+                  <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "#bbf7d0" }}>
+                    <div className="px-4 py-2 flex items-center gap-2" style={{ background: "linear-gradient(135deg,#dcfce7,#f0fdf4)", borderBottom: "1px solid #bbf7d0" }}>
+                      <p className="text-xs font-bold" style={{ color: "#15803d" }}>Route confirmed by Security — no input needed</p>
+                    </div>
+                    <div className="px-4 py-4 flex items-center gap-3 flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "var(--text-muted)" }}>Coming From</p>
+                        <p className="text-sm font-bold" style={{ color: "var(--text)" }}>{lt.fromLocation || "—"}</p>
+                      </div>
+                      <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#22c55e" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                      <div className="flex-1 min-w-0 text-right">
+                        <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "var(--text-muted)" }}>Arriving At</p>
+                        <p className="text-sm font-bold" style={{ color: "#15803d" }}>{lt.toLocation || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (!ltBulkMode && (!!selectedVehicleDetail || isDraftMode || isRejectEditMode)) && (
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Location Details</SectionTitle>
 
+                {/* Gate OUT draft: fromLocation locked (Security's gate), toLocation still needed */}
+                {isDraftMode && lt.fromLocation ? (
+                  <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-xl"
+                    style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                    <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#15803d" }}>From Location — Security Gate (Locked)</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#14532d" }}>{lt.fromLocation}</p>
+                    </div>
+                    <span className="text-[10px] px-2 py-1 rounded-full font-bold flex-shrink-0" style={{ background: "#dcfce7", color: "#15803d" }}>LOCKED</span>
+                  </div>
+                ) : null}
+
                 {/* Location Type Radio Buttons */}
+                {(<>
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-2" style={{ color: "var(--text)" }}>Location Type</label>
                   <div className="flex flex-wrap gap-4">
                     {([
-                      { value: "OTHER", label: "Other" },
                       { value: "DEALER", label: "Dealer" },
                       { value: "DIMO", label: "DIMO", asoHidden: true },
                       { value: "PROMOTION", label: "Promotion" },
@@ -3707,6 +3891,8 @@ export default function CreateGatePassPage() {
                     )}
                   </Field>
                 )}
+              </>
+              )}{/* end: hide location inputs for Gate IN draft */}
               </div>
               )}
 
@@ -3745,29 +3931,50 @@ export default function CreateGatePassPage() {
               {/* Gate Out — Schedule Departure */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Gate Out — Schedule Departure</SectionTitle>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Estimated Departure Date" required error={errors.departureDate}>
-                    <DatePicker value={lt.departureDate} onChange={(v) => setL("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
-                  </Field>
-                  <Field label="Estimated Departure Time" required error={errors.departureTime}>
-                    <TimePicker value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} date={lt.departureDate} />
-                  </Field>
-
-                </div>
+                {isDraftMode ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      { label: "Departure Date", value: lt.departureDate ? new Date(lt.departureDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
+                      { label: "Departure Time", value: lt.departureTime || "—" },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="flex flex-col gap-1 px-4 py-3 rounded-xl" style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}>
+                        <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>{label}</span>
+                        <div className="flex items-center gap-2">
+                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-sm font-semibold" style={{ color: "var(--text)" }}>{value}</span>
+                          <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full font-semibold" style={{ background: "#eff6ff", color: "#2563eb" }}>Auto-set</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Field label="Estimated Departure Date" required error={errors.departureDate}>
+                      <DatePicker value={lt.departureDate} onChange={(v) => setL("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
+                    </Field>
+                    <Field label="Estimated Departure Time" required error={errors.departureTime}>
+                      <TimePicker value={lt.departureTime} onChange={(v) => setL("departureTime", v)} error={errors.departureTime} date={lt.departureDate} />
+                    </Field>
+                  </div>
+                )}
               </div>
 
-              {/* Gate In — Expected Arrival (LT is round-trip) */}
-              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                <SectionTitle>Gate In — Expected Arrival</SectionTitle>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Expected Arrival Date" required error={errors.arrivalDate}>
-                    <DatePicker value={lt.arrivalDate} onChange={(v) => { setL("arrivalDate", v); setErrors(p => { const n = { ...p }; delete n.arrivalDate; return n; }); }} min={lt.departureDate || today} placeholder="Pick arrival date" error={errors.arrivalDate} />
-                  </Field>
-                  <Field label="Expected Arrival Time" error={errors.arrivalTime}>
-                    <TimePicker value={lt.arrivalTime} onChange={(v) => { setL("arrivalTime", v); setErrors(p => { const n = { ...p }; delete n.arrivalTime; return n; }); }} date={lt.arrivalDate} error={errors.arrivalTime} minTime={lt.arrivalDate && lt.arrivalDate === lt.departureDate && lt.departureTime ? lt.departureTime : undefined} />
-                  </Field>
+              {/* Gate In — Expected Arrival */}
+              {!isDraftMode && (
+                <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                  <SectionTitle>Gate In — Expected Arrival</SectionTitle>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Field label="Expected Arrival Date" required error={errors.arrivalDate}>
+                      <DatePicker value={lt.arrivalDate} onChange={(v) => { setL("arrivalDate", v); setErrors(p => { const n = { ...p }; delete n.arrivalDate; return n; }); }} min={lt.departureDate || today} placeholder="Pick arrival date" error={errors.arrivalDate} />
+                    </Field>
+                    <Field label="Expected Arrival Time" error={errors.arrivalTime}>
+                      <TimePicker value={lt.arrivalTime} onChange={(v) => { setL("arrivalTime", v); setErrors(p => { const n = { ...p }; delete n.arrivalTime; return n; }); }} date={lt.arrivalDate} error={errors.arrivalTime} minTime={lt.arrivalDate && lt.arrivalDate === lt.departureDate && lt.departureTime ? lt.departureTime : undefined} />
+                    </Field>
+                  </div>
                 </div>
-              </div>
+              )}
 
             </motion.div>
           ) : (
@@ -3794,7 +4001,15 @@ export default function CreateGatePassPage() {
                               onFocus={() => void fetchLookup("vehicle", "")}
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
-                                setSelectedCdVehicleDetail({ vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" });
+                                const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
+                                setSelectedCdVehicleDetail(detail);
+                                void checkActivePass(o.chassisNo ?? "");
+                                void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
+                                  if (loc) {
+                                    setSelectedCdVehicleDetail((prev) => prev ? { ...prev, currentLocation: loc } : prev);
+                                    setC("fromLocation", loc);
+                                  }
+                                });
                               }}
                               placeholder="Search by vehicle no or chassis no"
                               error={errors.vehicle}
@@ -3829,8 +4044,36 @@ export default function CreateGatePassPage() {
                           </div>
                         </div>
                         {selectedCdVehicleDetail && (
-                          <div className="mt-3 rounded-xl border grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 px-4 py-3"
-                            style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                          <div className="mt-3 rounded-xl border px-4 py-3"
+                            style={{ background: "var(--surface2)", borderColor: activePassWarning ? "#f87171" : "var(--border)" }}>
+                            {activePassWarning && (
+                              <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
+                                style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <p className="text-xs font-semibold flex-1" style={{ color: "#991b1b" }}>
+                                  Active gate pass <strong>{activePassWarning.gatePassNumber}</strong> already exists for this vehicle
+                                  <span className="ml-1 font-normal opacity-75">({activePassWarning.status.replace(/_/g, " ").toLowerCase()})</span>
+                                </p>
+                                <a href={`/gate-pass/${activePassWarning.id}`} target="_blank" rel="noreferrer"
+                                  className="text-xs font-bold underline flex-shrink-0" style={{ color: "#dc2626" }}>View</a>
+                              </div>
+                            )}
+                          {/* Current Location — same style as LT card */}
+                          <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Current Location</p>
+                              <p className="text-sm font-semibold" style={{ color: selectedCdVehicleDetail.currentLocation ? "#2563eb" : "var(--text-muted)" }}>
+                                {selectedCdVehicleDetail.currentLocation ?? <span className="italic font-normal">Detecting…</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
                             {[
                               { label: "Chassis No",    val: selectedCdVehicleDetail.chassisNo },
                               { label: "Model",         val: selectedCdVehicleDetail.model },
@@ -3843,6 +4086,7 @@ export default function CreateGatePassPage() {
                                 <p className="text-sm font-medium" style={{ color: val ? "var(--text)" : "var(--text-muted)" }}>{val || "—"}</p>
                               </div>
                             ))}
+                          </div>
                           </div>
                         )}
                       </Field>
@@ -3961,8 +4205,20 @@ export default function CreateGatePassPage() {
 
                   {/* Gate Out */}
                   <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                    <SectionTitle>Gate Out from Dimo 800</SectionTitle>
+                    <SectionTitle>Gate Out Details</SectionTitle>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Field label="Departure From" className="md:col-span-2">
+                        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm"
+                          style={{ background: "var(--surface2)", borderColor: "var(--border)", color: cd.fromLocation ? "var(--text)" : "var(--text-muted)", minHeight: "42px" }}>
+                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <span className="font-medium">
+                            {cd.fromLocation || (selectedCdVehicleDetail ? <span className="italic font-normal">Detecting location…</span> : <span className="italic font-normal">Select a vehicle to detect departure location</span>)}
+                          </span>
+                        </div>
+                      </Field>
                       <Field label="Estimated Departure Date" required error={errors.departureDate}>
                         <DatePicker value={cd.departureDate} onChange={(v) => setC("departureDate", v)} min={today} error={errors.departureDate} placeholder="Pick departure date" />
                       </Field>
@@ -4049,12 +4305,21 @@ export default function CreateGatePassPage() {
                             className="px-4 py-1.5 rounded-lg text-sm border font-medium"
                             style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface)" }}>Cancel</button>
                           <button type="button"
-                            onClick={() => {
-                              if (newCarrierName.trim()) {
-                                setCarrier("companyName", newCarrierName.trim());
-                                if (newCarrierReg.trim()) setCarrier("carrierRegNo", newCarrierReg.trim());
-                                setShowAddCarrier(false); setNewCarrierName(""); setNewCarrierReg("");
+                            onClick={async () => {
+                              if (!newCarrierName.trim()) return;
+                              // Save to master data if registration no is provided
+                              if (newCarrierReg.trim()) {
+                                try {
+                                  await fetch("/api/lookups", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ field: "carrier", companyName: newCarrierName.trim(), registrationNo: newCarrierReg.trim() }),
+                                  });
+                                } catch { /* non-critical — still populate the form */ }
                               }
+                              setCarrier("companyName", newCarrierName.trim());
+                              if (newCarrierReg.trim()) setCarrier("carrierRegNo", newCarrierReg.trim());
+                              setShowAddCarrier(false); setNewCarrierName(""); setNewCarrierReg("");
                             }}
                             className="px-4 py-1.5 rounded-lg text-sm text-white font-semibold"
                             style={{ background: "#16a34a" }}>Use This Carrier</button>
@@ -4168,16 +4433,48 @@ export default function CreateGatePassPage() {
           </>
         )}
 
-        {errors.form && (
-          <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-600 bg-red-50 border border-red-200">{errors.form}</div>
+        {/* Resubmit — rejection info + "What did you fix?" (only in resubmit mode) */}
+        {isRejectEditMode && (
+          <div className="rounded-2xl border mb-5 overflow-hidden" style={{ borderColor: "#fca5a5" }}>
+            <div className="px-5 py-3 flex items-center gap-2" style={{ background: "#fef2f2" }}>
+              <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm font-bold" style={{ color: "#991b1b" }}>
+                Editing rejected gate pass {rejectedPassInfo?.gatePassNumber ?? ""} — vehicle cannot be changed
+              </span>
+            </div>
+            {rejectedPassInfo?.reason && (
+              <div className="px-5 py-3 border-b" style={{ background: "var(--surface)", borderColor: "#fca5a5" }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: "#991b1b" }}>Rejection Reason</p>
+                <p className="text-sm" style={{ color: "var(--text)" }}>{rejectedPassInfo.reason}</p>
+              </div>
+            )}
+            <div className="px-5 py-4" style={{ background: "var(--surface)" }}>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: "var(--text)" }}>
+                What did you fix? <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <textarea
+                value={resubmitNote}
+                onChange={(e) => { setResubmitNote(e.target.value); setErrors(prev => { const n = { ...prev }; delete n.resubmitNote; return n; }); }}
+                placeholder="Describe the changes you made to address the rejection..."
+                rows={3}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                style={{ background: "var(--surface2)", borderColor: errors.resubmitNote ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+              />
+              {errors.resubmitNote && <p className="text-xs mt-1" style={{ color: "#ef4444" }}>{errors.resubmitNote}</p>}
+            </div>
+          </div>
         )}
 
-        {/* Error summary — shown when submit is blocked */}
-        {Object.keys(errors).length > 0 && (
+        {/* errors.form is shown as a fixed toast (see below) */}
+
+        {/* Error summary — shown when submit is blocked (excludes form-level errors shown above) */}
+        {Object.keys(errors).filter(k => k !== "form").length > 0 && (
           <div className="mb-4 rounded-2xl border px-5 py-4" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
             <p className="text-sm font-bold mb-2" style={{ color: "#991b1b" }}>Please fix the following before submitting:</p>
             <ul className="space-y-1">
-              {Object.entries(errors).map(([, msg]) => (
+              {Object.entries(errors).filter(([key]) => key !== "form").map(([, msg]) => (
                 <li key={msg} className="text-sm flex items-center gap-2" style={{ color: "#b91c1c" }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
                   {msg}

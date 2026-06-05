@@ -54,8 +54,11 @@ export async function findApproversForLocationBrand(
   selectedApproverName?: string,
   vehicleMake?: string | null
 ) {
-  const baseWhere = location
-    ? { role: "APPROVER" as const, defaultLocation: location }
+  // Match approvers by plant prefix (first part before " - ") so sub-storage variants
+  // like "Galle Branch - HNB" and "Galle Branch - Sales" both resolve to "Galle Branch" approvers.
+  const plantPrefix = location ? location.split(" - ")[0].trim() : null;
+  const baseWhere = plantPrefix
+    ? { role: "APPROVER" as const, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } }
     : { role: "APPROVER" as const };
 
   const findUsers = (where: object) =>

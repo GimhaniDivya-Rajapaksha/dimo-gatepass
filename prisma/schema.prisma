@@ -17,6 +17,7 @@ enum Role {
   CASHIER
   SECURITY_OFFICER
   SERVICE_ADVISOR
+  DELIVERY_COORDINATOR
 }
 
 enum PassType {
@@ -54,6 +55,7 @@ model User {
   brand            String?
   resetToken       String?        @unique
   resetTokenExpiry DateTime?
+  isDisabled       Boolean        @default(false)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
@@ -103,10 +105,11 @@ model GatePass {
 
   passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
   paymentType    String?   // CASH | CREDIT | MIXED (used for MAIN_OUT)
-  cashierCleared  Boolean  @default(false)
-  creditApproved  Boolean  @default(false)
-  hasCredit       Boolean  @default(false)
-  hasImmediate    Boolean  @default(false)
+  cashierCleared           Boolean  @default(false)
+  creditApproved           Boolean  @default(false)
+  hasCredit                Boolean  @default(false)
+  hasImmediate             Boolean  @default(false)
+  cashierOverrideRequested Boolean  @default(false)
   serviceJobNo      String?   // After Sales service job/work order number
   securityCreated   Boolean  @default(false) // created by Security Officer with vehicle only
   gateDirection     String?  // "IN" | "OUT" — direction selected by security at creation

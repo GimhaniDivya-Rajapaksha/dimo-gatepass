@@ -43,7 +43,9 @@ function LoginForm() {
             ? "Microsoft sign-in callback failed. Check Azure redirect URI, tenant/client values, and client secret."
             : authError === "AccessDenied"
               ? "Sign-in was denied for this account."
-              : "";
+              : authError === "AccountDisabled"
+                ? "Your account has been disabled. Please contact your administrator."
+                : "";
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,7 +56,9 @@ function LoginForm() {
 
     if (result?.error) {
       const msg = result.error.toLowerCase();
-      if (msg.includes("database") || msg.includes("unavailable") || msg.includes("pool") || msg.includes("maxclients")) {
+      if (msg.includes("accountdisabled") || msg.includes("disabled")) {
+        setError("Your account has been disabled. Please contact your administrator.");
+      } else if (msg.includes("database") || msg.includes("unavailable") || msg.includes("pool") || msg.includes("maxclients")) {
         setError("Database temporarily unavailable. Please wait a moment and try again.");
       } else {
         setError("Invalid email or password. Please try again.");
@@ -74,6 +78,7 @@ function LoginForm() {
     else if (role === "AREA_SALES_OFFICER") router.push("/aso");
     else if (role === "SECURITY_OFFICER") router.push("/gate-pass/security-gate-out");
     else if (role === "SERVICE_ADVISOR") router.push("/initiator");
+    else if (role === "DELIVERY_COORDINATOR") router.push("/delivery-coordinator");
     else router.push("/");
   }
 

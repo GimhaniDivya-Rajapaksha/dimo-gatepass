@@ -93,7 +93,12 @@ function getJourneyStageBadge(p: GatePass) {
     return { label: "GATE IN", bg: "#ecfdf5", color: "#065f46", dot: "#10b981" };
   }
 
-  if (p.passSubType === "MAIN_OUT" && ["GATE_OUT", "COMPLETED"].includes(p.status)) {
+  if (p.passSubType === "MAIN_OUT" && p.status === "GATE_OUT") {
+    // Vehicle has left DIMO but recipient hasn't confirmed receipt yet — not complete
+    return { label: "AWAITING RECEIPT", bg: "#eff6ff", color: "#1d4ed8", dot: "#3b82f6" };
+  }
+
+  if (p.passSubType === "MAIN_OUT" && p.status === "COMPLETED") {
     return statusCfg["COMPLETED"];
   }
 
@@ -175,8 +180,10 @@ function GatePassListPageInner() {
   const { data: session } = useSession();
   const isInitiator = session?.user?.role === "INITIATOR";
   const isASO = session?.user?.role === "AREA_SALES_OFFICER";
+  const isDC = session?.user?.role === "DELIVERY_COORDINATOR";
   const [gatingInId, setGatingInId] = useState<string | null>(null);
   const [markingInId, setMarkingInId] = useState<string | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
   const [liveLocations, setLiveLocations] = useState<Record<string, string | null>>({});
 
   // Styled confirm modal (replaces browser confirm())
@@ -339,6 +346,26 @@ function GatePassListPageInner() {
     }
   }
 
+  async function handlePrint(p: GatePass) {
+    setPrintingId(p.id);
+    // APPROVED LT/CD: printing counts as Gate OUT — update status before navigating.
+    // Skip for DELIVERY_COORDINATOR: they print for reference only, no security side-effect.
+    if (!isDC && p.status === "APPROVED" && (p.passType === "LOCATION_TRANSFER" || p.passType === "CUSTOMER_DELIVERY")) {
+      try {
+        await fetch(`/api/gate-pass/${p.id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "print_gate_out" }),
+        });
+        fetchPasses();
+      } catch {
+        // Continue to print even if the status update fails
+      }
+    }
+    router.push(`/gate-pass/${p.id}?print=1`);
+    setTimeout(() => setPrintingId(null), 500);
+  }
+
   const isSrTab = passTypeFilter === "AFTER_SALES";
 
   return (
@@ -348,13 +375,15 @@ function GatePassListPageInner() {
           <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>My Gate Passes</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>{total} records found</p>
         </div>
-        <Link href="/gate-pass/create" className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-md"
-          style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-          </svg>
-          Create Gate Pass
-        </Link>
+        {!isDC && (
+          <Link href="/gate-pass/create" className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-md"
+            style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            Create Gate Pass
+          </Link>
+        )}
       </div>
 
       {/* Pass Type Tabs */}
@@ -427,7 +456,9 @@ function GatePassListPageInner() {
                 {passes.map((p, i) => {
                   const sc = getJourneyStageBadge(p);
                   const loc = getDisplayCurrentLocation(p, liveLocations[p.id]);
-                  const subs = p.subPasses ?? [];
+                  // Exclude cancelled/rejected sub-passes from the visible journey — they are
+                  // dead-end branches that should not appear as active steps in the timeline.
+                  const subs = (p.subPasses ?? []).filter(s => !["CANCELLED", "REJECTED"].includes(s.status));
                   const isExpanded = expandedId === p.id;
                   const canPrint  = ["APPROVED", "GATE_OUT", "COMPLETED"].includes(p.status);
                   const canCancel = p.status === "PENDING_APPROVAL";
@@ -500,14 +531,14 @@ function GatePassListPageInner() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                 </svg>
                               </button>
-                              {false && <button onClick={() => canPrint && router.push(`/gate-pass/${p.id}?print=1`)} disabled={!canPrint}
+                              <button type="button" onClick={(e) => { e.stopPropagation(); if (canPrint) void handlePrint(p); }} disabled={!canPrint || printingId === p.id}
                                 className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                                 style={{ background: canPrint ? "var(--surface)" : "var(--surface2)", borderColor: canPrint ? "#10b981" : "var(--border)", color: canPrint ? "#10b981" : "var(--text-muted)", opacity: canPrint ? 1 : 0.4, cursor: canPrint ? "pointer" : "not-allowed" }}
                                 title={canPrint ? "Print" : "Available after approval"}>
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                                 </svg>
-                              </button>}
+                              </button>
                               {canCancel && (
                                 <button onClick={() => askCancel(p.id)} disabled={cancellingId === p.id}
                                   className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
@@ -532,7 +563,13 @@ function GatePassListPageInner() {
                               ...subs.map(s => ({ ...s, gatePassNumber: p.gatePassNumber, isMain: false })),
                             ].map((step, idx, arr) => {
                               const stc = subTypeCfg[step.passSubType ?? ""] ?? subTypeCfg["MAIN_IN"];
-                              const sSc = statusCfg[step.status] ?? statusCfg["PENDING_APPROVAL"];
+                              // For inbound passes (MAIN_IN, SUB_IN), GATE_OUT means "vehicle is en route here"
+                              // — relabel it as "Gate In" to match the direction of travel.
+                              const isInbound = step.passSubType === "MAIN_IN" || step.passSubType === "SUB_IN";
+                              const displayStatus = isInbound && step.status === "GATE_OUT" ? "GATE_IN_TRANSIT" : step.status;
+                              const sSc = displayStatus === "GATE_IN_TRANSIT"
+                                ? { label: "Gate In", bg: "#ecfdf5", color: "#065f46" }
+                                : (statusCfg[step.status] ?? statusCfg["PENDING_APPROVAL"]);
                               const isDone = ["COMPLETED", "GATE_OUT", "APPROVED"].includes(step.status);
                               const isCurrent = !isDone;
                               return (
@@ -622,7 +659,7 @@ function GatePassListPageInner() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
-                  {["Action", "Gate Pass No", "Vehicle / Chassis", "Departure From", "Requested By", "Departure Date", "Status"].map((h) => (
+                  {["Action", "Gate Pass No", "Vehicle / Chassis", "To Location", "Requested By", "Departure Date", "Status"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
@@ -699,14 +736,14 @@ function GatePassListPageInner() {
                                 </svg>
                               </button>
                             )}
-                            {false && <button onClick={() => canPrint && router.push(`/gate-pass/${p.id}?print=1`)} disabled={!canPrint}
+                              <button type="button" onClick={(e) => { e.stopPropagation(); if (canPrint) void handlePrint(p); }} disabled={!canPrint || printingId === p.id}
                               className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                               style={{ background: canPrint ? "var(--surface)" : "var(--surface2)", borderColor: canPrint ? "#10b981" : "var(--border)", color: canPrint ? "#10b981" : "var(--text-muted)", opacity: canPrint ? 1 : 0.4, cursor: canPrint ? "pointer" : "not-allowed" }}
                               title={canPrint ? "Print" : "Available after approval"}>
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                               </svg>
-                            </button>}
+                            </button>
                             {canMarkIn && (
                               <button onClick={() => askMarkIn(p)} disabled={markingInId === p.id}
                                 className="flex items-center gap-1 px-2.5 h-8 rounded-lg border text-xs font-semibold transition-all"

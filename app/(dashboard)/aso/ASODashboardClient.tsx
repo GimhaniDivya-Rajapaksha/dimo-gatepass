@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -101,6 +101,7 @@ function fmtDate(d: string | null) {
 export default function ASODashboardClient({ user }: Props) {
   const [incoming, setIncoming] = useState<IncomingVehicle[]>([]);
   const [incomingLoading, setIncomingLoading] = useState(true);
+  const [atLocation, setAtLocation] = useState<IncomingVehicle[]>([]);  // COMPLETED SUB_OUT — arrived, needs SUB_IN
 
   const [myPasses, setMyPasses] = useState<MyPass[]>([]);
   const [myTotal, setMyTotal] = useState(0);
@@ -140,23 +141,35 @@ export default function ASODashboardClient({ user }: Props) {
         ltParams.set("toLocation", user.defaultLocation);
       }
 
-      // Also fetch APPROVED SUB_IN passes to detect which vehicles already have a sub-in created
-      const [subOutRes, ltRes, subInRes] = await Promise.all([
+      // COMPLETED SUB_OUT at ASO's location — vehicle has arrived, needs SUB_IN
+      const completedSubOutParams = new URLSearchParams({
+        passType: "AFTER_SALES", passSubType: "SUB_OUT",
+        status: "COMPLETED", limit: "50", locationView: "true",
+      });
+      if (destinationPlant) completedSubOutParams.set("toLocationPlant", destinationPlant);
+      else if (user.defaultLocation) completedSubOutParams.set("toLocation", user.defaultLocation);
+
+      // Also fetch APPROVED/GATE_OUT SUB_IN passes to detect which vehicles already have a sub-in created
+      const [subOutRes, ltRes, subInRes, completedSubOutRes] = await Promise.all([
         fetch(`/api/gate-pass?${subOutParams}`),
         fetch(`/api/gate-pass?${ltParams}`),
-        fetch("/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
+        fetch("/api/gate-pass?passType=AFTER_SALES&passSubType=SUB_IN&limit=100"),
+        fetch(`/api/gate-pass?${completedSubOutParams}`),
       ]);
       if (!subOutRes.ok && !ltRes.ok) { setIncoming([]); return; }
 
-      const [subOutData, ltData, subInData] = await Promise.all([
+      const [subOutData, ltData, subInData, completedSubOutData] = await Promise.all([
         subOutRes.ok ? subOutRes.json() : { passes: [] },
         ltRes.ok ? ltRes.json() : { passes: [] },
         subInRes.ok ? subInRes.json() : { passes: [] },
+        completedSubOutRes.ok ? completedSubOutRes.json() : { passes: [] },
       ]);
 
-      // Build a set of parent pass IDs that already have an APPROVED SUB_IN
+      // Build a set of parent pass IDs that already have a SUB_IN (any active status)
       const existingSubInParents = new Set<string>(
-        (subInData.passes ?? []).map((p: any) => p.parentPassId).filter(Boolean)
+        (subInData.passes ?? [])
+          .filter((p: any) => !["COMPLETED", "CANCELLED"].includes(p.status))
+          .map((p: any) => p.parentPassId).filter(Boolean)
       );
 
       const incomingPasses = [
@@ -166,9 +179,14 @@ export default function ASODashboardClient({ user }: Props) {
 
       setIncoming(incomingPasses.map((p: IncomingVehicle) => ({
         ...p,
-        // Mark if a SUB_IN pass already exists for this vehicle's parent MAIN_IN
         hasActiveSubIn: p.passType === "AFTER_SALES" && (existingSubInParents.has(p.parentPass?.id ?? "") || existingSubInParents.has(p.id)),
       })));
+
+      // Vehicles that arrived (COMPLETED SUB_OUT) but don't yet have a SUB_IN
+      const arrivedNeedingSubIn = (completedSubOutData.passes || []).filter((p: IncomingVehicle) =>
+        !existingSubInParents.has(p.parentPass?.id ?? "") && !existingSubInParents.has(p.id)
+      );
+      setAtLocation(arrivedNeedingSubIn);
     } catch {
       setIncoming([]);
     } finally {
@@ -285,6 +303,29 @@ export default function ASODashboardClient({ user }: Props) {
   useEffect(() => { void fetchMyPasses(); }, [fetchMyPasses]);
   useEffect(() => { void fetchPendingApprovalTotal(); }, [fetchPendingApprovalTotal]);
   useEffect(() => { setMyPage(1); }, [subTypeFilter, statusFilter]);
+
+  // Auto-refresh incoming vehicles when a new GATE_PASS_RECEIVED notification arrives
+  const lastNotifRef = useRef(0);
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/notifications");
+        if (!res.ok) return;
+        const data = await res.json();
+        const count = (data.notifications ?? []).filter(
+          (n: { type: string; read: boolean }) => n.type === "GATE_PASS_RECEIVED" && !n.read
+        ).length;
+        if (count > lastNotifRef.current) {
+          lastNotifRef.current = count;
+          void fetchIncoming();
+          void fetchMyPasses();
+        } else {
+          lastNotifRef.current = count;
+        }
+      } catch { /* ignore */ }
+    }, 10_000);
+    return () => clearInterval(poll);
+  }, [fetchIncoming, fetchMyPasses]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -571,18 +612,7 @@ export default function ASODashboardClient({ user }: Props) {
 
                         {/* Action */}
                         <div className="flex-shrink-0 ml-2 flex flex-col gap-1.5">
-                          {v.passType === "LOCATION_TRANSFER" ? (
-                            <button
-                              onClick={() => void handlePassAction(v.id, "gate_in", "Confirm vehicle arrived at your location")}
-                              disabled={actioningId === v.id}
-                              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap disabled:opacity-50"
-                              style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
-                              {actioningId === v.id
-                                ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                              Confirm Arrived
-                            </button>
-                          ) : v.hasActiveSubIn ? (
+                          {v.hasActiveSubIn ? (
                             <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
                               style={{ background: "#ede9fe", color: "#5b21b6", border: "1px solid #c4b5fd" }}>
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -592,14 +622,14 @@ export default function ASODashboardClient({ user }: Props) {
                             </span>
                           ) : (
                             <button
-                              onClick={() => void handleCreateSubIn(v)}
+                              onClick={() => void handlePassAction(v.id, "gate_in", "Confirm vehicle arrived at your location")}
                               disabled={actioningId === v.id}
                               className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap disabled:opacity-50"
-                              style={{ background: "linear-gradient(135deg,#1d4ed8,#2563eb)" }}>
+                              style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
                               {actioningId === v.id
                                 ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
-                              Create Sub IN Pass
+                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                              Confirm Arrived
                             </button>
                           )}
                           <Link href={`/gate-pass/${v.id}`}
@@ -617,6 +647,99 @@ export default function ASODashboardClient({ user }: Props) {
           )}
         </div>
       </motion.div>
+
+      {/* ── Vehicles at Sub-Location (arrived, needs SUB_IN) ───────────────────── */}
+      {atLocation.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, type: "spring", stiffness: 160, damping: 22 }}
+          className="rounded-2xl border overflow-hidden"
+          style={{ background: "var(--surface)", borderColor: "#f59e0b66", boxShadow: "var(--card-shadow)" }}>
+
+          <div className="flex items-center justify-between px-5 py-4 border-b"
+            style={{ background: "linear-gradient(135deg,#fffbeb,#fef3c722)", borderColor: "#fde68a" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "#fef3c7" }}>
+                <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="font-bold text-base" style={{ color: "#92400e" }}>Vehicles at Sub-Location</h2>
+                <p className="text-xs" style={{ color: "#b45309" }}>
+                  Arrived — create SUB IN to send back to HQ
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-bold"
+              style={{ background: "#fef3c7", color: "#b45309" }}>
+              {atLocation.length} vehicle{atLocation.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="p-4 flex flex-col gap-3">
+            {atLocation.map((v) => (
+              <motion.div key={v.id}
+                initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                className="rounded-xl border p-4 flex items-center gap-4"
+                style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#fef3c7" }}>
+                  <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 8h4l3 3v5h-7V8z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-mono font-bold text-sm" style={{ color: "var(--accent)" }}>
+                      {v.parentPass?.gatePassNumber ?? v.gatePassNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                      style={{ background: "#dcfce7", color: "#15803d" }}>
+                      ✓ Arrived at Sub-Location
+                    </span>
+                  </div>
+                  <p className="font-bold text-sm" style={{ color: "var(--text)" }}>{v.vehicle}</p>
+                  {v.chassis && <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{v.chassis}</p>}
+                  {v.toLocation && (
+                    <p className="text-xs mt-1 flex items-center gap-1" style={{ color: "#b45309" }}>
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      {v.toLocation}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleCreateSubIn(v)}
+                  disabled={actioningId === v.id}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-bold flex-shrink-0 disabled:opacity-60 transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#b45309,#d97706)" }}>
+                  {actioningId === v.id ? (
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+                    </svg>
+                  )}
+                  Create SUB IN
+                </button>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* ── My Sub-Passes ────────────────────────────────────────────────────── */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}

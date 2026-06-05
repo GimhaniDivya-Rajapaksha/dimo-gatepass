@@ -47,8 +47,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     where: { id },
     data: {
       status:        nextStatus,
-      toLocation:    toLocation    || null,
-      fromLocation:  fromLocation  || null,
+      // For Gate IN drafts, preserve the already-set toLocation/fromLocation if body doesn't provide them
+      toLocation:    toLocation    || pass.toLocation    || null,
+      fromLocation:  fromLocation  || pass.fromLocation  || null,
       departureDate: departureDate || null,
       departureTime: departureTime || null,
       arrivalDate:   arrivalDate   || null,
