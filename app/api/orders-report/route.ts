@@ -25,10 +25,12 @@ export async function GET(req: NextRequest) {
   const statusFilter  = searchParams.get("status") || "";
   const searchFilter  = searchParams.get("search") || "";
 
-  // Fetch all AFTER_SALES MAIN_OUT gate passes that have service orders
+  // Fetch AFTER_SALES MAIN_OUT and CUSTOMER_DELIVERY gate passes that have service orders
   const where: Record<string, unknown> = {
-    passType: "AFTER_SALES",
-    passSubType: "MAIN_OUT",
+    OR: [
+      { passType: "AFTER_SALES", passSubType: "MAIN_OUT" },
+      { passType: "CUSTOMER_DELIVERY" },
+    ],
   };
 
   if (statusFilter) where.status = statusFilter;
@@ -60,6 +62,8 @@ export async function GET(req: NextRequest) {
     return {
       id: p.id,
       gatePassNumber: p.gatePassNumber,
+      passType: p.passType,
+      passSubType: p.passSubType,
       vehicle: p.vehicle,
       chassis: p.chassis,
       make: p.make,

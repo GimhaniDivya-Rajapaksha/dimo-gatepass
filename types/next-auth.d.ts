@@ -13,6 +13,7 @@ declare module "next-auth" {
       role: string | null;
       defaultLocation: string | null;
       approverName: string | null;
+      backupApproverName: string | null;
     };
   }
 }
@@ -23,5 +24,6 @@ declare module "next-auth/jwt" {
     role: string | null;
     defaultLocation?: string | null;
     approverName?: string | null;
+    backupApproverName?: string | null;
   }
 }

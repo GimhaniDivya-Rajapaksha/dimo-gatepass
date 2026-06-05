@@ -35,40 +35,48 @@ function BrandSelector({ value, onChange, multi }: { value: string; onChange: (v
 
 type User = {
   id: string; name: string; email: string; role: string | null;
+  isDisabled?: boolean;
   createdAt: string; approverId?: string | null;
+  backupApproverId?: string | null;
   defaultLocation?: string | null; brand?: string | null;
   approver?: { id: string; name: string } | null;
+  backupApprover?: { id: string; name: string } | null;
 };
 
 const ROLES = [
   "INITIATOR", "APPROVER", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR",
+  "DELIVERY_COORDINATOR",
 ];
 const ROLE_LABELS: Record<string, string> = {
   INITIATOR: "Initiator", APPROVER: "Approver",
   ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
   SECURITY_OFFICER: "Security Officer", SERVICE_ADVISOR: "Service Advisor",
+  DELIVERY_COORDINATOR: "Delivery Coordinator",
 };
 const roleColors: Record<string, string> = {
   INITIATOR: "#2563eb", APPROVER: "#7c3aed",
   ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
   SECURITY_OFFICER: "#0f766e", SERVICE_ADVISOR: "#ea580c",
+  DELIVERY_COORDINATOR: "#0d9488",
 };
 const roleBg: Record<string, string> = {
   INITIATOR: "#eff6ff", APPROVER: "#f5f3ff",
   ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
   SECURITY_OFFICER: "#f0fdfa", SERVICE_ADVISOR: "#fff7ed",
+  DELIVERY_COORDINATOR: "#f0fdfa",
 };
 
 // Which attributes each role needs
 const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
-  INITIATOR:          ["location", "brand", "approver"],
-  SECURITY_OFFICER:   ["location"],
-  APPROVER:           ["location", "brand"],
-  CASHIER:            ["location"],
-  AREA_SALES_OFFICER: ["location", "brand"],
-  SERVICE_ADVISOR:    ["location", "brand"],
-  ADMIN:              [],
+  INITIATOR:            ["location", "brand", "approver"],
+  SECURITY_OFFICER:     ["location"],
+  APPROVER:             ["location", "brand"],
+  CASHIER:              ["location", "approver"],
+  AREA_SALES_OFFICER:   ["location", "brand"],
+  SERVICE_ADVISOR:      ["location", "brand"],
+  DELIVERY_COORDINATOR: ["location"],
+  ADMIN:                [],
 };
 
 /* ─── Assign Attributes Modal ─────────────────────────────────────── */
@@ -85,6 +93,7 @@ function AssignAttributesModal({
   const [location, setLocation] = useState(user.defaultLocation ?? "");
   const [brand, setBrand] = useState(user.brand ?? "");
   const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
   const [locations, setLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -102,6 +111,7 @@ function AssignAttributesModal({
     // Validate mandatory fields per role
     if (fields.includes("location") && !location.trim()) { setError("Location is required for this role."); return; }
     if (fields.includes("brand") && !brand.trim()) { setError("Brand is required for this role."); return; }
+    if (approverId && backupApproverId && approverId === backupApproverId) { setError("Approver 1 and Approver 2 must be different."); return; }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/assign-attributes", {
@@ -112,6 +122,7 @@ function AssignAttributesModal({
           ...(fields.includes("location") ? { defaultLocation: location } : {}),
           ...(fields.includes("brand") ? { brand } : {}),
           ...(fields.includes("approver") ? { approverId } : {}),
+          ...(fields.includes("approver") ? { backupApproverId } : {}),
         }),
       });
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
@@ -122,6 +133,10 @@ function AssignAttributesModal({
         approver: fields.includes("approver")
           ? approverId ? (approvers.find(a => a.id === approverId) ? { id: approverId, name: approvers.find(a => a.id === approverId)!.name } : null) : null
           : user.approver,
+        backupApproverId: fields.includes("approver") ? backupApproverId || null : user.backupApproverId,
+        backupApprover: fields.includes("approver")
+          ? backupApproverId ? (approvers.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approvers.find(a => a.id === backupApproverId)!.name } : null) : null
+          : user.backupApprover,
       });
       onClose();
     } catch {
@@ -191,7 +206,8 @@ function AssignAttributesModal({
           {fields.includes("approver") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+                {role === "CASHIER" ? "Payment Override Approver" : "Approver"}{" "}
+                <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
               <select
                 value={approverId} onChange={e => setApproverId(e.target.value)}
@@ -201,6 +217,29 @@ function AssignAttributesModal({
                 <option value="">{approvers.length === 0 ? "No approvers yet" : "None"}</option>
                 {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
+              {role === "CASHIER" && (
+                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                  This approver will receive payment override requests when the cashier cannot clear a payment.
+                </p>
+              )}
+            </div>
+          )}
+          {fields.includes("approver") && role !== "CASHIER" && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <select
+                value={backupApproverId} onChange={e => setBackupApproverId(e.target.value)}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                <option value="">No Approver 2 assigned</option>
+                {approvers.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                Initiators can select this approver if Approver 1 is unavailable.
+              </p>
             </div>
           )}
 
@@ -239,7 +278,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   onCreated: (u: User) => void;
   approvers: User[];
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", defaultLocation: "", brand: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
@@ -266,6 +305,9 @@ function AddUserModal({ onClose, onCreated, approvers }: {
     if (fields.includes("brand") && !form.brand.trim()) {
       setError(`Brand is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
     }
+    if (form.approverId && form.backupApproverId && form.approverId === form.backupApproverId) {
+      setError("Approver 1 and Approver 2 must be different."); return;
+    }
     setLoading(true); setError("");
     try {
       const res = await fetch("/api/admin/create-user", {
@@ -276,7 +318,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to create user"); setLoading(false); return; }
       // Also save attributes if provided
-      if (data.id && (form.defaultLocation || form.brand || form.approverId)) {
+      if (data.id && (form.defaultLocation || form.brand || form.approverId || form.backupApproverId)) {
         await fetch("/api/admin/assign-attributes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -285,6 +327,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
             defaultLocation: form.defaultLocation || null,
             brand: form.brand || null,
             approverId: form.approverId || null,
+            backupApproverId: form.backupApproverId || null,
           }),
         });
       }
@@ -295,6 +338,10 @@ function AddUserModal({ onClose, onCreated, approvers }: {
         approverId: form.approverId || null,
         approver: form.approverId
           ? (approvers.find(a => a.id === form.approverId) ?? null)
+          : null,
+        backupApproverId: form.backupApproverId || null,
+        backupApprover: form.backupApproverId
+          ? (approvers.find(a => a.id === form.backupApproverId) ?? null)
           : null,
       });
       onClose();
@@ -399,6 +446,19 @@ function AddUserModal({ onClose, onCreated, approvers }: {
               </select>
             </div>
           )}
+          {fields.includes("approver") && approvers.length > 0 && selectedRole !== "CASHIER" && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <select value={form.backupApproverId} onChange={e => set("backupApproverId", e.target.value)}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                <option value="">No Approver 2 assigned</option>
+                {approvers.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose}
@@ -426,12 +486,30 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [successId, setSuccessId] = useState<string | null>(null);
   const [showAddUser, setShowAddUser] = useState(false);
   const [attrModal, setAttrModal] = useState<User | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  async function toggleDisabled(userId: string) {
+    setTogglingId(userId);
+    const res = await fetch("/api/admin/toggle-user", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, isDisabled: data.isDisabled } : u));
+    } else {
+      setActionError(data.error || "Failed to update user status.");
+      setTimeout(() => setActionError(null), 4000);
+    }
+    setTogglingId(null);
+  }
 
   useEffect(() => {
     if (status === "authenticated" && session?.user?.role !== "ADMIN") router.replace("/");
@@ -465,7 +543,9 @@ export default function AdminPage() {
     });
     if (!res.ok) {
       setAssigning(null);
-      setLoadError("Unable to assign the role right now. Please try again.");
+      const errData = await res.json().catch(() => ({}));
+      setActionError(errData.error || "Unable to assign the role right now. Please try again.");
+      setTimeout(() => setActionError(null), 4000);
       return;
     }
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
@@ -498,10 +578,32 @@ export default function AdminPage() {
     { label: "Area Sales",       value: users.filter(u => u.role === "AREA_SALES_OFFICER").length,  color: "#15803d", bg: "#f0fdf4" },
     { label: "Security",         value: users.filter(u => u.role === "SECURITY_OFFICER").length,    color: "#0f766e", bg: "#f0fdfa" },
     { label: "Service Advisors", value: users.filter(u => u.role === "SERVICE_ADVISOR").length,     color: "#ea580c", bg: "#fff7ed" },
+    { label: "DC",              value: users.filter(u => u.role === "DELIVERY_COORDINATOR").length, color: "#0d9488", bg: "#f0fdfa" },
   ];
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+
+      {/* Action error toast — role/toggle failures; does NOT hide the user table */}
+      <AnimatePresence>
+        {actionError && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            className="fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-semibold"
+            style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca" }}>
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {actionError}
+            <button onClick={() => setActionError(null)} className="ml-2 hover:opacity-70">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showAddUser && (
           <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} />
@@ -656,7 +758,7 @@ export default function AdminPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>
-                  {["User", "Current Role", "Location & Brand", "Joined", "Assign Role"].map(h => (
+                  {["User", "Current Role", "Location & Brand", "Joined", "Assign Role", "Status"].map(h => (
                     <th key={h} className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
                 </tr>
@@ -673,7 +775,7 @@ export default function AdminPage() {
                   <tr><td colSpan={5} className="text-center py-16" style={{ color: "var(--text-muted)" }}>No users found</td></tr>
                 ) : filtered.map((user, i) => (
                   <motion.tr key={user.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
-                    className="group transition-colors" style={{ borderBottom: "1px solid var(--border)" }}
+                    className="group transition-colors" style={{ borderBottom: "1px solid var(--border)", opacity: user.isDisabled ? 0.6 : 1 }}
                     onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
@@ -681,11 +783,16 @@ export default function AdminPage() {
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                          style={{ background: user.role ? (roleColors[user.role] || "#94a3b8") : "#94a3b8" }}>
+                          style={{ background: user.isDisabled ? "#94a3b8" : (user.role ? (roleColors[user.role] || "#94a3b8") : "#94a3b8") }}>
                           {user.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-semibold" style={{ color: "var(--text)" }}>{user.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold" style={{ color: "var(--text)" }}>{user.name}</p>
+                            {user.isDisabled && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ background: "#fee2e2", color: "#991b1b" }}>Disabled</span>
+                            )}
+                          </div>
                           <p className="text-xs" style={{ color: "var(--text-muted)" }}>{user.email}</p>
                         </div>
                       </div>
@@ -743,7 +850,10 @@ export default function AdminPage() {
                               )
                             )}
                             {ROLE_ATTRS[user.role].includes("approver") && user.approver && (
-                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>👤 {user.approver.name}</p>
+                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 1: {user.approver.name}</p>
+                            )}
+                            {ROLE_ATTRS[user.role].includes("approver") && user.backupApprover && (
+                              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 2: {user.backupApprover.name}</p>
                             )}
                           </div>
                           <button
@@ -778,6 +888,39 @@ export default function AdminPage() {
                         <option value="" disabled>{assigning === user.id ? "Updating..." : "Assign role..."}</option>
                         {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                       </select>
+                    </td>
+
+                    {/* Disable / Enable toggle */}
+                    <td className="px-5 py-4">
+                      {user.id === session?.user?.id ? (
+                        <span className="text-xs px-2 py-1 rounded-lg" style={{ color: "var(--text-muted)", background: "var(--surface2)" }}>
+                          Own account
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => void toggleDisabled(user.id)}
+                          disabled={togglingId === user.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50"
+                          style={user.isDisabled
+                            ? { background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }
+                            : { background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca" }}>
+                          {togglingId === user.id ? (
+                            <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                            </svg>
+                          ) : user.isDisabled ? (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                          )}
+                          {user.isDisabled ? "Enable" : "Disable"}
+                        </button>
+                      )}
                     </td>
                   </motion.tr>
                 ))}

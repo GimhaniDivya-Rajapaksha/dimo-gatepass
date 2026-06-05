@@ -465,6 +465,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [markingOutId, setMarkingOutId] = useState<string | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
 
   // Security-created DRAFT passes needing completion
   const [draftPasses, setDraftPasses] = useState<GatePass[]>([]);
@@ -524,9 +525,19 @@ export default function InitiatorDashboardClient({ user }: Props) {
         setMainInLoading(true);
         setArrivingLoading(true);
         try {
-          const mainInParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", status: "GATE_OUT", limit: "50" });
+          // No status filter — fetch all active MAIN_IN passes (APPROVED = just arrived, GATE_OUT = gate confirmed)
+          const mainInParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", parentOnly: "true", limit: "50" });
           const mainInRes = await fetch(`/api/gate-pass?${mainInParams}`);
-          if (!cancelled && mainInRes.ok) { const d = await mainInRes.json(); setMainInActive(d.passes || []); }
+          if (!cancelled && mainInRes.ok) {
+            const d = await mainInRes.json();
+            const pending = (d.passes || []).filter((p: GatePass) =>
+              // Only active statuses — exclude completed/cancelled journeys
+              !["COMPLETED", "CANCELLED"].includes(p.status) &&
+              // Exclude passes that already have a MAIN_OUT sub-pass
+              !p.subPasses?.some((sp: { passSubType: string | null }) => sp.passSubType === "MAIN_OUT")
+            );
+            setMainInActive(pending);
+          }
         } finally { if (!cancelled) setMainInLoading(false); }
 
         try {
@@ -644,11 +655,15 @@ export default function InitiatorDashboardClient({ user }: Props) {
     if (isASO) return;
     setMainInLoading(true);
     try {
-      const params = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", status: "GATE_OUT", limit: "50" });
+      const params = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "MAIN_IN", parentOnly: "true", limit: "50" });
       const res = await fetch(`/api/gate-pass?${params}`);
       if (!res.ok) return;
       const d = await res.json();
-      setMainInActive(d.passes || []);
+      const pending = (d.passes || []).filter((p: GatePass) =>
+        !["COMPLETED", "CANCELLED"].includes(p.status) &&
+        !p.subPasses?.some((sp: { passSubType: string | null }) => sp.passSubType === "MAIN_OUT")
+      );
+      setMainInActive(pending);
     } finally { setMainInLoading(false); }
   }, [isASO]);
 
@@ -728,6 +743,25 @@ export default function InitiatorDashboardClient({ user }: Props) {
       setMarkingOutId(null);
     }
   }, [fetchPasses]);
+
+  const handlePrint = useCallback(async (p: GatePass) => {
+    setPrintingId(p.id);
+    // APPROVED LT/CD: printing counts as Gate OUT — update status before navigating
+    if (p.status === "APPROVED" && (p.passType === "LOCATION_TRANSFER" || p.passType === "CUSTOMER_DELIVERY")) {
+      try {
+        await fetch(`/api/gate-pass/${p.id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "print_gate_out" }),
+        });
+        fetchPasses();
+      } catch {
+        // Continue to print even if the status update fails
+      }
+    }
+    router.push(`/gate-pass/${p.id}?print=1`);
+    setTimeout(() => setPrintingId(null), 500);
+  }, [router, fetchPasses]);
 
   const handleConfirmArrived = useCallback(async (id: string) => {
     if (!confirm("Confirm vehicle has arrived?")) return;
@@ -1382,7 +1416,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
                 <th className="w-1 p-0" />
-                {["Action", "Gate Pass No", "Vehicle / Chassis", "Departure From", "Requested By", "Departure Date", "Status"].map((h) => (
+                {["Action", "Gate Pass No", "Vehicle / Chassis", "To Location", "Requested By", "Departure Date", "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{h}</th>
                 ))}
               </tr>
@@ -1463,8 +1497,12 @@ export default function InitiatorDashboardClient({ user }: Props) {
                             </svg>
                           </button>
                           <button
-                            onClick={() => canPrint && router.push(`/gate-pass/${p.id}?print=1`)}
-                            disabled={!canPrint}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (canPrint) void handlePrint(p);
+                            }}
+                            disabled={!canPrint || printingId === p.id}
                             className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
                             style={{
                               background: canPrint ? "var(--surface)" : "var(--surface2)",

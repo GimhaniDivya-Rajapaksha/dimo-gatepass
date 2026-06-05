@@ -11,10 +11,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { name, email, password, role, approverId } = await req.json();
+    const { name, email, password, role, approverId, backupApproverId } = await req.json();
 
     if (!name?.trim() || !email?.trim() || !password?.trim()) {
       return NextResponse.json({ error: "Name, email and password are required" }, { status: 400 });
+    }
+    if (approverId && backupApproverId && approverId === backupApproverId) {
+      return NextResponse.json({ error: "Approver 1 and Approver 2 must be different" }, { status: 400 });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -27,6 +30,7 @@ export async function POST(req: NextRequest) {
         passwordHash,
         role: role || null,
         ...(approverId ? { approverId } : {}),
+        ...(backupApproverId ? { backupApproverId } : {}),
       },
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });

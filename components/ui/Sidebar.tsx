@@ -14,23 +14,25 @@ interface SidebarProps {
 }
 
 const roleLabels: Record<string, string> = {
-  INITIATOR:        "Gate Pass Initiator",
-  APPROVER:         "Approver",
-  RECIPIENT:        "Recipient",
-  ADMIN:            "Administrator",
-  CASHIER:          "Cashier",
-  AREA_SALES_OFFICER: "Area Sales Officer",
-  SECURITY_OFFICER: "Security Officer",
+  INITIATOR:            "Gate Pass Initiator",
+  APPROVER:             "Approver",
+  RECIPIENT:            "Recipient",
+  ADMIN:                "Administrator",
+  CASHIER:              "Cashier",
+  AREA_SALES_OFFICER:   "Area Sales Officer",
+  SECURITY_OFFICER:     "Security Officer",
+  DELIVERY_COORDINATOR: "Delivery Coordinator",
 };
 
 const roleColors: Record<string, string> = {
-  INITIATOR:        "#3b82f6",
-  APPROVER:         "#f59e0b",
-  RECIPIENT:        "#10b981",
-  ADMIN:            "#8b5cf6",
-  CASHIER:          "#f59e0b",
-  AREA_SALES_OFFICER: "#06b6d4",
-  SECURITY_OFFICER: "#1d4ed8",
+  INITIATOR:            "#3b82f6",
+  APPROVER:             "#f59e0b",
+  RECIPIENT:            "#10b981",
+  ADMIN:                "#8b5cf6",
+  CASHIER:              "#f59e0b",
+  AREA_SALES_OFFICER:   "#06b6d4",
+  SECURITY_OFFICER:     "#1d4ed8",
+  DELIVERY_COORDINATOR: "#0d9488",
 };
 
 export default function Sidebar({ user, role }: SidebarProps) {
@@ -39,6 +41,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const { theme }  = useTheme();
   const [mounted, setMounted] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
+  const [overrideCount, setOverrideCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
 
@@ -54,6 +57,19 @@ export default function Sidebar({ user, role }: SidebarProps) {
         .then(d => setDraftCount(d.total ?? 0))
         .catch(() => {});
     }, 60_000);
+    return () => clearInterval(id);
+  }, [role]);
+
+  useEffect(() => {
+    if (role !== "APPROVER") return;
+    const fetchOverrides = () => {
+      fetch("/api/gate-pass?status=CASHIER_REVIEW&cashierOverride=true&limit=1")
+        .then(r => r.json())
+        .then(d => setOverrideCount(d.total ?? 0))
+        .catch(() => {});
+    };
+    fetchOverrides();
+    const id = setInterval(fetchOverrides, 60_000);
     return () => clearInterval(id);
   }, [role]);
 
@@ -154,6 +170,12 @@ export default function Sidebar({ user, role }: SidebarProps) {
                   <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
                     style={{ background: "#f59e0b", color: "#1c1400" }}>
                     {draftCount}
+                  </span>
+                )}
+                {item.showOverrideBadge && overrideCount > 0 && (
+                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
+                    style={{ background: "#ef4444", color: "#fff" }}>
+                    {overrideCount}
                   </span>
                 )}
                 {isActive && !item.showDraftBadge && (

@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
-type PassType  = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
+type PassType  = "LOCATION_TRANSFER" | "AFTER_SALES";
 type Direction = "IN" | "OUT";
 type AssignTo  = "INITIATOR" | "SERVICE_ADVISOR";
 type PassTypeChoice = PassType | "";
@@ -326,7 +326,7 @@ export default function SecurityCreatePage() {
     setSelectedVehicle(null);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     if (!passType) { setError("Pass type is required"); return; }
     if (!direction) { setError("Gate direction is required"); return; }
@@ -363,7 +363,6 @@ export default function SecurityCreatePage() {
   const passTypeOptions: { value: PassType; label: string; icon: string }[] = [
     { value: "AFTER_SALES",       label: "After Sales",       icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
     { value: "LOCATION_TRANSFER", label: "Location Transfer", icon: "M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" },
-    { value: "CUSTOMER_DELIVERY", label: "Customer Delivery", icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
   ];
   const completionSteps = [
     { key: "type", label: "Pass Type", done: !!passType },

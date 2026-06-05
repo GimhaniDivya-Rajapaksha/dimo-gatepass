@@ -147,7 +147,7 @@ function downloadCSV(passes: GatePassFull[], searchTerm: string) {
     p.companyName ?? "", p.carrierRegNo ?? "",
     p.driverName ?? "", p.driverNIC ?? "", p.driverContact ?? "",
     p.mileage ?? "", p.insurance ?? "", p.garagePlate ?? "",
-    p.comments ?? "", p.requestedBy ?? "",
+    (p.comments ?? "").replace(/\[\[ASSIGNED_ROLE:[^\]]*\]\]/g,"").replace(/\[\[LT_BATCH[^\]]*\]\]/g,"").trim(), p.requestedBy ?? "",
     p.createdBy?.name ?? "", p.createdBy?.email ?? "",
     p.approvedBy?.name ?? "",
     new Date(p.createdAt).toLocaleDateString(),
@@ -185,7 +185,7 @@ export default function VehicleReportPage() {
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
+    if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER", "DELIVERY_COORDINATOR"].includes(session.user?.role ?? "")) {
       router.replace("/");
     }
   }, [status, session, router]);
@@ -201,6 +201,41 @@ export default function VehicleReportPage() {
   const [lastSearch, setLastSearch] = useState("");
   const [currentLocation, setCurrentLocation] = useState<string | null>(null);
   const [currentPlantLocation, setCurrentPlantLocation] = useState<CurrentPlantLocation | null>(null);
+
+  // Derive a human-readable location status from the most recent active pass
+  // when SAP doesn't have a live location (currentLocation is null).
+  const inferredLocation = useMemo(() => {
+    if (currentLocation || !passes?.length) return null;
+    const activeStatuses = ["GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "APPROVED", "PENDING_APPROVAL", "CASHIER_REVIEW"];
+    const sorted = [...passes].sort((a, b) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime());
+    const active = sorted.find(p => activeStatuses.includes(p.status));
+    if (!active) return null;
+
+    const shorten = (loc: string | null) => loc ? loc.split(" - ").slice(0, 2).join(" - ").substring(0, 28) : "?";
+
+    if (active.status === "GATE_OUT" || active.status === "INITIATOR_OUT") {
+      return {
+        line1: `${shorten(active.fromLocation)} → ${shorten(active.toLocation)}`,
+        line2: "Gate Out · In Transit · Not yet confirmed at destination",
+        color: "#d97706", bg: "#fef3c7", border: "#fde68a", dotColor: "#f59e0b",
+      };
+    }
+    if (active.status === "INITIATOR_IN") {
+      return {
+        line1: shorten(active.toLocation) ?? shorten(active.fromLocation),
+        line2: "At Gate · Awaiting Security confirmation",
+        color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", dotColor: "#8b5cf6",
+      };
+    }
+    if (active.status === "APPROVED") {
+      return {
+        line1: shorten(active.fromLocation),
+        line2: "Approved · Awaiting Gate Out",
+        color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", dotColor: "#22c55e",
+      };
+    }
+    return null;
+  }, [currentLocation, passes]);
   // Preserved SAP identifiers — survives SAP removing the vehicle from /plant on failed updates
   const lastKnownSapIds = React.useRef<{ internalNo: string; externalNo: string; chassisNo: string } | null>(null);
   const [plantLocations, setPlantLocations] = useState<PlantLocationOption[]>([]);
@@ -352,7 +387,7 @@ export default function VehicleReportPage() {
       </div>
     );
   }
-  if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER"].includes(session.user?.role ?? "")) {
+  if (!session || !["INITIATOR", "APPROVER", "ADMIN", "AREA_SALES_OFFICER", "CASHIER", "DELIVERY_COORDINATOR"].includes(session.user?.role ?? "")) {
     return null;
   }
 
@@ -524,20 +559,38 @@ export default function VehicleReportPage() {
                 {/* Current location */}
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: currentLocation ? "#f0fdf4" : "var(--surface2)", border: "1px solid", borderColor: currentLocation ? "#bbf7d0" : "var(--border)" }}>
-                    <svg className="w-4 h-4" style={{ color: currentLocation ? "#15803d" : "#9ca3af" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
+                    style={{
+                      background: currentLocation ? "#f0fdf4" : inferredLocation ? inferredLocation.bg : "var(--surface2)",
+                      border: "1px solid",
+                      borderColor: currentLocation ? "#bbf7d0" : inferredLocation ? inferredLocation.border : "var(--border)",
+                    }}>
+                    {inferredLocation && !currentLocation ? (
+                      /* transit / status icon */
+                      <svg className="w-4 h-4" style={{ color: inferredLocation.color }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" style={{ color: currentLocation ? "#15803d" : "#9ca3af" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    )}
                   </div>
                   <div className="min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wide leading-none mb-0.5" style={{ color: "var(--text-muted)" }}>
                       Current Location
                     </p>
-                    <p className="text-sm font-bold leading-none truncate" style={{ color: currentLocation ? "#15803d" : "var(--text-muted)" }}>
-                      {currentLocation ?? "Unknown"}
-                    </p>
+                    {currentLocation ? (
+                      <p className="text-sm font-bold leading-none truncate" style={{ color: "#15803d" }}>{currentLocation}</p>
+                    ) : inferredLocation ? (
+                      <>
+                        <p className="text-sm font-bold leading-tight truncate" style={{ color: inferredLocation.color }}>{inferredLocation.line1}</p>
+                        <p className="text-[10px] mt-0.5 leading-tight" style={{ color: inferredLocation.color, opacity: 0.75 }}>{inferredLocation.line2}</p>
+                      </>
+                    ) : (
+                      <p className="text-sm font-bold leading-none" style={{ color: "var(--text-muted)" }}>Unknown</p>
+                    )}
                   </div>
                 </div>
 
@@ -557,87 +610,6 @@ export default function VehicleReportPage() {
                 )}
               </div>
 
-              <div className="px-5 pb-4">
-                <div className="rounded-2xl border p-4 no-print" style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
-                  <div className="flex flex-col gap-3">
-                    <div>
-                      <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Update Vehicle Location</p>
-                      <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                        Change the live plant and storage location and show the API response message here.
-                      </p>
-                      {currentPlantLocation && (
-                        <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-                          Current Plant {currentPlantLocation.plantCode} - {currentPlantLocation.plantDescription} | Sloc {currentPlantLocation.storageLocation} - {currentPlantLocation.storageDescription}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end flex-wrap">
-                      <div className="flex-1 min-w-0">
-                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Plant</label>
-                        <select
-                          value={selectedPlant}
-                          onChange={(e) => {
-                            setSelectedPlant(e.target.value);
-                            setSelectedSloc("");
-                            setLocationUpdateError(null);
-                            setLocationUpdateMessage(null);
-                          }}
-                          className="w-full border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-                        >
-                          <option value="">Select plant</option>
-                          {plantOptions.map((plant) => (
-                            <option key={`${plant.plantCode}-${plant.plantDescription}`} value={plant.plantCode}>
-                              {plant.plantCode} - {plant.plantDescription}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <label className="block text-xs font-semibold mb-1" style={{ color: "var(--text-muted)" }}>Storage Location</label>
-                        <select
-                          value={selectedSloc}
-                          onChange={(e) => {
-                            setSelectedSloc(e.target.value);
-                            setLocationUpdateError(null);
-                            setLocationUpdateMessage(null);
-                          }}
-                          disabled={!selectedPlant}
-                          className="w-full border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-60"
-                          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-                        >
-                          <option value="">Select storage location</option>
-                          {storageOptions.map((location) => (
-                            <option key={location.id} value={location.storageLocation}>
-                              {location.storageLocation} - {location.storageDescription}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        onClick={handleLocationUpdate}
-                        disabled={locationUpdateLoading || !selectedPlant || !selectedSloc}
-                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                        style={{ background: "linear-gradient(135deg,#15803d,#22c55e)" }}
-                      >
-                        {locationUpdateLoading ? "Updating..." : "Update Location"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {locationUpdateMessage && (
-                    <div className="mt-3 rounded-xl border px-4 py-3 text-sm font-medium" style={{ background: "#f0fdf4", borderColor: "#bbf7d0", color: "#15803d" }}>
-                      {locationUpdateMessage}
-                    </div>
-                  )}
-
-                  {locationUpdateError && (
-                    <div className="mt-3 rounded-xl border px-4 py-3 text-sm font-medium" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
-                      {locationUpdateError}
-                    </div>
-                  )}
-                </div>
-              </div>
             </motion.div>
           )}
         </div>
@@ -886,7 +858,7 @@ export default function VehicleReportPage() {
                                           {p.mileage && <DetailField label="Mileage" value={p.mileage} />}
                                           {p.insurance && <DetailField label="Insurance" value={p.insurance} />}
                                           {p.garagePlate && <DetailField label="Garage Plate" value={p.garagePlate} mono />}
-                                          {p.comments && <DetailField label="Comments" value={p.comments} />}
+                                          {(() => { const c = p.comments?.replace(/\[\[ASSIGNED_ROLE:[^\]]*\]\]/g,"").replace(/\[\[LT_BATCH[^\]]*\]\]/g,"").trim(); return c ? <DetailField label="Comments" value={c} /> : null; })()}
                                           {p.rejectionReason && <DetailField label="Rejection Reason" value={p.rejectionReason} highlight="red" />}
                                         </DetailGroup>
 

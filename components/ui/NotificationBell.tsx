@@ -14,13 +14,15 @@ interface Notification {
 }
 
 const typeConfig: Record<string, { icon: string; bg: string; color: string; label: string; labelBg: string; labelColor: string }> = {
-  GATE_PASS_SUBMITTED: { icon: "📋", bg: "#eff6ff", color: "#1d4ed8", label: "New Request",  labelBg: "#eff6ff", labelColor: "#1d4ed8" },
-  GATE_PASS_APPROVED:  { icon: "✅", bg: "#f0fdf4", color: "#15803d", label: "Approved",     labelBg: "#f0fdf4", labelColor: "#15803d" },
-  GATE_PASS_REJECTED:  { icon: "❌", bg: "#fef2f2", color: "#dc2626", label: "Rejected",     labelBg: "#fef2f2", labelColor: "#dc2626" },
-  GATE_PASS_RECEIVED:  { icon: "🚗", bg: "#f5f3ff", color: "#5b21b6", label: "Gate Out",     labelBg: "#f5f3ff", labelColor: "#5b21b6" },
+  GATE_PASS_SUBMITTED:  { icon: "📋", bg: "#eff6ff", color: "#1d4ed8", label: "New Request",  labelBg: "#eff6ff", labelColor: "#1d4ed8" },
+  GATE_PASS_APPROVED:   { icon: "✅", bg: "#f0fdf4", color: "#15803d", label: "Approved",     labelBg: "#f0fdf4", labelColor: "#15803d" },
+  GATE_PASS_REJECTED:   { icon: "❌", bg: "#fef2f2", color: "#dc2626", label: "Rejected",     labelBg: "#fef2f2", labelColor: "#dc2626" },
+  GATE_PASS_RECEIVED:   { icon: "🚗", bg: "#f5f3ff", color: "#5b21b6", label: "Gate Out",     labelBg: "#f5f3ff", labelColor: "#5b21b6" },
+  NEW_USER_REGISTERED:  { icon: "👤", bg: "#faf5ff", color: "#7c3aed", label: "New User",     labelBg: "#faf5ff", labelColor: "#7c3aed" },
 };
 
 function getNavPath(n: Notification): string {
+  if (n.type === "NEW_USER_REGISTERED") return "/admin";
   if (!n.gatePass?.id) return "/";
   const id = n.gatePass.id;
   switch (n.type) {
@@ -57,9 +59,12 @@ export default function NotificationBell() {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 60000);
-    return () => clearInterval(interval);
+    const initial = setTimeout(fetchNotifications, 2500);
+    const interval = setInterval(fetchNotifications, 120000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [fetchNotifications]);
 
   useEffect(() => {

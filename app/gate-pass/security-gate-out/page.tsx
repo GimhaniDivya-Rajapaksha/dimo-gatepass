@@ -239,8 +239,8 @@ function PassCard({ p, mode, onConfirmed }: {
             {p.make && (
               <p className="text-xs font-semibold" style={{ color: `${accentLight}cc` }}>{p.make}</p>
             )}
-            {/* Route — LT and AFTER_SALES sub-passes */}
-            {(p.passType === "LOCATION_TRANSFER" || (p.passType === "AFTER_SALES" && p.passSubType && ["SUB_OUT","SUB_OUT_IN","SUB_IN"].includes(p.passSubType))) && (p.fromLocation || p.toLocation) && (
+            {/* Route — show whenever location data is available */}
+            {(p.fromLocation || p.toLocation) && (
               <p className="text-[10px] mt-1 font-mono" style={{ color: "rgba(255,255,255,0.5)" }}>
                 {p.fromLocation || "?"} → {p.toLocation || "?"}
               </p>
@@ -429,19 +429,8 @@ function PassCard({ p, mode, onConfirmed }: {
           Drag the car {isOut ? "→ right" : "← left"} to confirm vehicle {isOut ? "departure" : "arrival"}
         </p>
 
-        {/* Print + View Details */}
+        {/* View Details */}
         <div className="flex gap-2">
-          <a
-            href={`/gate-pass/${p.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-opacity hover:opacity-80"
-            style={{ borderColor: "rgba(16,185,129,0.5)", color: "#059669", background: "rgba(16,185,129,0.08)" }}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Print Gate Pass
-          </a>
           <a
             href={`/gate-pass/${p.id}`}
             className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border transition-opacity hover:opacity-80"
@@ -555,40 +544,56 @@ export default function SecurityGateDashboard() {
       const inData         = await fetchJson(`/api/gate-pass?status=GATE_OUT&limit=100${toLocQ}`);
       const subInData      = await fetchJson(`/api/gate-pass?status=APPROVED&passType=AFTER_SALES&passSubType=SUB_IN&limit=100${toLocQ}`);
       const initiatorInData = await fetchJson(`/api/gate-pass?status=INITIATOR_IN&limit=100${toLocQ}`);
-      const releasedData   = await fetchJson(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
-      const clearedData    = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
-      const draftData      = await fetchJson("/api/gate-pass?status=DRAFT&limit=50");
+      // Released Today: vehicles that LEFT this gate today.
+      // fromLocQ because the vehicle's fromLocation = Security's gate.
+      // Fetch both GATE_OUT (still in transit) and COMPLETED (already arrived at destination)
+      // so same-day round-trips are not missed.
+      const releasedInTransitData  = await fetchJson(`/api/gate-pass?status=GATE_OUT&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${fromLocQ}`);
+      const releasedCompletedData  = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${fromLocQ}`);
+      // Cleared IN Today: vehicles that ARRIVED at this gate and Gate IN was confirmed today.
+      // toLocQ because the vehicle's toLocation = Security's gate.
+      const clearedData            = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
+      const draftData              = await fetchJson("/api/gate-pass?status=DRAFT&limit=50");
       setDraftPasses(draftData.passes ?? []);
 
-      // Server already scoped by location — just filter by pass type/subtype
+      // Server already scoped by location — filter by pass type/subtype
       const approvedAll: Pass[] = outData.passes ?? [];
+
+      // Bug fix: MAIN_IN APPROVED at fromLocQ = vehicle departing from Security's plant for service.
+      // These need Gate OUT confirmation (not Gate IN). Include in outPasses.
       const approvedGateOut = approvedAll.filter((p) =>
-        !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN") &&
-        !(p.passType === "AFTER_SALES" && p.passSubType === "MAIN_IN")
+        !(p.passType === "AFTER_SALES" && p.passSubType === "SUB_IN")
+        // MAIN_IN is now correctly included in Gate OUT (removed wrong exclusion)
       );
       setOutPasses([
         ...approvedGateOut,
         ...(initiatorOutData.passes ?? []),
       ].sort(sortNewestFirst));
 
-      // APPROVED MAIN_IN: server filtered by fromLocation (vehicle arriving to this security's plant)
-      const approvedMainIn: Pass[] = approvedAll.filter((p) =>
-        p.passType === "AFTER_SALES" && p.passSubType === "MAIN_IN"
-      );
-      const approvedSubIn: Pass[] = subInData.passes ?? [];
-      const allGateOut: Pass[]    = inData.passes ?? [];
+      const approvedSubIn: Pass[]     = subInData.passes ?? [];
+      const allGateOut: Pass[]        = inData.passes ?? [];
       const initiatorInPasses: Pass[] = initiatorInData.passes ?? [];
-      // Gate IN: server already scoped by toLocation — just filter by pass type
+
+      // Gate IN queue: vehicles arriving at Security's gate that need Gate IN confirmation.
+      // Bug fix: added CUSTOMER_DELIVERY — Security can confirm Gate IN for CD arrivals.
+      // MAIN_IN APPROVED removed (moved to Gate OUT above).
       setInPasses([
-        ...approvedMainIn,
         ...initiatorInPasses,
         ...approvedSubIn,
         ...allGateOut.filter((p) =>
           (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN" || p.passSubType === "SUB_OUT")) ||
-          p.passType === "LOCATION_TRANSFER"
+          p.passType === "LOCATION_TRANSFER" ||
+          p.passType === "CUSTOMER_DELIVERY"
         ),
       ].sort(sortNewestFirst));
-      setReleasedToday((releasedData.passes ?? []).length);
+
+      // Released Today = GATE_OUT (in transit) + COMPLETED (already arrived) from this gate today.
+      // De-duplicate by id in case a pass appears in both (shouldn't happen, but safe).
+      const releasedIds = new Set([
+        ...(releasedInTransitData.passes ?? []).map((p: Pass) => p.id),
+        ...(releasedCompletedData.passes ?? []).map((p: Pass) => p.id),
+      ]);
+      setReleasedToday(releasedIds.size);
       setClearedInToday((clearedData.passes ?? []).length);
     } catch {
       showToast("Failed to refresh passes.", false);

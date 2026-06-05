@@ -85,11 +85,13 @@ export default function ReceivePage() {
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
-      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50" });
+      // locationView=true bypasses the INITIATOR "own passes only" filter so destination
+      // initiators can see incoming passes they did not create.
+      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50", locationView: "true" });
       // Only show GATE_OUT SUB_OUT — vehicle must have physically left source (source SO confirmed Gate OUT)
-      const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "50" });
-      const ltCompParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20" });
-      const asCompParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20" });
+      const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "50", locationView: "true" });
+      const ltCompParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20", locationView: "true" });
+      const asCompParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20", locationView: "true" });
       if (myLocation) {
         ltParams.set("toLocation", myLocation);
         asGateOutParams.set("toLocation", myLocation);

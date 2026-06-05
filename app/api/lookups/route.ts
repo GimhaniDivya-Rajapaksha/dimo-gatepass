@@ -87,45 +87,44 @@ export async function GET(req: NextRequest) {
       if (matnr) {
         const [allRows, dbLocs] = await Promise.all([
           fetchPlantVehicleRows().catch(() => []),
-          (locationType === "DIMO" || locationType === "DEALER")
-            ? prisma.locationOption.findMany({ where: { locationType }, select: { plantCode: true, storageLocation: true } })
-            : Promise.resolve(null),
+          prisma.locationOption.findMany({
+            select: {
+              plantCode: true,
+              plantDescription: true,
+              storageLocation: true,
+              storageDescription: true,
+              locationType: true,
+            },
+          }),
         ]);
 
-        // Build a set of plant+sloc keys from DB for the requested locationType
-        const dbAllowed = dbLocs
-          ? new Set(dbLocs.map((l: { plantCode: string; storageLocation: string }) => `${l.plantCode}|${l.storageLocation}`))
-          : null;
+        const dbByKey = new Map(
+          dbLocs.map((loc) => [`${loc.plantCode}|${loc.storageLocation}`, loc])
+        );
 
         const seen = new Set<string>();
         const options: LocationOption[] = [];
         for (const row of allRows.filter(r => r.materialNo && r.materialNo.toUpperCase() === matnr.toUpperCase())) {
           if (!row.plantDescription) continue;
           // Fall back to storageLocation code when SAP leaves LgortDesc blank
-          const storageDesc = row.storageDescription || row.storageLocation;
           const id = [row.plantCode, row.storageLocation].join("|");
           if (seen.has(id)) continue;
 
-          // Filter by locationType: prefer DB match, fall back to D-prefix rule
-          if (locationType === "DIMO" || locationType === "DEALER") {
-            const inDb = dbAllowed?.has(id) ?? false;
-            const byPrefix = row.storageLocation.toUpperCase().startsWith("D") ? "DEALER" : "DIMO";
-            const effectiveType = inDb ? locationType : byPrefix;
-            if (effectiveType !== locationType) continue;
-          }
-
           seen.add(id);
-          const value = [row.plantDescription, storageDesc].filter(Boolean).join(" - ");
+          const dbLoc = dbByKey.get(id);
+          const plantDescription = dbLoc?.plantDescription || row.plantDescription;
+          const storageDesc = dbLoc?.storageDescription || row.storageDescription || row.storageLocation;
+          const value = [plantDescription, storageDesc].filter(Boolean).join(" - ");
           options.push({
             id, value, label: value,
             plantCode: row.plantCode,
-            plantDescription: row.plantDescription,
+            plantDescription,
             storageLocation: row.storageLocation,
             storageDescription: storageDesc,
             source: "api",
           });
         }
-        return NextResponse.json({ options: filterApiLocations(options, q).slice(0, take) });
+        return NextResponse.json({ options: filterApiLocations(options, q, locationType).slice(0, take) });
       }
 
       const apiLocations = await fetchPlantLocationOptions().catch(() => []);
@@ -393,6 +392,27 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("Location create error:", e);
       return NextResponse.json({ error: "Failed to create location." }, { status: 500 });
+    }
+  }
+
+  if (field === "carrier") {
+    const companyName = normalize(body.companyName ?? "");
+    const registrationNo = normalize(body.registrationNo ?? "");
+    if (!companyName || !registrationNo) {
+      return NextResponse.json({ error: "companyName and registrationNo are required" }, { status: 400 });
+    }
+    try {
+      const created = await prisma.carrierOption.upsert({
+        where: { registrationNo },
+        update: { companyName },
+        create: { companyName, registrationNo },
+      });
+      return NextResponse.json({
+        option: { id: created.id, companyName: created.companyName, registrationNo: created.registrationNo },
+      });
+    } catch (e) {
+      console.error("Carrier create error:", e);
+      return NextResponse.json({ error: "Failed to save carrier." }, { status: 500 });
     }
   }
 
