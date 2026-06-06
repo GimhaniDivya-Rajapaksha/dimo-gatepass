@@ -7,12 +7,18 @@ export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const vehicleNo = new URL(req.url).searchParams.get("vehicleNo") ?? "";
-  if (!vehicleNo) return NextResponse.json({ passes: [] });
+  const params = new URL(req.url).searchParams;
+  const vehicleNo = params.get("vehicleNo") ?? "";
+  const chassisNo = params.get("chassisNo") ?? "";
+  if (!vehicleNo && !chassisNo) return NextResponse.json({ passes: [] });
+
+  const where = chassisNo
+    ? { chassis: { equals: chassisNo, mode: "insensitive" as const } }
+    : { vehicle: { contains: vehicleNo, mode: "insensitive" as const } };
 
   try {
     const passes = await prisma.gatePass.findMany({
-      where: { vehicle: { contains: vehicleNo, mode: "insensitive" } },
+      where,
       include: {
         createdBy: { select: { name: true } },
         approvedBy: { select: { name: true } },
