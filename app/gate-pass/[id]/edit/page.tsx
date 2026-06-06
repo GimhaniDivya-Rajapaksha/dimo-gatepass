@@ -141,11 +141,16 @@ export default function EditPendingGatePassPage() {
   const [insurance, setInsurance] = useState("");
   const [garagePlate, setGaragePlate] = useState("");
 
-  // Load all approvers on mount
+  // Load only this initiator's assigned approvers (approver + backup approver)
   useEffect(() => {
-    fetch(`/api/lookups?field=approver&limit=100`)
+    fetch(`/api/me`)
       .then(r => r.json())
-      .then((d: { options?: LookupOption[] }) => setApproverOptions(d.options ?? []));
+      .then((d: { user?: { approver?: { id: string; name: string } | null; backupApprover?: { id: string; name: string } | null } }) => {
+        const opts: LookupOption[] = [];
+        if (d.user?.approver) opts.push({ id: d.user.approver.id, value: d.user.approver.name, label: d.user.approver.name });
+        if (d.user?.backupApprover) opts.push({ id: d.user.backupApprover.id, value: d.user.backupApprover.name, label: d.user.backupApprover.name });
+        setApproverOptions(opts);
+      });
   }, []);
 
   useEffect(() => {
