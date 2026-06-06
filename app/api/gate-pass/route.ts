@@ -347,6 +347,7 @@ export async function POST(req: NextRequest) {
     departureDate: body.departureDate || null,
     departureTime: body.departureTime || null,
     requestedBy: body.requestedBy || null,
+    intendedApprover: (typeof body.approver === "string" ? body.approver.trim() : null) || null,
     outReason: body.outReason || null,
     transportMode: body.transportMode || null,
     companyName: body.companyName || null,

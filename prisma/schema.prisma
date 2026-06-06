@@ -102,6 +102,7 @@ model GatePass {
   rejectionReason String?
   resubmitCount   Int     @default(0)
   resubmitNote    String? // initiator's correction note when resubmitting
+  intendedApprover     String? // approver name selected by initiator at creation / after reassign
   previousApprover     String? // original approver name when initiator redirected the pass
   approverChangeReason String? // reason given by initiator for changing the approver
 
