@@ -102,6 +102,8 @@ model GatePass {
   rejectionReason String?
   resubmitCount   Int     @default(0)
   resubmitNote    String? // initiator's correction note when resubmitting
+  previousApprover     String? // original approver name when initiator redirected the pass
+  approverChangeReason String? // reason given by initiator for changing the approver
 
   passSubType    String?   // MAIN_IN | MAIN_OUT | SUB_OUT | SUB_IN
   paymentType    String?   // CASH | CREDIT | MIXED (used for MAIN_OUT)
