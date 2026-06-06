@@ -15,7 +15,10 @@ type GatePass = {
   status: string; vehicle: string; chassis: string | null;
   departureDate: string | null; requestedBy: string | null;
   toLocation: string | null; fromLocation: string | null; vehicleDetails: string | null;
-  createdBy: { name: string }; createdAt: string;
+  createdBy: { id: string; name: string }; createdAt: string;
+  approver?: string | null;
+  previousApprover?: string | null;
+  approverChangeReason?: string | null;
   subPasses?: SubPass[];
 };
 
@@ -198,6 +201,17 @@ function GatePassListPageInner() {
   };
   const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null);
 
+  // Reassign approver modal
+  type ReassignModal = { id: string; gatePassNumber: string; currentApprover: string };
+  const [reassignModal, setReassignModal] = useState<ReassignModal | null>(null);
+  const [reassignNewApprover, setReassignNewApprover] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignApproverOptions, setReassignApproverOptions] = useState<{ id: string; value: string; label: string }[]>([]);
+  const [reassignApproverLoading, setReassignApproverLoading] = useState(false);
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
+  const [reassignError, setReassignError] = useState("");
+
+
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ page: String(page), limit: "15" });
@@ -240,6 +254,24 @@ function GatePassListPageInner() {
   }, [page, search, statusFilter, passTypeFilter]);
 
   useEffect(() => { fetchPasses(); }, [fetchPasses]);
+
+  async function handleReassignSubmit() {
+    if (!reassignModal) return;
+    if (!reassignNewApprover.trim()) { setReassignError("Please select a new approver"); return; }
+    if (!reassignReason.trim()) { setReassignError("Please enter a reason for the change"); return; }
+    setReassignSubmitting(true); setReassignError("");
+    try {
+      const res = await fetch(`/api/gate-pass/${reassignModal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "initiator_reassign", newApprover: reassignNewApprover, reason: reassignReason }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as { error?: string }).error || "Failed"); }
+      setReassignModal(null); setReassignNewApprover(""); setReassignReason(""); setReassignApproverOptions([]);
+      void fetchPasses();
+    } catch (e) { setReassignError(String(e)); }
+    finally { setReassignSubmitting(false); }
+  }
   useEffect(() => { setPage(1); }, [search, statusFilter, passTypeFilter]);
   useEffect(() => { setStatusFilter(searchParams.get("status") ?? "ALL"); setPage(1); }, [searchParams]);
 
@@ -693,6 +725,7 @@ function GatePassListPageInner() {
 
                     const canMarkIn = false; // MAIN_IN goes directly to Security Gate IN
                     const canEdit = p.status === "DRAFT" && (isInitiator || isASO || session?.user?.role === "SERVICE_ADVISOR");
+                    const canReassign = p.status === "PENDING_APPROVAL" && (isInitiator || isASO) && p.createdBy?.id === session?.user?.id;
 
                     // For AFTER_SALES GATE_OUT: ASO can confirm arrived (gate_in → COMPLETED); MAIN_IN and SUB_OUT handled by security
                     const canGateIn = p.passType === "AFTER_SALES" && p.status === "GATE_OUT"
@@ -733,6 +766,16 @@ function GatePassListPageInner() {
                                 title="Complete / Edit this draft pass">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                            )}
+                            {canReassign && (
+                              <button onClick={(e) => { e.stopPropagation(); setReassignModal({ id: p.id, gatePassNumber: p.gatePassNumber, currentApprover: p.approver ?? "" }); setReassignNewApprover(""); setReassignReason(""); setReassignApproverOptions([]); setReassignError(""); }}
+                                className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all"
+                                style={{ background: "#eff6ff", borderColor: "#3b82f6", color: "#1d4ed8" }}
+                                title="Change approver">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                                 </svg>
                               </button>
                             )}
@@ -880,6 +923,118 @@ function GatePassListPageInner() {
                   className="px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all shadow-md"
                   style={{ background: confirmModal.confirmColor }}>
                   {confirmModal.confirmLabel}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Reassign Approver Modal ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {reassignModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.45)" }}
+            onClick={() => setReassignModal(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="rounded-2xl shadow-2xl w-full max-w-md p-6"
+              style={{ background: "var(--surface)", borderColor: "var(--border)", border: "1px solid" }}
+              onClick={(e) => e.stopPropagation()}>
+
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#eff6ff" }}>
+                  <svg className="w-5 h-5" style={{ color: "#1d4ed8" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-bold text-base" style={{ color: "var(--text)" }}>Change Approver</p>
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{reassignModal.gatePassNumber}</p>
+                </div>
+              </div>
+
+              {/* Current approver */}
+              {reassignModal.currentApprover && (
+                <div className="mb-4 px-3 py-2 rounded-xl text-sm" style={{ background: "#fef9c3", color: "#92400e" }}>
+                  Currently assigned to: <strong>{reassignModal.currentApprover}</strong>
+                </div>
+              )}
+
+              {/* New approver search */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                  New Approver <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={reassignNewApprover}
+                    onChange={(e) => {
+                      setReassignNewApprover(e.target.value);
+                      const q = e.target.value.trim();
+                      if (!q) { setReassignApproverOptions([]); return; }
+                      setReassignApproverLoading(true);
+                      fetch(`/api/lookups?field=approver&q=${encodeURIComponent(q)}&limit=10`)
+                        .then(r => r.json())
+                        .then((d: { options?: { id: string; value: string; label: string }[] }) => setReassignApproverOptions(d.options ?? []))
+                        .finally(() => setReassignApproverLoading(false));
+                    }}
+                    placeholder="Search approver name..."
+                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                  />
+                  {reassignApproverOptions.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full rounded-xl border shadow-xl overflow-hidden"
+                      style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                      {reassignApproverOptions.map((o) => (
+                        <button key={o.id} type="button"
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors"
+                          style={{ color: "var(--text)" }}
+                          onClick={() => { setReassignNewApprover(o.value); setReassignApproverOptions([]); }}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div className="mb-5">
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                  Reason for Change <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="e.g. Original approver is not available today..."
+                  className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+                  style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                />
+              </div>
+
+              {reassignError && (
+                <p className="text-red-500 text-xs mb-3">{reassignError}</p>
+              )}
+
+              {/* Note about approver 1 visibility */}
+              <p className="text-xs mb-4 px-3 py-2 rounded-xl" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                The original approver will be notified that this pass was redirected. They will <strong>not</strong> be able to approve it.
+              </p>
+
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setReassignModal(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}>
+                  Cancel
+                </button>
+                <button type="button" onClick={() => void handleReassignSubmit()} disabled={reassignSubmitting}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                  style={{ background: reassignSubmitting ? "#93c5fd" : "#2563eb", cursor: reassignSubmitting ? "not-allowed" : "pointer" }}>
+                  {reassignSubmitting ? "Reassigning..." : "Confirm Change"}
                 </button>
               </div>
             </motion.div>
