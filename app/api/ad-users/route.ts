@@ -35,8 +35,9 @@ export async function GET(req: NextRequest) {
   try {
     const token = await getGraphToken();
 
-    const filter = `startswith(displayName,'${q.replace(/'/g, "''")}') or startswith(mail,'${q.replace(/'/g, "''")}') or startswith(userPrincipalName,'${q.replace(/'/g, "''")}')`;
-    const graphUrl = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(filter)}&$select=id,displayName,mail,userPrincipalName&$top=15&$count=true&$orderby=displayName`;
+    // Use $search for reliable user lookup across displayName, mail, userPrincipalName
+    const searchQuery = `"displayName:${q}" OR "mail:${q}" OR "userPrincipalName:${q}"`;
+    const graphUrl = `https://graph.microsoft.com/v1.0/users?$search=${encodeURIComponent(searchQuery)}&$select=id,displayName,mail,userPrincipalName&$top=15&$count=true&$orderby=displayName`;
 
     const graphRes = await fetch(graphUrl, {
       headers: {
@@ -47,8 +48,8 @@ export async function GET(req: NextRequest) {
 
     if (!graphRes.ok) {
       const err = await graphRes.json().catch(() => ({}));
-      console.error("[ad-users] Graph API error:", err);
-      return NextResponse.json({ error: "Graph API error" }, { status: 500 });
+      console.error("[ad-users] Graph API error:", JSON.stringify(err));
+      return NextResponse.json({ users: [], error: String(err?.error?.message ?? "Graph API error") });
     }
 
     const data = await graphRes.json() as { value: { id: string; displayName: string; mail: string; userPrincipalName: string }[] };
