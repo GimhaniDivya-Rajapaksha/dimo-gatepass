@@ -159,7 +159,29 @@ export async function GET(req: NextRequest) {
       }];
     }
   }
-  // APPROVER and ADMIN see all
+  // APPROVER: for PENDING_APPROVAL passes, only show ones explicitly assigned to them
+  // (intendedApprover = their name). For null intendedApprover (old passes), still show all.
+  // For other statuses (approved/rejected history), no restriction.
+  if (role === "APPROVER" && (!status || status === "PENDING_APPROVAL")) {
+    const approverName = (session.user as { name?: string | null }).name ?? "";
+    if (approverName) {
+      const pendingFilter = { status: "PENDING_APPROVAL" as const };
+      const assignedFilter = {
+        AND: [
+          pendingFilter,
+          { OR: [
+            { intendedApprover: { equals: approverName, mode: "insensitive" as const } },
+            { intendedApprover: null },
+          ]},
+        ],
+      };
+      const nonPendingFilter = { status: { not: "PENDING_APPROVAL" as const } };
+      if (!where.OR) {
+        where.OR = [assignedFilter as object, nonPendingFilter as object];
+      }
+    }
+  }
+  // ADMIN sees all
 
   // toLocation / fromLocation filters (used by Security page and Vehicle Arrivals to scope by gate location)
   // locationPlant variants do a startsWith match — one security officer covers all sub-locations in a plant.

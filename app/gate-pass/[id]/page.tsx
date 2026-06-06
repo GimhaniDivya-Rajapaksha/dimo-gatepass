@@ -24,7 +24,7 @@ type GatePassDetail = {
   mileage: string | null; insurance: string | null; garagePlate: string | null;
   comments: string | null; rejectionReason: string | null;
   resubmitCount: number; resubmitNote: string | null;
-  previousApprover: string | null; approverChangeReason: string | null;
+  intendedApprover: string | null; previousApprover: string | null; approverChangeReason: string | null;
   paymentType: string | null;
   hasCredit: boolean;
   hasImmediate: boolean;
@@ -490,6 +490,10 @@ function InitiatorGatePassDetailPageInner() {
   const isLT = data.passType === "LOCATION_TRANSFER";
   const canCancel  = data.status === "PENDING_APPROVAL" && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
   const isApproverView = role === "APPROVER" || role === "ADMIN";
+  // True if this approver is specifically assigned to this gate pass.
+  // null intendedApprover means old pass (no selection stored) — allow any approver.
+  const isIntendedApprover = role === "ADMIN" || !data.intendedApprover ||
+    data.intendedApprover.trim().toLowerCase() === (session?.user?.name ?? "").trim().toLowerCase();
   const isInitiatorView = role === "INITIATOR" || role === "AREA_SALES_OFFICER";
   const isSecurityOfficer = role === "SECURITY_OFFICER";
   // Security Officer can confirm Gate OUT:
@@ -993,23 +997,44 @@ function InitiatorGatePassDetailPageInner() {
         )}
 
         {/* Approver reassignment info banner */}
-        {data.previousApprover && (
-          <div className="mb-4 px-4 py-3 rounded-2xl border no-print flex items-start gap-3" style={{ background: "#eff6ff", borderColor: "#93c5fd" }}>
-            <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#1d4ed8" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold mb-0.5" style={{ color: "#1e40af" }}>Approver Reassigned</p>
-              <p className="text-xs" style={{ color: "#1d4ed8" }}>
-                This gate pass was originally submitted to <strong>{data.previousApprover}</strong> and redirected to you.
-              </p>
-              {data.approverChangeReason && (
-                <p className="text-xs mt-1" style={{ color: "#1d4ed8" }}>
-                  Reason: <strong>{data.approverChangeReason}</strong>
+        {data.previousApprover && isApproverView && (
+          isIntendedApprover ? (
+            /* New approver — show who it came from */
+            <div className="mb-4 px-4 py-3 rounded-2xl border no-print flex items-start gap-3" style={{ background: "#eff6ff", borderColor: "#93c5fd" }}>
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#1d4ed8" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#1e40af" }}>Approver Reassigned</p>
+                <p className="text-xs" style={{ color: "#1d4ed8" }}>
+                  This gate pass was originally submitted to <strong>{data.previousApprover}</strong> and redirected to you.
                 </p>
-              )}
+                {data.approverChangeReason && (
+                  <p className="text-xs mt-1" style={{ color: "#1d4ed8" }}>
+                    Reason: <strong>{data.approverChangeReason}</strong>
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            /* Original approver — show it was redirected away */
+            <div className="mb-4 px-4 py-3 rounded-2xl border no-print flex items-start gap-3" style={{ background: "#fefce8", borderColor: "#fde68a" }}>
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#92400e" }}>This gate pass was redirected away from you</p>
+                <p className="text-xs" style={{ color: "#a16207" }}>
+                  The initiator reassigned this to <strong>{data.intendedApprover}</strong>. You cannot approve or reject it.
+                </p>
+                {data.approverChangeReason && (
+                  <p className="text-xs mt-1" style={{ color: "#a16207" }}>
+                    Reason: <strong>{data.approverChangeReason}</strong>
+                  </p>
+                )}
+              </div>
+            </div>
+          )
         )}
 
         {/* Inline reject reason box */}
@@ -1478,7 +1503,7 @@ function InitiatorGatePassDetailPageInner() {
                   )}
 
                   {/* Approve / Reject — sticky footer inside panel */}
-                  <div className="px-4 py-3 border-t flex items-center gap-2 flex-shrink-0"
+                  {isIntendedApprover && <div className="px-4 py-3 border-t flex items-center gap-2 flex-shrink-0"
                     style={{ borderColor: "#fde68a", background: "var(--surface)" }}>
                     <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                       onClick={() => { setShowRejectBox(!showRejectBox); setError(""); }}
@@ -1499,14 +1524,14 @@ function InitiatorGatePassDetailPageInner() {
                         : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
                       {approveLoading ? "Approving…" : "Approve"}
                     </motion.button>
-                  </div>
+                  </div>}
                 </div>
               );
             })()}
 
           <div className="flex items-center gap-3 flex-wrap mt-2">
             {/* ── APPROVER / ADMIN buttons (non-AFTER_SALES or non-MAIN_OUT) ── */}
-            {isApproverView && pendingApproval && !approveResult && !(data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT") && (
+            {isApproverView && isIntendedApprover && pendingApproval && !approveResult && !(data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT") && (
               <>
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                   onClick={() => { setShowRejectBox(!showRejectBox); setError(""); }}
