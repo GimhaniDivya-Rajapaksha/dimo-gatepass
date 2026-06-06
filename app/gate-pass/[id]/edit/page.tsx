@@ -19,6 +19,65 @@ function Field({ label, required, children, error }: { label: string; required?:
   );
 }
 
+function ApproverDropdown({ value, onChange, allOptions }: {
+  value: string;
+  onChange: (v: string) => void;
+  allOptions: LookupOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  const ref = { current: null as HTMLDivElement | null };
+
+  const filtered = query
+    ? allOptions.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+    : allOptions;
+
+  return (
+    <div className="relative" ref={(el) => { ref.current = el; }}>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 180)}
+        placeholder="Select approver..."
+        className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+      />
+      {/* Dropdown arrow */}
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }}>
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </span>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl border shadow-xl overflow-hidden"
+          style={{ background: "var(--surface)", borderColor: "var(--border)", maxHeight: "220px", overflowY: "auto" }}>
+          {filtered.length === 0 ? (
+            <p className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>No approvers found</p>
+          ) : filtered.map((o) => (
+            <button key={o.id} type="button"
+              onMouseDown={() => { onChange(o.value); setQuery(o.label); setOpen(false); }}
+              className="w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2"
+              style={{
+                color: "var(--text)",
+                background: value === o.value ? "#eff6ff" : "transparent",
+                fontWeight: value === o.value ? 600 : 400,
+              }}>
+              {value === o.value && (
+                <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SearchDropdown({ value, onChange, onSelect, options, loading, placeholder }: {
   value: string; onChange: (v: string) => void; onSelect: (o: LookupOption) => void;
   options: LookupOption[]; loading?: boolean; placeholder?: string;
@@ -81,6 +140,13 @@ export default function EditPendingGatePassPage() {
   const [mileage, setMileage] = useState("");
   const [insurance, setInsurance] = useState("");
   const [garagePlate, setGaragePlate] = useState("");
+
+  // Load all approvers on mount
+  useEffect(() => {
+    fetch(`/api/lookups?field=approver&limit=100`)
+      .then(r => r.json())
+      .then((d: { options?: LookupOption[] }) => setApproverOptions(d.options ?? []));
+  }, []);
 
   useEffect(() => {
     fetch(`/api/gate-pass/${id}`)
@@ -174,22 +240,14 @@ export default function EditPendingGatePassPage() {
         </div>
       </div>
 
-      {/* Editable fields */}
+      {/* Approver dropdown */}
       <div className="rounded-2xl border p-5 mb-5 space-y-4" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Approver</p>
         <Field label="Approver" required>
-          <SearchDropdown
+          <ApproverDropdown
             value={approver}
-            onChange={(v) => {
-              setApprover(v);
-              if (!v) { setApproverOptions([]); return; }
-              fetch(`/api/lookups?field=approver&q=${encodeURIComponent(v)}&limit=15`)
-                .then(r => r.json())
-                .then((d: { options?: LookupOption[] }) => setApproverOptions(d.options ?? []));
-            }}
-            onSelect={(o) => { setApprover(o.value); setApproverOptions([]); }}
-            options={approverOptions}
-            placeholder="Search assigned approver..."
+            onChange={setApprover}
+            allOptions={approverOptions}
           />
         </Field>
       </div>
