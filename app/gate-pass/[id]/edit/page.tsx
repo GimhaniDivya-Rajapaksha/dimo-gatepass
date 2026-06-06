@@ -92,6 +92,59 @@ function PreloadedDropdown({ value, onChange, options, placeholder }: {
   );
 }
 
+/** Dropdown that fetches on demand as user types */
+function SearchDropdown({ value, onChange, onSelect, placeholder, fetchUrl }: {
+  value: string; onChange: (v: string) => void;
+  onSelect: (o: LookupOption) => void;
+  placeholder?: string; fetchUrl: (q: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<LookupOption[]>([]);
+  const ref = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function search(q: string) {
+    if (timer.current) clearTimeout(timer.current);
+    if (!q.trim()) { setOptions([]); return; }
+    timer.current = setTimeout(() => {
+      fetch(fetchUrl(q)).then(r => r.json())
+        .then((d: { options?: LookupOption[] }) => setOptions(d.options ?? []));
+    }, 250);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <input type="text" value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); search(e.target.value); }}
+        onFocus={() => { setOpen(true); if (value) search(value); }}
+        placeholder={placeholder ?? "Search..."}
+        className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+      />
+      {open && options.length > 0 && (
+        <div className="absolute z-30 mt-1 w-full rounded-xl border shadow-2xl overflow-hidden"
+          style={{ background: "var(--surface)", borderColor: "var(--border)", maxHeight: 220, overflowY: "auto" }}>
+          {options.map(o => (
+            <button key={o.id} type="button"
+              onMouseDown={() => { onSelect(o); setOpen(false); setOptions([]); }}
+              className="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors"
+              style={{ color: "var(--text)" }}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────────────────────── */
 export default function EditPendingGatePassPage() {
   const { id } = useParams<{ id: string }>();
@@ -237,8 +290,8 @@ export default function EditPendingGatePassPage() {
               <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: "#fef9c3", color: "#92400e" }}>LOCKED</span>
             </div>
           </div>
-          {gp.make      && <div><p className="text-xs mb-0.5" style={{ color: "var(--text-muted)" }}>Make</p><p className="text-sm font-medium" style={{ color: "var(--text)" }}>{gp.make as string}</p></div>}
-          {gp.vehicleColor && <div><p className="text-xs mb-0.5" style={{ color: "var(--text-muted)" }}>Colour</p><p className="text-sm font-medium" style={{ color: "var(--text)" }}>{gp.vehicleColor as string}</p></div>}
+          {!!(gp.make as string) && <div><p className="text-xs mb-0.5" style={{ color: "var(--text-muted)" }}>Make</p><p className="text-sm font-medium" style={{ color: "var(--text)" }}>{gp.make as string}</p></div>}
+          {!!(gp.vehicleColor as string) && <div><p className="text-xs mb-0.5" style={{ color: "var(--text-muted)" }}>Colour</p><p className="text-sm font-medium" style={{ color: "var(--text)" }}>{gp.vehicleColor as string}</p></div>}
         </div>
       </div>
 
@@ -313,20 +366,57 @@ export default function EditPendingGatePassPage() {
           </Field>
 
           {isCarrier && (
-            <div className="grid grid-cols-2 gap-4">
-              {([
-                ["Company Name", companyName, setCompanyName, "Carrier company..."],
-                ["Carrier Reg No", carrierRegNo, setCarrierRegNo, "Registration number..."],
-                ["Driver Name", driverName, setDriverName, "Driver name..."],
-                ["Driver NIC", driverNIC, setDriverNIC, "NIC number..."],
-                ["Driver Contact", driverContact, setDriverContact, "Contact number..."],
-              ] as [string, string, (v: string) => void, string][]).map(([lbl, val, set, ph]) => (
-                <Field key={lbl} label={lbl}>
-                  <input type="text" value={val} onChange={e => set(e.target.value)} placeholder={ph}
-                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Company Name">
+                  <SearchDropdown
+                    value={companyName}
+                    onChange={setCompanyName}
+                    placeholder="Search company name..."
+                    fetchUrl={q => `/api/lookups?field=companyName&q=${encodeURIComponent(q)}&limit=15`}
+                    onSelect={o => { setCompanyName(o.value); if (o.registrationNo) setCarrierRegNo(o.registrationNo); }}
+                  />
                 </Field>
-              ))}
+                <Field label="Carrier Reg No">
+                  <SearchDropdown
+                    value={carrierRegNo}
+                    onChange={setCarrierRegNo}
+                    placeholder="Search reg no..."
+                    fetchUrl={q => `/api/lookups?field=carrierRegNo&q=${encodeURIComponent(q)}&limit=15`}
+                    onSelect={o => { setCarrierRegNo(o.value); if (o.companyName) setCompanyName(o.companyName); }}
+                  />
+                </Field>
+              </div>
+              {/* Driver Details */}
+              <div className="pt-2 border-t" style={{ borderColor: "var(--border)" }}>
+                <p className="text-xs font-semibold mb-3" style={{ color: "var(--text)" }}>Driver Details</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="DL / NIC No">
+                    <SearchDropdown
+                      value={driverNIC}
+                      onChange={setDriverNIC}
+                      placeholder="Search NIC / DL..."
+                      fetchUrl={q => `/api/lookups?field=driverNIC&q=${encodeURIComponent(q)}&limit=15`}
+                      onSelect={o => { setDriverNIC(o.value); if (o.driverName) setDriverName(o.driverName); if (o.driverContact) setDriverContact(o.driverContact); }}
+                    />
+                  </Field>
+                  <Field label="Driver Name">
+                    <SearchDropdown
+                      value={driverName}
+                      onChange={setDriverName}
+                      placeholder="Search driver name..."
+                      fetchUrl={q => `/api/lookups?field=driverName&q=${encodeURIComponent(q)}&limit=15`}
+                      onSelect={o => { setDriverName(o.value); if (o.driverNIC) setDriverNIC(o.driverNIC); if (o.driverContact) setDriverContact(o.driverContact); }}
+                    />
+                  </Field>
+                  <Field label="Driver Contact">
+                    <input type="text" value={driverContact} onChange={e => setDriverContact(e.target.value)}
+                      placeholder="Contact number..."
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                  </Field>
+                </div>
+              </div>
             </div>
           )}
 

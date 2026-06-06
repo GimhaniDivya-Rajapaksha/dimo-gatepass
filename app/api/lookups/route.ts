@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles } from "@/lib/sap";
 import { fetchPlantLocationOptions, fetchPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
 
-type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier";
+type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier" | "driverNIC" | "driverName";
 
 function normalize(text: string) {
   return text.trim();
@@ -326,6 +326,34 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    if (field === "driverNIC") {
+      const drivers = await (prisma as any).driverOption.findMany({
+        where: q ? { OR: [{ nic: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : undefined,
+        orderBy: { nic: "asc" },
+        take,
+      });
+      return NextResponse.json({
+        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
+          id: d.id, value: d.nic, label: `${d.nic} — ${d.name}`,
+          driverName: d.name, driverContact: d.contact ?? "",
+        })),
+      });
+    }
+
+    if (field === "driverName") {
+      const drivers = await (prisma as any).driverOption.findMany({
+        where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nic: { contains: q, mode: "insensitive" } }] } : undefined,
+        orderBy: { name: "asc" },
+        take,
+      });
+      return NextResponse.json({
+        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
+          id: d.id, value: d.name, label: `${d.name} (${d.nic})`,
+          driverNIC: d.nic, driverContact: d.contact ?? "",
+        })),
+      });
+    }
+
     const options = await prisma.user.findMany({
       where: {
         role: "APPROVER",
@@ -416,6 +444,24 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("Carrier create error:", e);
       return NextResponse.json({ error: "Failed to save carrier." }, { status: 500 });
+    }
+  }
+
+  if (field === "driver") {
+    const name = normalize(body.name ?? "");
+    const nic  = normalize(body.nic  ?? "");
+    const contact = normalize(body.contact ?? "") || null;
+    if (!name || !nic) return NextResponse.json({ error: "name and nic are required" }, { status: 400 });
+    try {
+      const created = await (prisma as any).driverOption.upsert({
+        where: { nic },
+        update: { name, contact },
+        create: { name, nic, contact },
+      });
+      return NextResponse.json({ option: { id: created.id, name: created.name, nic: created.nic, contact: created.contact } });
+    } catch (e) {
+      console.error("Driver save error:", e);
+      return NextResponse.json({ error: "Failed to save driver." }, { status: 500 });
     }
   }
 
