@@ -115,6 +115,7 @@ model GatePass {
   cashierOverrideRequested      Boolean  @default(false)
   singleOrderEscalated          Boolean  @default(false)
   singleOrderEscalatedApproverId String?  // user ID of approver selected by cashier for single-order escalation
+  escalationApproved            Boolean  @default(false) // approver signed off escalated orders; cashier can now generate invoice
   serviceJobNo      String?   // After Sales service job/work order number
   securityCreated   Boolean  @default(false) // created by Security Officer with vehicle only
   gateDirection     String?  // "IN" | "OUT" — direction selected by security at creation

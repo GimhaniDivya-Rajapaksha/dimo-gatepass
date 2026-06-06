@@ -170,6 +170,13 @@ export async function GET(req: NextRequest) {
         ],
       }];
     }
+  } else if (role === "CASHIER") {
+    // Cashier only sees passes originating from their plant location
+    const cashierLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+    if (cashierLocation) {
+      const plant = cashierLocation.split(" - ")[0].trim();
+      where.AND = [{ fromLocation: { startsWith: plant, mode: "insensitive" as const } }];
+    }
   }
   // APPROVER: for PENDING_APPROVAL passes, only show ones explicitly assigned to them
   // (intendedApprover = their name). For null intendedApprover (old passes), still show all.

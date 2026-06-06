@@ -25,6 +25,7 @@ type GatePass = {
   cashierOverrideRequested?: boolean;
   singleOrderEscalated?: boolean;
   singleOrderEscalatedApproverId?: string | null;
+  escalationApproved?: boolean;
   createdBy: { name: string; email: string };
   createdAt: string;
   parentPass: { id: string; gatePassNumber: string; vehicle: string; serviceJobNo: string | null } | null;
@@ -101,6 +102,7 @@ function OrderModal({
   setSelectedEscalationApprover,
   escalating,
   onSingleOrderEscalate,
+  onRefreshPass,
 }: {
   pass: GatePass;
   onClose: () => void;
@@ -110,9 +112,16 @@ function OrderModal({
   setSelectedEscalationApprover: (v: string) => void;
   escalating: boolean;
   onSingleOrderEscalate: (passId: string) => void;
+  onRefreshPass: () => Promise<void>;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
   const isCustomerDelivery = pass.passType === "CUSTOMER_DELIVERY";
+
+  // 2-step flow: 'review' = order columns, 'confirm' = escalation/proceed
+  const [step, setStep] = useState<"review" | "confirm">(() =>
+    (pass as any).escalationApproved || pass.singleOrderEscalated ? "confirm" : "review"
+  );
+  const [refreshing, setRefreshing] = useState(false);
 
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,7 +130,6 @@ function OrderModal({
   const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
-
 
   // Selected checkboxes on the left (available) side
   const [selectedLeft, setSelectedLeft] = useState<Set<string>>(new Set());
@@ -286,12 +294,9 @@ function OrderModal({
     }
   }
 
-  function handlePrint() {
-    const el = invoiceRef.current;
-    if (!el) return;
-    const win = window.open("", "_blank", "width=820,height=700");
-    if (!win) return;
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payment Receipt · ${pass.gatePassNumber}</title><style>
+  function buildInvoiceHtml() {
+    const ts = new Date().toLocaleString();
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payment Receipt · ${pass.gatePassNumber}</title><style>
       *{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:28px;color:#111;font-size:13px}
       .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
       .hdr h1{font-size:20px;font-weight:700}h2{font-size:13px;font-weight:600;margin-bottom:8px;color:#374151}
@@ -302,18 +307,38 @@ function OrderModal({
       .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
       @media print{button{display:none!important}}
     </style></head><body>
-      <div class="hdr"><div><h1>Payment Receipt</h1><p style="font-size:12px;color:#6b7280;margin-top:4px">DIMO Gate Pass System</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:700;font-family:monospace">${pass.gatePassNumber}</p><p style="font-size:11px;color:#6b7280">${new Date().toLocaleString()}</p></div></div>
-      <div class="meta"><div><strong>Vehicle</strong>${pass.vehicle}</div><div><strong>Chassis</strong>${pass.chassis ?? "—"}</div><div><strong>Pass Type</strong>${pass.passType.replace(/_/g," ")}</div><div><strong>Cleared At</strong>${new Date().toLocaleString()}</div></div>
+      <div class="hdr"><div><h1>Payment Receipt</h1><p style="font-size:12px;color:#6b7280;margin-top:4px">DIMO Gate Pass System</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:700;font-family:monospace">${pass.gatePassNumber}</p><p style="font-size:11px;color:#6b7280">${ts}</p></div></div>
+      <div class="meta"><div><strong>Vehicle</strong>${pass.vehicle}</div><div><strong>Chassis</strong>${pass.chassis ?? "—"}</div><div><strong>Pass Type</strong>${pass.passType.replace(/_/g," ")}</div><div><strong>Cleared At</strong>${ts}</div></div>
       <h2 style="color:#15803d">✓ Cleared Orders (${snapshotPaidOrders.length})</h2>
       <table><thead><tr><th>#</th><th>Order ID</th><th>Status</th><th>Pay Term</th></tr></thead><tbody>
       ${snapshotPaidOrders.length===0?`<tr><td colspan="4" style="text-align:center;color:#6b7280">No immediate orders — proceeded directly</td></tr>`:snapshotPaidOrders.map((o,i)=>`<tr><td>${i+1}</td><td><strong>${o.orderId}</strong></td><td>${o.orderStatus}</td><td>${o.payTerm}</td></tr>`).join("")}
       </tbody></table>
       ${snapshotUnpaidOrders.length>0?`<h2 style="color:#991b1b;margin-top:12px">✗ Unpaid Orders (${snapshotUnpaidOrders.length})</h2><table><thead><tr><th>#</th><th>Order ID</th><th>Status</th><th>Pay Term</th></tr></thead><tbody>${snapshotUnpaidOrders.map((o,i)=>`<tr style="background:#fef2f2"><td>${i+1}</td><td><strong>${o.orderId}</strong></td><td>${o.orderStatus}</td><td>${o.payTerm}</td></tr>`).join("")}</tbody></table>`:""}
       <div class="footer"><span>Generated by DIMO Gate Pass System</span><span class="badge">✓ Payment Cleared</span></div>
-    </body></html>`);
+    </body></html>`;
+  }
+
+  function handlePrint() {
+    const html = buildInvoiceHtml();
+    const win = window.open("", "_blank", "width=820,height=700");
+    if (!win) return;
+    win.document.write(html);
     win.document.close();
     win.focus();
     win.print();
+  }
+
+  function handleDownload() {
+    const html = buildInvoiceHtml();
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Invoice-${pass.gatePassNumber}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -371,27 +396,26 @@ function OrderModal({
           </div>
         </div>
 
-        {/* Workflow steps guide */}
-        <div className="px-6 py-3 border-b flex-shrink-0 flex items-center gap-3"
+        {/* Step indicator */}
+        <div className="px-6 py-2.5 border-b flex-shrink-0 flex items-center gap-3"
           style={{ borderColor: "var(--border)", background: "#f8fafc" }}>
           {[
-            { n: "1", text: "Immediate payment orders auto-loaded from SAP", done: immediateOrders.length > 0 },
-            { n: "2", text: "Mark all immediate orders as Fully Paid", done: immediateOrders.length > 0 && available.length === 0 },
-            { n: "3", text: available.length === 0 && immediateOrders.length > 0 ? `${isCustomerDelivery ? "Proceed" : "Slide to confirm"} — your part is done` : "Credit orders are handled by Approver in parallel", done: false },
-          ].map((step, i) => (
+            { n: "1", label: "Review Orders", active: step === "review", done: step === "confirm" },
+            { n: "2", label: isCustomerDelivery ? "Confirm & Invoice" : "Confirm Payment", active: step === "confirm", done: false },
+          ].map((s, i) => (
             <div key={i} className="flex items-center gap-1.5 text-xs">
               <span className="w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px]"
-                style={{ background: step.done ? "#dcfce7" : "#e0f2fe", color: step.done ? "#15803d" : "#0369a1" }}>
-                {step.done ? "✓" : step.n}
+                style={{ background: s.done ? "#dcfce7" : s.active ? "#1a4f9e" : "var(--surface2)", color: s.done ? "#15803d" : s.active ? "#fff" : "var(--text-muted)" }}>
+                {s.done ? "✓" : s.n}
               </span>
-              <span style={{ color: step.done ? "#15803d" : "var(--text-muted)" }}>{step.text}</span>
-              {i < 2 && <span className="text-gray-300 mx-1">→</span>}
+              <span className="font-medium" style={{ color: s.active ? "var(--text)" : "var(--text-muted)" }}>{s.label}</span>
+              {i === 0 && <span className="text-gray-300 mx-1">→</span>}
             </div>
           ))}
         </div>
 
-        {/* SAP sync status message */}
-        {sapSyncMsg && (
+        {/* SAP sync status message — only shown in step 1 */}
+        {step === "review" && sapSyncMsg && (
           <div className="px-6 py-2 text-xs font-medium flex items-center gap-2"
             style={{ background: sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "#fef2f2" : "#f0fdf4", color: sapSyncMsg.includes("Failed") || sapSyncMsg.includes("unavailable") ? "#991b1b" : "#15803d", borderBottom: "1px solid var(--border)" }}>
             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -401,312 +425,464 @@ function OrderModal({
           </div>
         )}
 
-        {/* Credit orders info banner */}
-        {creditOrders.length > 0 && (
+        {/* Credit orders info banner — only shown in step 1 */}
+        {step === "review" && creditOrders.length > 0 && (
           <div className="px-6 py-2.5 flex items-center gap-2 text-xs flex-shrink-0"
             style={{ background: "#eff6ff", borderBottom: "1px solid #bfdbfe" }}>
             <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
             </svg>
             <span style={{ color: "#1d4ed8" }}>
-              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are being reviewed by the <strong>Approver in the same location</strong> — not your responsibility.
+              <strong>{creditOrders.length} credit order{creditOrders.length > 1 ? "s" : ""}</strong> (e.g. 90 Days) are handled by the <strong>Approver</strong> — not your responsibility.
             </span>
           </div>
         )}
 
-        {/* Body: two columns */}
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <svg className="animate-spin w-6 h-6" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            </div>
-          ) : (
-            <div className="grid grid-cols-[1fr_auto_1fr] gap-0 h-full">
-              {/* Left: Pending Payment */}
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
-                    Pending Payment
+        {/* ── Step 1: Order columns ── */}
+        {step === "review" && (
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="animate-spin w-6 h-6" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[1fr_auto_1fr] gap-0 h-full">
+                {/* Left: Pending Payment */}
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+                      Pending Payment
+                      {available.length > 0 && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                          style={{ background: "#fef2f2", color: "#991b1b" }}>
+                          {available.length} unpaid
+                        </span>
+                      )}
+                    </p>
                     {available.length > 0 && (
-                      <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
-                        style={{ background: "#fef2f2", color: "#991b1b" }}>
-                        {available.length} unpaid
-                      </span>
+                      <button
+                        onClick={() =>
+                          setSelectedLeft(
+                            selectedLeft.size === available.length
+                              ? new Set()
+                              : new Set(available.map((o) => o.id))
+                          )
+                        }
+                        className="flex items-center gap-1.5 cursor-pointer select-none transition-all"
+                      >
+                        <div className="w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all"
+                          style={{
+                            background: selectedLeft.size === available.length ? "#2563eb" : "transparent",
+                            borderColor: selectedLeft.size === available.length ? "#2563eb" : "#94a3b8",
+                          }}>
+                          {selectedLeft.size === available.length && (
+                            <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                          {selectedLeft.size > 0 && selectedLeft.size < available.length && (
+                            <div className="w-2 h-0.5 rounded" style={{ background: "#2563eb" }} />
+                          )}
+                        </div>
+                        <span className="text-[11px] font-semibold" style={{ color: "#2563eb" }}>
+                          {selectedLeft.size === available.length ? "Deselect All" : "Select All"}
+                        </span>
+                      </button>
                     )}
-                  </p>
-                  {available.length > 0 && (
-                    <button
-                      onClick={() =>
-                        setSelectedLeft(
-                          selectedLeft.size === available.length
-                            ? new Set()
-                            : new Set(available.map((o) => o.id))
-                        )
-                      }
-                      className="flex items-center gap-1.5 cursor-pointer select-none transition-all"
-                    >
-                      {/* Checkbox */}
-                      <div className="w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all"
-                        style={{
-                          background: selectedLeft.size === available.length ? "#2563eb" : "transparent",
-                          borderColor: selectedLeft.size === available.length ? "#2563eb" : "#94a3b8",
-                        }}>
-                        {selectedLeft.size === available.length && (
-                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                        {selectedLeft.size > 0 && selectedLeft.size < available.length && (
-                          <div className="w-2 h-0.5 rounded" style={{ background: "#2563eb" }} />
-                        )}
-                      </div>
-                      <span className="text-[11px] font-semibold" style={{ color: "#2563eb" }}>
-                        {selectedLeft.size === available.length ? "Deselect All" : "Select All"}
-                      </span>
-                    </button>
+                  </div>
+                  {available.length === 0 ? (
+                    <div className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
+                      {orders.length === 0
+                        ? <><p className="font-semibold mb-1">No orders yet</p><p>Click "Sync SAP" to load orders</p></>
+                        : <p className="text-green-600 font-semibold">✓ All orders fully paid</p>}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {available.map((o) => (
+                        <OrderCard key={o.id} order={o} selected={selectedLeft.has(o.id)}
+                          onToggle={() => setSelectedLeft((prev) => { const n = new Set(prev); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
+                          onDelete={() => handleDeleteOrder(o.id)} side="left" />
+                      ))}
+                    </div>
                   )}
                 </div>
-                {available.length === 0 ? (
-                  <div className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
-                    {orders.length === 0
-                      ? <><p className="font-semibold mb-1">No orders yet</p><p>Click "Sync SAP" to load orders from SAP</p></>
-                      : <p className="text-green-600 font-semibold">✓ All orders fully paid</p>}
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {available.map((o) => (
-                      <OrderCard
-                        key={o.id}
-                        order={o}
-                        selected={selectedLeft.has(o.id)}
-                        onToggle={() => setSelectedLeft((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(o.id)) next.delete(o.id); else next.add(o.id);
-                          return next;
-                        })}
-                        onDelete={() => handleDeleteOrder(o.id)}
-                        side="left"
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* Center: Move buttons — pinned to top so they stay visible regardless of scroll */}
-              <div className="flex flex-col items-center justify-start gap-2 px-2 pt-4 pb-4 sticky top-0"
-                style={{ borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>
-                {/* Mark All Paid shortcut */}
-                {available.length > 0 && (
-                  <button
-                    onClick={async () => {
-                      setSaving(true);
-                      const allIds = new Set(available.map((o) => o.id));
-                      const newAssigned = new Set([...assigned.map((o) => o.id), ...allIds]);
-                      await fetch("/api/service-orders", {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "assign", gatePassId: pass.id, assignedIds: [...newAssigned] }),
-                      });
-                      setSelectedLeft(new Set());
-                      await fetchOrders();
-                      setSaving(false);
-                    }}
-                    disabled={saving}
-                    title="Mark all pending orders as paid at once"
-                    className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-[10px] font-bold transition-all disabled:opacity-40"
-                    style={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac" }}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    All
-                  </button>
-                )}
-                <button
-                  onClick={handleSwitchToAssigned}
-                  disabled={saving || selectedLeft.size === 0}
-                  title="Mark selected orders as fully paid"
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
-                  style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                  Mark Paid
-                </button>
-                <p className="text-[9px] text-center leading-tight" style={{ color: "var(--text-muted)" }}>
-                  Select &amp;<br/>move
-                </p>
-                <button
-                  onClick={handleSwitchToAvailable}
-                  disabled={saving || selectedRight.size === 0}
-                  title="Move back to pending"
-                  className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
-                  style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca" }}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
-                  </svg>
-                  Unmark
-                </button>
-              </div>
-
-              {/* Right: Fully Paid */}
-              <div className="p-4">
-                <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>
-                  Fully Paid ✓
-                  {assigned.length > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
-                      style={{ background: "#f0fdf4", color: "#15803d" }}>
-                      {assigned.length}
-                    </span>
+                {/* Center: Move buttons */}
+                <div className="flex flex-col items-center justify-start gap-2 px-2 pt-4 pb-4 sticky top-0"
+                  style={{ borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>
+                  {available.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        setSaving(true);
+                        const newAssigned = new Set([...assigned.map((o) => o.id), ...available.map((o) => o.id)]);
+                        await fetch("/api/service-orders", { method: "PATCH", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "assign", gatePassId: pass.id, assignedIds: [...newAssigned] }) });
+                        setSelectedLeft(new Set());
+                        await fetchOrders();
+                        setSaving(false);
+                      }}
+                      disabled={saving}
+                      className="flex flex-col items-center gap-0.5 px-2 py-2 rounded-lg text-[10px] font-bold transition-all disabled:opacity-40"
+                      style={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac" }}
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      All
+                    </button>
                   )}
-                </p>
-                {assigned.length === 0 ? (
-                  <p className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>
-                    Select orders from left &amp; click Mark Paid
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {assigned.map((o) => (
-                      <OrderCard
-                        key={o.id}
-                        order={o}
-                        selected={selectedRight.has(o.id)}
-                        onToggle={() => setSelectedRight((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(o.id)) next.delete(o.id); else next.add(o.id);
-                          return next;
-                        })}
-                        onDelete={() => handleDeleteOrder(o.id)}
-                        side="right"
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+                  <button onClick={handleSwitchToAssigned} disabled={saving || selectedLeft.size === 0}
+                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
+                    style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                    Mark Paid
+                  </button>
+                  <p className="text-[9px] text-center leading-tight" style={{ color: "var(--text-muted)" }}>Select &amp;<br/>move</p>
+                  <button onClick={handleSwitchToAvailable} disabled={saving || selectedRight.size === 0}
+                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 whitespace-nowrap"
+                    style={{ background: "#fef2f2", color: "#991b1b", border: "1px solid #fecaca" }}>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
+                    </svg>
+                    Unmark
+                  </button>
+                </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t flex-shrink-0 flex items-center justify-between gap-4"
-          style={{ borderColor: "var(--border)" }}>
-          <div className="flex-1">
-            {error && <p className="text-sm font-medium" style={{ color: "#ef4444" }}>{error}</p>}
-            {immediateOrders.length > 0 && (
-              <div className="flex items-center gap-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                <span>
-                  <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> immediate paid
-                </span>
-                <span>·</span>
-                <span>
-                  <span className="font-semibold" style={{ color: available.length > 0 ? "#c2410c" : "var(--text-muted)" }}>
-                    {available.length}
-                  </span> unpaid
-                </span>
-                {available.length === 0 && (
-                  <span className="px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: "#f0fdf4", color: "#15803d" }}>
-                    All immediate orders cleared ✓
-                  </span>
-                )}
+                {/* Right: Fully Paid */}
+                <div className="p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>
+                    Fully Paid ✓
+                    {assigned.length > 0 && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                        style={{ background: "#f0fdf4", color: "#15803d" }}>{assigned.length}</span>
+                    )}
+                  </p>
+                  {assigned.length === 0 ? (
+                    <p className="text-xs text-center py-6" style={{ color: "var(--text-muted)" }}>Select orders from left &amp; click Mark Paid</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {assigned.map((o) => (
+                        <OrderCard key={o.id} order={o} selected={selectedRight.has(o.id)}
+                          onToggle={() => setSelectedRight((prev) => { const n = new Set(prev); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
+                          onDelete={() => handleDeleteOrder(o.id)} side="right" />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
-          {(() => {
-            const allPaid = immediateOrders.length > 0 && available.length === 0;
-            const noOrders = immediateOrders.length === 0;
-            const oneRemaining = available.length === 1 && assigned.length >= 1;
+        )}
 
-            // Exactly 1 unpaid order left → show approver escalation instead of proceed
-            if (oneRemaining && !pass.singleOrderEscalated) {
-              return (
-                <div className="w-full rounded-2xl border p-4" style={{ background: "#fefce8", borderColor: "#fde68a" }}>
-                  <p className="text-sm font-semibold mb-1" style={{ color: "#92400e" }}>
-                    1 order remaining — approver sign-off required
-                  </p>
-                  <p className="text-xs mb-3" style={{ color: "#b45309" }}>
-                    You cannot proceed with 1 unpaid order. Select an approver to review and authorise this order.
-                  </p>
-                  <div className="flex gap-2 flex-wrap">
-                    <select
-                      value={selectedEscalationApprover}
-                      onChange={e => setSelectedEscalationApprover(e.target.value)}
-                      className="flex-1 border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      style={{ background: "var(--surface2)", borderColor: "#fcd34d", color: "var(--text)", minWidth: 180 }}
-                    >
-                      <option value="">Select approver…</option>
-                      {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    <button
-                      onClick={() => onSingleOrderEscalate(pass.id)}
-                      disabled={!selectedEscalationApprover || escalating}
-                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg,#d97706,#b45309)" }}
-                    >
-                      {escalating ? "Sending…" : "Send to Approver"}
-                    </button>
+        {/* ── Step 2: Confirm / Escalate ── */}
+        {step === "confirm" && (
+          <div className="flex-1 overflow-y-auto min-h-0 p-6 flex flex-col gap-4">
+            {/* Summary bar */}
+            <div className="flex items-center gap-3 text-sm flex-wrap">
+              <span className="px-3 py-1 rounded-full font-semibold text-xs" style={{ background: "#f0fdf4", color: "#15803d" }}>
+                {assigned.length} paid ✓
+              </span>
+              {available.length > 0 && (
+                <span className="px-3 py-1 rounded-full font-semibold text-xs" style={{ background: "#fef2f2", color: "#991b1b" }}>
+                  {available.length} unpaid
+                </span>
+              )}
+              {creditOrders.length > 0 && (
+                <span className="px-3 py-1 rounded-full font-semibold text-xs" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                  {creditOrders.length} credit (approver)
+                </span>
+              )}
+            </div>
+
+            {isCustomerDelivery ? (
+              /* ── CD Step 2 ── */
+              (() => {
+                const escalationApproved = !!(pass as any).escalationApproved;
+                const escalated = !!pass.singleOrderEscalated;
+                const escalationApproverName = approverList.find(a => a.id === pass.singleOrderEscalatedApproverId)?.name ?? "the approver";
+
+                if (escalationApproved) {
+                  // State D: approver signed off → show generate invoice
+                  return (
+                    <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
+                          <svg className="w-5 h-5" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm" style={{ color: "#15803d" }}>Approver Signed Off</p>
+                          <p className="text-xs mt-0.5" style={{ color: "#16a34a" }}>
+                            {escalationApproverName} approved the remaining orders. You can now generate the invoice.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleProceed}
+                        disabled={saving}
+                        className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-sm disabled:opacity-60 transition-all hover:opacity-90"
+                        style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}
+                      >
+                        {saving ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>}
+                        {saving ? "Generating…" : "Generate Invoice"}
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (escalated) {
+                  // State C: waiting for approver
+                  return (
+                    <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+                          <svg className="w-5 h-5 animate-spin" style={{ color: "#d97706" }} fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm" style={{ color: "#92400e" }}>Waiting for Approver</p>
+                          <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
+                            Request sent to <strong>{escalationApproverName}</strong> — you will be notified once they sign off.
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-xs rounded-xl px-4 py-3" style={{ background: "#fef3c7", color: "#92400e" }}>
+                        Invoice generation is locked until the approver responds. Check your notifications or refresh to see the latest status.
+                      </p>
+                      <button
+                        onClick={async () => { setRefreshing(true); await onRefreshPass(); setRefreshing(false); }}
+                        disabled={refreshing}
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border disabled:opacity-50 transition-all hover:opacity-80"
+                        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                      >
+                        <svg className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        {refreshing ? "Refreshing…" : "Refresh Status"}
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (available.length === 0) {
+                  // State A: all paid → generate invoice directly
+                  return (
+                    <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
+                          <svg className="w-5 h-5" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm" style={{ color: "#15803d" }}>All Immediate Orders Cleared</p>
+                          <p className="text-xs mt-0.5" style={{ color: "#16a34a" }}>
+                            {assigned.length} order{assigned.length !== 1 ? "s" : ""} paid. Ready to generate the invoice.
+                            {creditOrders.length > 0 && ` Credit orders are handled by the approver in parallel.`}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleProceed}
+                        disabled={saving}
+                        className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-sm disabled:opacity-60 transition-all hover:opacity-90"
+                        style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}
+                      >
+                        {saving ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>}
+                        {saving ? "Generating…" : "Generate Invoice"}
+                      </button>
+                    </div>
+                  );
+                }
+
+                // State B: has remaining → must send to approver
+                return (
+                  <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#fefce8", borderColor: "#fde68a" }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+                        <svg className="w-5 h-5" style={{ color: "#d97706" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm" style={{ color: "#92400e" }}>
+                          {available.length} Order{available.length !== 1 ? "s" : ""} Still Unpaid
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
+                          An approver must sign off before the invoice can be generated. Select an approver below.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+                        Select Approver
+                      </label>
+                      <div className="flex gap-2 flex-wrap">
+                        <select
+                          value={selectedEscalationApprover}
+                          onChange={e => setSelectedEscalationApprover(e.target.value)}
+                          className="flex-1 border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                          style={{ background: "var(--surface2)", borderColor: "#fcd34d", color: "var(--text)", minWidth: 200 }}
+                        >
+                          <option value="">Choose an approver…</option>
+                          {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                        <button
+                          onClick={() => onSingleOrderEscalate(pass.id)}
+                          disabled={!selectedEscalationApprover || escalating}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-all hover:opacity-90"
+                          style={{ background: "linear-gradient(135deg,#d97706,#b45309)" }}
+                        >
+                          {escalating
+                            ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Sending…</>
+                            : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg> Send to Approver</>}
+                        </button>
+                      </div>
+                      {error && <p className="text-xs font-medium mt-1" style={{ color: "#ef4444" }}>{error}</p>}
+                    </div>
                   </div>
-                </div>
-              );
-            }
+                );
+              })()
+            ) : (
+              /* ── AFTER_SALES Step 2 ── */
+              (() => {
+                const allPaid = immediateOrders.length > 0 && available.length === 0;
+                const noOrders = immediateOrders.length === 0;
+                if (allPaid || noOrders) {
+                  return (
+                    <div className="flex flex-col gap-4">
+                      <div className="rounded-2xl border p-4 flex items-center gap-3" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                        <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <p className="text-sm font-medium" style={{ color: "#15803d" }}>
+                          {noOrders ? "No immediate orders — you can proceed." : `All ${assigned.length} immediate order${assigned.length !== 1 ? "s" : ""} cleared. Slide to confirm.`}
+                        </p>
+                      </div>
+                      {saving ? (
+                        <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                          style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
+                          <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                          Processing…
+                        </div>
+                      ) : (
+                        <SlideToConfirm onConfirm={handleProceed} disabled={saving} />
+                      )}
+                    </div>
+                  );
+                }
+                // Has remaining → approver escalation
+                return (
+                  <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#fefce8", borderColor: "#fde68a" }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+                        <svg className="w-5 h-5" style={{ color: "#d97706" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm" style={{ color: "#92400e" }}>
+                          {available.length} Order{available.length !== 1 ? "s" : ""} Pending
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
+                          {pass.singleOrderEscalated
+                            ? `Sent to ${approverList.find(a => a.id === pass.singleOrderEscalatedApproverId)?.name ?? "approver"} — waiting for sign-off.`
+                            : "You can proceed now (credit orders stay with approver), or escalate remaining to an approver."}
+                        </p>
+                      </div>
+                    </div>
+                    {!pass.singleOrderEscalated ? (
+                      <>
+                        <div className="flex gap-2 flex-wrap">
+                          <select
+                            value={selectedEscalationApprover}
+                            onChange={e => setSelectedEscalationApprover(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                            style={{ background: "var(--surface2)", borderColor: "#fcd34d", color: "var(--text)", minWidth: 180 }}
+                          >
+                            <option value="">Escalate to approver (optional)…</option>
+                            {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                          {selectedEscalationApprover && (
+                            <button onClick={() => onSingleOrderEscalate(pass.id)} disabled={escalating}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                              style={{ background: "linear-gradient(135deg,#d97706,#b45309)" }}>
+                              {escalating ? "Sending…" : "Send to Approver"}
+                            </button>
+                          )}
+                        </div>
+                        {saving ? (
+                          <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
+                            style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
+                            <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                            Processing…
+                          </div>
+                        ) : (
+                          <SlideToConfirm onConfirm={handleProceed} disabled={saving} />
+                        )}
+                      </>
+                    ) : (
+                      <div className="rounded-xl px-4 py-3 flex items-center gap-2 text-xs font-medium" style={{ background: "#fef3c7", color: "#92400e" }}>
+                        <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                        Waiting for approver sign-off…
+                      </div>
+                    )}
+                    {error && <p className="text-xs font-medium" style={{ color: "#ef4444" }}>{error}</p>}
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
 
-            if (oneRemaining && pass.singleOrderEscalated) {
-              return (
-                <div className="w-full rounded-2xl border px-4 py-3 flex items-center gap-3" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
-                  <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#16a34a" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm font-medium" style={{ color: "#15803d" }}>
-                    Escalated to approver — waiting for sign-off before proceeding.
-                  </p>
-                </div>
-              );
-            }
-
-            // All paid → Slide to confirm
-            if (allPaid && !isCustomerDelivery) {
-              return saving ? (
-                <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
-                  style={{ background: "linear-gradient(135deg,#059669,#10b981)", opacity: 0.7 }}>
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  Processing…
-                </div>
-              ) : (
-                <SlideToConfirm onConfirm={handleProceed} disabled={saving} />
-              );
-            }
-
-            const bg = allPaid || isCustomerDelivery
-              ? "linear-gradient(135deg,#059669,#10b981)"
-              : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "No Immediate Orders — Proceed" : "Proceed";
-            return (
+        {/* Footer */}
+        <div className="px-6 py-3 border-t flex-shrink-0 flex items-center justify-between gap-3"
+          style={{ borderColor: "var(--border)" }}>
+          {step === "review" ? (
+            <>
+              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {!loading && immediateOrders.length > 0 && (
+                  <span>
+                    <span className="font-semibold" style={{ color: "#15803d" }}>{assigned.length}</span> paid ·{" "}
+                    <span className="font-semibold" style={{ color: available.length > 0 ? "#c2410c" : "var(--text-muted)" }}>{available.length}</span> unpaid
+                  </span>
+                )}
+              </div>
               <button
-                onClick={() => setConfirmProceed(true)}
-                disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
-                style={{ background: bg, flexShrink: 0 }}
+                onClick={() => setStep("confirm")}
+                disabled={loading}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm disabled:opacity-50 transition-all hover:opacity-90"
+                style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
               >
-                {saving ? (
-                  <>
-                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    Processing…
-                  </>
-                ) : label}
+                Next
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
               </button>
-            );
-          })()}
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setStep("review")}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+                </svg>
+                Back to Orders
+              </button>
+              <div />
+            </>
+          )}
         </div>
 
         {/* ── Post-proceed: Receipt / Invoice screen ── */}
@@ -836,14 +1012,14 @@ function OrderModal({
                 Print Receipt
               </button>
               <button
-                onClick={handlePrint}
+                onClick={handleDownload}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
                 style={{ background: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8" }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                 </svg>
-                Download PDF
+                Download Invoice
               </button>
               <div className="flex-1" />
               <button
@@ -1118,7 +1294,18 @@ export default function CashierReviewPage() {
   const [escalating, setEscalating] = useState(false);
 
   function openModal(p: GatePass) {
-    setModalPass(p);
+    // If the pass was escalated, fetch escalationApproved via raw SQL before showing the modal
+    // (Prisma client may be stale and not include this column in findMany results).
+    if (p.singleOrderEscalated) {
+      fetch(`/api/gate-pass/${p.id}/escalation-status`)
+        .then(r => r.ok ? r.json() : null)
+        .then((d: { escalationApproved?: boolean } | null) => {
+          setModalPass(d ? { ...p, escalationApproved: d.escalationApproved ?? false } : p);
+        })
+        .catch(() => setModalPass(p));
+    } else {
+      setModalPass(p);
+    }
     setSelectedEscalationApprover("");
     if (approverList.length === 0) {
       fetch("/api/users?role=APPROVER&limit=100")
@@ -1162,6 +1349,28 @@ export default function CashierReviewPage() {
 
   useEffect(() => { void fetchPasses(); }, [fetchPasses]);
 
+  // Refresh the currently-open modal pass from the server (used by waiting state).
+  // Also fetches escalationApproved via a raw-SQL endpoint because the Prisma client
+  // may be stale and not return the new column from findMany.
+  // Must be declared before any early returns to satisfy Rules of Hooks.
+  const handleRefreshPass = useCallback(async () => {
+    if (!modalPass) return;
+    const [listRes, escRes] = await Promise.all([
+      fetch(`/api/gate-pass?status=CASHIER_REVIEW&passType=CUSTOMER_DELIVERY&limit=50`),
+      fetch(`/api/gate-pass/${modalPass.id}/escalation-status`),
+    ]);
+    if (!listRes.ok) return;
+    const data = await listRes.json();
+    const cdFiltered: GatePass[] = (data.passes ?? []).filter((p: GatePass) => p.hasImmediate && !p.cashierCleared);
+    setCdPasses(cdFiltered);
+    let updated = cdFiltered.find(p => p.id === modalPass.id) ?? null;
+    if (updated && escRes.ok) {
+      const escData = await escRes.json();
+      updated = { ...updated, escalationApproved: escData.escalationApproved ?? false };
+    }
+    if (updated) setModalPass(updated);
+  }, [modalPass]);
+
   useEffect(() => {
     if (status !== "loading" && (!session || session.user?.role !== "CASHIER")) {
       router.replace("/");
@@ -1198,7 +1407,8 @@ export default function CashierReviewPage() {
         body: JSON.stringify({ action: "cashier_single_order_escalate", approverId: selectedEscalationApprover }),
       });
       if (!res.ok) { const d = await res.json(); showToast(d.error ?? "Failed to escalate", "info"); return; }
-      showToast("Escalated to approver — they will be notified to sign off.", "success");
+      setModalPass(prev => prev ? { ...prev, singleOrderEscalated: true, singleOrderEscalatedApproverId: selectedEscalationApprover } : null);
+      showToast("Sent to approver — you will be notified when they sign off.", "success");
       void fetchPasses();
     } catch { showToast("Network error", "info"); }
     finally { setEscalating(false); }
@@ -1475,7 +1685,7 @@ export default function CashierReviewPage() {
                       </div>
                     </div>
 
-                    {/* Invoice + Review Orders + Override */}
+                    {/* Invoice + Review Orders */}
                     <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
                       <button
                         onClick={() => setQuickInvoicePass(p)}
@@ -1488,28 +1698,6 @@ export default function CashierReviewPage() {
                         </svg>
                         Invoice
                       </button>
-                      {p.cashierOverrideRequested ? (
-                        <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
-                          style={{ background: "#fffbeb", color: "#b45309", border: "1px solid #fde68a" }}>
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          Awaiting Approver Override
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => void handleRequestOverride(p.id)}
-                          disabled={overrideLoadingId === p.id}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all hover:opacity-80 disabled:opacity-50"
-                          style={{ background: "#fff7ed", borderColor: "#fdba74", color: "#c2410c" }}
-                          title="Request approver override for payment clearance"
-                        >
-                          {overrideLoadingId === p.id
-                            ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                            : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
-                          Request Override
-                        </button>
-                      )}
                       <button
                         onClick={() => openModal(p)}
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90"
@@ -1708,6 +1896,7 @@ export default function CashierReviewPage() {
             setSelectedEscalationApprover={setSelectedEscalationApprover}
             escalating={escalating}
             onSingleOrderEscalate={handleSingleOrderEscalate}
+            onRefreshPass={handleRefreshPass}
           />
         )}
       </AnimatePresence>
