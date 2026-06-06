@@ -288,8 +288,17 @@ export async function GET(req: NextRequest) {
         });
       });
 
+      const safe = q.trim().toUpperCase();
+      const sorted = Array.from(merged.values()).sort((a, b) => {
+        const aStarts = a.value.toUpperCase().startsWith(safe) || a.chassisNo.toUpperCase().startsWith(safe);
+        const bStarts = b.value.toUpperCase().startsWith(safe) || b.chassisNo.toUpperCase().startsWith(safe);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        return a.value.localeCompare(b.value);
+      });
+
       return NextResponse.json({
-        options: Array.from(merged.values()).slice(0, take),
+        options: sorted.slice(0, take),
         source: "combined",
       });
     }
