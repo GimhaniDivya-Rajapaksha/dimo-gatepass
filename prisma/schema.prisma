@@ -112,7 +112,9 @@ model GatePass {
   creditApproved           Boolean  @default(false)
   hasCredit                Boolean  @default(false)
   hasImmediate             Boolean  @default(false)
-  cashierOverrideRequested Boolean  @default(false)
+  cashierOverrideRequested      Boolean  @default(false)
+  singleOrderEscalated          Boolean  @default(false)
+  singleOrderEscalatedApproverId String?  // user ID of approver selected by cashier for single-order escalation
   serviceJobNo      String?   // After Sales service job/work order number
   securityCreated   Boolean  @default(false) // created by Security Officer with vehicle only
   gateDirection     String?  // "IN" | "OUT" — direction selected by security at creation

@@ -48,6 +48,18 @@ async function sendApprovalEmailsToApprovers(approvers: { id: string; email: str
   }
 }
 
+// Returns cashiers at the vehicle's location; falls back to all cashiers if none assigned there.
+async function getCashiersForLocation(fromLocation: string | null) {
+  const plantPrefix = fromLocation ? fromLocation.split(" - ")[0].trim() : null;
+  if (plantPrefix) {
+    const located = await prisma.user.findMany({
+      where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix } },
+    });
+    if (located.length > 0) return located;
+  }
+  return prisma.user.findMany({ where: { role: "CASHIER" as any } });
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -444,7 +456,7 @@ export async function POST(req: NextRequest) {
             data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
           });
           gatePass.status = "CASHIER_REVIEW";
-          const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+          const cashiers = await getCashiersForLocation(approverLocation);
           if (cashiers.length > 0) {
             await prisma.notification.createMany({
               data: cashiers.map((c) => ({
@@ -493,7 +505,7 @@ export async function POST(req: NextRequest) {
           });
           gatePass.status = "CASHIER_REVIEW";
           const [cashiers, approvers] = await Promise.all([
-            prisma.user.findMany({ where: { role: "CASHIER" as any } }),
+            getCashiersForLocation(approverLocation),
             findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null),
           ]);
           if (cashiers.length > 0) {
@@ -658,7 +670,7 @@ export async function POST(req: NextRequest) {
 
     // Immediate-only → cashier. No-orders / credit-only → approver. Mixed → both.
     if (hasImmediate) {
-      const cashiers = await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+      const cashiers = await getCashiersForLocation(approverLocation);
       if (cashiers.length > 0) {
         await prisma.notification.createMany({
           data: cashiers.map((c) => ({
