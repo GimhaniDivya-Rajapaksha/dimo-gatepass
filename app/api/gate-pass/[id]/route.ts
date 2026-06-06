@@ -91,34 +91,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const gp = updated as typeof updated & { approver?: string; previousApprover?: string; approverChangeReason?: string };
 
-    // Notify old approver that pass was redirected away from them
+    // Notify old approver — look up by exact name
     try {
-      const oldApprovers = await findApproversForLocationBrand(current.fromLocation, oldApproverName, current.make);
-      if (oldApprovers.length > 0) {
-        await prisma.notification.createMany({
-          data: oldApprovers.map((a) => ({
-            userId: a.id,
+      const oldUser = await prisma.user.findFirst({
+        where: { name: { equals: oldApproverName, mode: "insensitive" }, role: "APPROVER" },
+        select: { id: true },
+      });
+      if (oldUser) {
+        await prisma.notification.create({
+          data: {
+            userId: oldUser.id,
             type: "GATE_PASS_REASSIGNED_AWAY",
             title: "Gate Pass Redirected",
             message: `Gate pass ${current.gatePassNumber} that was submitted to you has been redirected to ${newApproverName}. Reason: ${reason}`,
             gatePassId: id,
-          })),
+          },
         });
       }
     } catch { /* non-critical */ }
 
-    // Notify new approver
+    // Notify new approver — look up by exact name
     try {
-      const newApprovers = await findApproversForLocationBrand(current.fromLocation, newApproverName, current.make);
-      if (newApprovers.length > 0) {
-        await prisma.notification.createMany({
-          data: newApprovers.map((a) => ({
-            userId: a.id,
+      const newUser = await prisma.user.findFirst({
+        where: { name: { equals: newApproverName, mode: "insensitive" }, role: "APPROVER" },
+        select: { id: true },
+      });
+      if (newUser) {
+        await prisma.notification.create({
+          data: {
+            userId: newUser.id,
             type: "GATE_PASS_REASSIGNED_TO",
             title: "Gate Pass Assigned to You",
             message: `Gate pass ${current.gatePassNumber} has been assigned to you (previously submitted to ${oldApproverName}). Reason: ${reason}`,
             gatePassId: id,
-          })),
+          },
         });
       }
     } catch { /* non-critical */ }
