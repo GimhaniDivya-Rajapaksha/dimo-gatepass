@@ -1197,10 +1197,10 @@ export default function CashierReviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "cashier_single_order_escalate", approverId: selectedEscalationApprover }),
       });
-      if (!res.ok) { const d = await res.json(); setError(d.error ?? "Failed to escalate"); return; }
+      if (!res.ok) { const d = await res.json(); showToast(d.error ?? "Failed to escalate", "info"); return; }
       showToast("Escalated to approver — they will be notified to sign off.", "success");
       void fetchPasses();
-    } catch { setError("Network error"); }
+    } catch { showToast("Network error", "info"); }
     finally { setEscalating(false); }
   }
 
