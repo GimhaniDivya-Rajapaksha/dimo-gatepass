@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
 type LocationType = "DEALER" | "DIMO" | "PROMOTION" | "FINANCE" | "OTHER";
 type TransportMode = "CARRIER" | "DRIVER" | "CUSTOMER" | "OTHER";
-type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo";
+type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "driverNIC" | "driverName";
 type LookupOption = { id: string; value: string; label: string; [key: string]: string };
 type LookupState = Record<LookupField, LookupOption[]>;
 
@@ -716,7 +716,7 @@ export default function CreateGatePassPage() {
 
   const [lookupOptions, setLookupOptions] = useState<LookupState>({
     location: [], outReason: [], vehicle: [],
-    approver: [], companyName: [], carrierRegNo: [],
+    approver: [], companyName: [], carrierRegNo: [], driverNIC: [], driverName: [],
   });
   const [locationLoading, setLocationLoading] = useState(false);
   const [draftGateDirection, setDraftGateDirection] = useState<string | null>(null);
@@ -4406,10 +4406,26 @@ export default function CreateGatePassPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="DL / NIC No" required error={errors.driverNIC}>
-                      <TextInput value={carrierFields.driverNIC} onChange={(v) => setCarrier("driverNIC", v)} placeholder="e.g. 123456789V or 200012345678" nicOnly maxLength={12} error={errors.driverNIC} />
+                      <SearchInput
+                        value={carrierFields.driverNIC}
+                        onChange={(v) => { setCarrier("driverNIC", v); void fetchLookup("driverNIC" as LookupField, v); }}
+                        onFocus={() => void fetchLookup("driverNIC" as LookupField, carrierFields.driverNIC)}
+                        onSelect={(o) => { setCarrier("driverNIC", o.value); if (o.driverName) setCarrier("driverName", o.driverName); if (o.driverContact) setCarrier("contactNo", o.driverContact); }}
+                        placeholder="Search NIC / DL no..."
+                        error={errors.driverNIC}
+                        options={lookupOptions["driverNIC" as LookupField] ?? []}
+                      />
                     </Field>
                     <Field label="Driver Name" required error={errors.driverName}>
-                      <TextInput value={carrierFields.driverName} onChange={(v) => setCarrier("driverName", v)} placeholder="Enter driver name" error={errors.driverName} />
+                      <SearchInput
+                        value={carrierFields.driverName}
+                        onChange={(v) => { setCarrier("driverName", v); void fetchLookup("driverName" as LookupField, v); }}
+                        onFocus={() => void fetchLookup("driverName" as LookupField, carrierFields.driverName)}
+                        onSelect={(o) => { setCarrier("driverName", o.value); if (o.driverNIC) setCarrier("driverNIC", o.driverNIC); if (o.driverContact) setCarrier("contactNo", o.driverContact); }}
+                        placeholder="Search driver name..."
+                        error={errors.driverName}
+                        options={lookupOptions["driverName" as LookupField] ?? []}
+                      />
                     </Field>
                     <Field label="Contact No" required error={errors.contactNo}>
                       <TextInput value={carrierFields.contactNo} onChange={(v) => setCarrier("contactNo", v)} placeholder="Enter driver contact no" numericOnly maxLength={10} error={errors.contactNo} />
