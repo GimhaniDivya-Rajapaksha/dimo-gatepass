@@ -72,7 +72,7 @@ const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
   INITIATOR:            ["location", "brand", "approver"],
   SECURITY_OFFICER:     ["location"],
   APPROVER:             ["location", "brand"],
-  CASHIER:              ["location", "approver"],
+  CASHIER:              ["location"],
   AREA_SALES_OFFICER:   ["location", "brand"],
   SERVICE_ADVISOR:      ["location", "brand"],
   DELIVERY_COORDINATOR: ["location"],
