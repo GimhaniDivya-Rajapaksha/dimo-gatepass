@@ -679,13 +679,13 @@ export default function CreateGatePassPage() {
     setActivePassWarning(null);
     if (!chassis) return;
     try {
-      const res = await fetch(`/api/gate-pass?search=${encodeURIComponent(chassis)}&limit=5`);
+      const res = await fetch(`/api/gate-pass/by-vehicle?chassisNo=${encodeURIComponent(chassis)}`);
       if (!res.ok) return;
       const data = await res.json();
       const activeStatuses = ["PENDING_APPROVAL", "APPROVED", "GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "CASHIER_REVIEW", "DRAFT"];
       const active = (data.passes ?? []).find(
         (p: { chassis?: string; status: string; gatePassNumber: string; id: string }) =>
-          p.chassis?.toLowerCase() === chassis.toLowerCase() && activeStatuses.includes(p.status)
+          activeStatuses.includes(p.status)
       );
       if (active) {
         setActivePassWarning({ gatePassNumber: active.gatePassNumber, status: active.status, id: active.id });
@@ -1707,6 +1707,10 @@ export default function CreateGatePassPage() {
       return t !== "" && !immediateTerms.includes(t);
     });
     const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
+
+    if (activePassWarning && !(isSr && srMode === "out")) {
+      e.form = `This vehicle already has an open gate pass (${activePassWarning.gatePassNumber}). A new gate pass cannot be created until the existing one is closed.`;
+    }
 
     if (isLtLike) {
       const isGateInDraft = isDraftMode && draftGateDirection === "IN";
@@ -3518,6 +3522,7 @@ export default function CreateGatePassPage() {
                             }
                             setL("toLocation", "");
                             setSelectedLocationDetail(null);
+                            if (!ltBulkMode) void checkActivePass(o.chassisNo ?? "");
                             void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
                               if (loc) {
                                 if (ltBulkMode) {
@@ -3757,10 +3762,18 @@ export default function CreateGatePassPage() {
                       setLt(p => ({ ...p, requestedBy: v }));
                       if (!v) { setLtRequestedByOptions([]); return; }
                       setLtRequestedByLoading(true);
+                      // Try AD first, fall back to system users if AD unavailable
                       fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
                         .then(r => r.json())
-                        .then((d: { users?: { id: string; name: string; email: string }[] }) => {
-                          setLtRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
+                        .then((d: { users?: { id: string; name: string; email: string }[]; error?: string }) => {
+                          if (d.users && d.users.length > 0) {
+                            setLtRequestedByOptions(d.users.map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
+                          } else {
+                            // Fall back to system users
+                            return fetch(`/api/lookups?field=requestedBy&q=${encodeURIComponent(v)}&limit=15`)
+                              .then(r => r.json())
+                              .then((ld: { options?: LookupOption[] }) => setLtRequestedByOptions(ld.options ?? []));
+                          }
                         })
                         .finally(() => setLtRequestedByLoading(false));
                     }}
@@ -4045,7 +4058,7 @@ export default function CreateGatePassPage() {
                               onChange={(v) => {
                                 setC("vehicle", v);
                                 void fetchLookup("vehicle", v);
-                                if (selectedCdVehicleDetail && v !== cd.vehicle) setSelectedCdVehicleDetail(null);
+                                if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); }
                               }}
                               onFocus={() => void fetchLookup("vehicle", "")}
                               onSelect={(o) => {
