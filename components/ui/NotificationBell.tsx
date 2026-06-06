@@ -104,6 +104,7 @@ export default function NotificationBell() {
     <div ref={ref} className="relative">
       <button
         onClick={handleOpen}
+        suppressHydrationWarning
         className="relative w-9 h-9 rounded-xl flex items-center justify-center border transition-all hover:shadow-sm"
         style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
       >
