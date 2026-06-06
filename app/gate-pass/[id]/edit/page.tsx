@@ -88,7 +88,7 @@ export default function EditPendingGatePassPage() {
       .then((d: { gatePass?: Record<string, string | null | boolean> }) => {
         const p = d.gatePass ?? {};
         setGp(p);
-        setApprover((p.approver as string) ?? "");
+        setApprover((p.intendedApprover as string) ?? (p.approver as string) ?? "");
         setDepartureDate((p.departureDate as string) ?? "");
         setDepartureTime((p.departureTime as string) ?? "");
         setToLocation((p.toLocation as string) ?? "");
