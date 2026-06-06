@@ -96,10 +96,20 @@ function OrderModal({
   pass,
   onClose,
   onProceed,
+  approverList,
+  selectedEscalationApprover,
+  setSelectedEscalationApprover,
+  escalating,
+  onSingleOrderEscalate,
 }: {
   pass: GatePass;
   onClose: () => void;
   onProceed: (result: { status: string; creditPending?: boolean }) => void;
+  approverList: { id: string; name: string }[];
+  selectedEscalationApprover: string;
+  setSelectedEscalationApprover: (v: string) => void;
+  escalating: boolean;
+  onSingleOrderEscalate: (passId: string) => void;
 }) {
   const jobNo = pass.serviceJobNo ?? pass.parentPass?.serviceJobNo ?? pass.gatePassNumber;
   const isCustomerDelivery = pass.passType === "CUSTOMER_DELIVERY";
@@ -111,10 +121,6 @@ function OrderModal({
   const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
-  // Single-order escalation
-  const [approverList, setApproverList] = useState<{ id: string; name: string }[]>([]);
-  const [selectedEscalationApprover, setSelectedEscalationApprover] = useState("");
-  const [escalating, setEscalating] = useState(false);
 
 
   // Selected checkboxes on the left (available) side
@@ -637,7 +643,7 @@ function OrderModal({
                       {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                     <button
-                      onClick={() => handleSingleOrderEscalate(pass.id)}
+                      onClick={() => onSingleOrderEscalate(pass.id)}
                       disabled={!selectedEscalationApprover || escalating}
                       className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                       style={{ background: "linear-gradient(135deg,#d97706,#b45309)" }}
@@ -1107,6 +1113,9 @@ export default function CashierReviewPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
+  const [approverList, setApproverList] = useState<{ id: string; name: string }[]>([]);
+  const [selectedEscalationApprover, setSelectedEscalationApprover] = useState("");
+  const [escalating, setEscalating] = useState(false);
 
   function openModal(p: GatePass) {
     setModalPass(p);
@@ -1694,6 +1703,11 @@ export default function CashierReviewPage() {
             pass={modalPass}
             onClose={() => setModalPass(null)}
             onProceed={handleProceedResult}
+            approverList={approverList}
+            selectedEscalationApprover={selectedEscalationApprover}
+            setSelectedEscalationApprover={setSelectedEscalationApprover}
+            escalating={escalating}
+            onSingleOrderEscalate={handleSingleOrderEscalate}
           />
         )}
       </AnimatePresence>
