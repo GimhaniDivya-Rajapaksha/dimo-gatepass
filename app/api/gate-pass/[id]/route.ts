@@ -58,18 +58,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ?? (current as any).previousApprover as string | null
       ?? "Previous Approver";
 
-    // Update the gate pass
+    // Update the gate pass — chassis is intentionally excluded
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
         previousApprover: oldApproverName,
         approverChangeReason: reason,
-        // Update editable fields (chassis locked)
-        ...(body.departureDate  !== undefined ? { departureDate:  body.departureDate  || null } : {}),
-        ...(body.departureTime  !== undefined ? { departureTime:  body.departureTime  || null } : {}),
-        ...(body.toLocation     !== undefined ? { toLocation:     body.toLocation     || null } : {}),
-        ...(body.outReason      !== undefined ? { outReason:      body.outReason      || null } : {}),
-        ...(body.requestedBy    !== undefined ? { requestedBy:    body.requestedBy    || null } : {}),
+        ...(body.departureDate   !== undefined ? { departureDate:   body.departureDate   || null } : {}),
+        ...(body.departureTime   !== undefined ? { departureTime:   body.departureTime   || null } : {}),
+        ...(body.arrivalDate     !== undefined ? { arrivalDate:     body.arrivalDate     || null } : {}),
+        ...(body.arrivalTime     !== undefined ? { arrivalTime:     body.arrivalTime     || null } : {}),
+        ...(body.toLocation      !== undefined ? { toLocation:      body.toLocation      || null } : {}),
+        ...(body.fromLocation    !== undefined ? { fromLocation:    body.fromLocation    || null } : {}),
+        ...(body.outReason       !== undefined ? { outReason:       body.outReason       || null } : {}),
+        ...(body.requestedBy     !== undefined ? { requestedBy:     body.requestedBy     || null } : {}),
+        ...(body.transportMode   !== undefined ? { transportMode:   body.transportMode   || null } : {}),
+        ...(body.companyName     !== undefined ? { companyName:     body.companyName     || null } : {}),
+        ...(body.carrierRegNo    !== undefined ? { carrierRegNo:    body.carrierRegNo    || null } : {}),
+        ...(body.driverName      !== undefined ? { driverName:      body.driverName      || null } : {}),
+        ...(body.driverNIC       !== undefined ? { driverNIC:       body.driverNIC       || null } : {}),
+        ...(body.driverContact   !== undefined ? { driverContact:   body.driverContact   || null } : {}),
+        ...(body.mileage         !== undefined ? { mileage:         body.mileage         || null } : {}),
+        ...(body.insurance       !== undefined ? { insurance:       body.insurance       || null } : {}),
+        ...(body.garagePlate     !== undefined ? { garagePlate:     body.garagePlate     || null } : {}),
       },
       include: {
         createdBy: { select: { id: true, name: true, email: true } },
