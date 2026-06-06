@@ -54,7 +54,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!reason) return NextResponse.json({ error: "Reason for change is required" }, { status: 400 });
 
     // Derive who the old approver was — use existing previousApprover chain or the approver field
-    const oldApproverName = (current as any).approver as string | null
+    const oldApproverName = (current as any).intendedApprover as string | null
       ?? (current as any).previousApprover as string | null
       ?? "Previous Approver";
 
@@ -62,6 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
+        intendedApprover: newApproverName,
         previousApprover: oldApproverName,
         approverChangeReason: reason,
         ...(body.departureDate   !== undefined ? { departureDate:   body.departureDate   || null } : {}),

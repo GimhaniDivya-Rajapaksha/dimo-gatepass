@@ -1,0 +1,1 @@
+ALTER TABLE "GatePass" ADD COLUMN IF NOT EXISTS "intendedApprover" TEXT;
