@@ -36,10 +36,13 @@ export async function GET(req: NextRequest) {
     const token = await getGraphToken();
 
     const filter = `startswith(displayName,'${q.replace(/'/g, "''")}') or startswith(mail,'${q.replace(/'/g, "''")}') or startswith(userPrincipalName,'${q.replace(/'/g, "''")}')`;
-    const graphUrl = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(filter)}&$select=id,displayName,mail,userPrincipalName&$top=15&$orderby=displayName`;
+    const graphUrl = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(filter)}&$select=id,displayName,mail,userPrincipalName&$top=15&$count=true&$orderby=displayName`;
 
     const graphRes = await fetch(graphUrl, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ConsistencyLevel: "eventual",
+      },
     });
 
     if (!graphRes.ok) {

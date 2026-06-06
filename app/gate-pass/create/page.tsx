@@ -3762,18 +3762,10 @@ export default function CreateGatePassPage() {
                       setLt(p => ({ ...p, requestedBy: v }));
                       if (!v) { setLtRequestedByOptions([]); return; }
                       setLtRequestedByLoading(true);
-                      // Try AD first, fall back to system users if AD unavailable
                       fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
                         .then(r => r.json())
-                        .then((d: { users?: { id: string; name: string; email: string }[]; error?: string }) => {
-                          if (d.users && d.users.length > 0) {
-                            setLtRequestedByOptions(d.users.map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
-                          } else {
-                            // Fall back to system users
-                            return fetch(`/api/lookups?field=requestedBy&q=${encodeURIComponent(v)}&limit=15`)
-                              .then(r => r.json())
-                              .then((ld: { options?: LookupOption[] }) => setLtRequestedByOptions(ld.options ?? []));
-                          }
+                        .then((d: { users?: { id: string; name: string; email: string }[] }) => {
+                          setLtRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
                         })
                         .finally(() => setLtRequestedByLoading(false));
                     }}
