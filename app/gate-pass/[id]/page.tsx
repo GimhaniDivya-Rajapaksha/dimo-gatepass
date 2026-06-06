@@ -31,11 +31,122 @@ type GatePassDetail = {
   cashierCleared: boolean;
   creditApproved: boolean;
   cashierOverrideRequested: boolean;
+  singleOrderEscalated: boolean;
+  singleOrderEscalatedApproverId: string | null;
   createdBy: { id: string; name: string; email: string }; approvedBy: { name: string } | null;
   createdAt: string; approvedAt: string | null;
   subPasses?: SubPassSummary[];
   parentPass?: { id: string; gatePassNumber: string; passSubType: string | null; status: string; toLocation: string | null } | null;
 };
+
+function SingleOrderApprovalPanel({ gatePassId, data, onApproved }: {
+  gatePassId: string;
+  data: GatePassDetail;
+  onApproved: () => void;
+}) {
+  const [history, setHistory] = useState<{ id: string; gatePassNumber: string; status: string; passType: string; createdAt: string; createdBy: { name: string } }[]>([]);
+  const [orders, setOrders] = useState<{ id: string; orderId: string; payTerm: string; isAssigned: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [approving, setApproving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`/api/gate-pass/by-vehicle?chassisNo=${encodeURIComponent(data.chassis ?? "")}`).then(r => r.json()),
+      fetch(`/api/service-orders?gatePassId=${gatePassId}`).then(r => r.json()),
+    ]).then(([vData, oData]: [{ passes?: typeof history }, { orders?: typeof orders }]) => {
+      setHistory((vData.passes ?? []).filter((p: { id: string }) => p.id !== gatePassId).slice(0, 10));
+      setOrders(oData.orders ?? []);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [gatePassId, data.chassis]);
+
+  const paid = orders.filter(o => o.isAssigned).length;
+  const unpaid = orders.filter(o => !o.isAssigned).length;
+
+  async function handleApprove() {
+    setApproving(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${gatePassId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_single_order_approve" }),
+      });
+      if (!res.ok) { const d = await res.json(); setErr(d.error ?? "Failed"); return; }
+      onApproved();
+    } catch { setErr("Network error"); }
+    finally { setApproving(false); }
+  }
+
+  return (
+    <div className="w-full rounded-2xl border overflow-hidden mb-2" style={{ borderColor: "#fde68a", background: "var(--surface)" }}>
+      {/* Header */}
+      <div className="px-5 py-3.5 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#fefce8,#fef3c7)" }}>
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fde68a" }}>
+          <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-bold" style={{ color: "#92400e" }}>Single Order Sign-off Required</p>
+          <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
+            Cashier cleared {paid} of {orders.length} orders — 1 remaining order requires your authorisation.
+          </p>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className="px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-4 border-b" style={{ borderColor: "var(--border)" }}>
+        <div><p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>Vehicle</p><p className="text-sm font-bold" style={{ color: "var(--text)" }}>{data.vehicle}</p></div>
+        <div><p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>Chassis</p><p className="text-sm font-bold" style={{ color: "var(--text)" }}>{data.chassis ?? "—"}</p></div>
+        <div><p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>Created By</p><p className="text-sm font-bold" style={{ color: "var(--text)" }}>{data.createdBy.name}</p></div>
+        <div>
+          <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>Orders</p>
+          <p className="text-sm font-bold" style={{ color: "var(--text)" }}>
+            <span style={{ color: "#16a34a" }}>{paid} paid</span>
+            {unpaid > 0 && <span style={{ color: "#dc2626" }}> · {unpaid} pending</span>}
+          </p>
+        </div>
+      </div>
+
+      {/* Vehicle history */}
+      <div className="px-5 py-4 border-b" style={{ borderColor: "var(--border)" }}>
+        <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Vehicle Gate Pass History</p>
+        {loading ? (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading history…</p>
+        ) : history.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>No previous gate passes for this vehicle.</p>
+        ) : (
+          <div className="space-y-2">
+            {history.map(h => (
+              <div key={h.id} className="flex items-center justify-between text-sm">
+                <a href={`/gate-pass/${h.id}`} target="_blank" rel="noreferrer" className="font-semibold underline" style={{ color: "#2563eb" }}>{h.gatePassNumber}</a>
+                <span style={{ color: "var(--text-muted)" }}>{h.passType.replace(/_/g, " ")}</span>
+                <span style={{ color: "var(--text-muted)" }}>{h.createdBy?.name}</span>
+                <span style={{ color: "var(--text-muted)" }}>{new Date(h.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                <span className="px-2 py-0.5 rounded-lg text-xs font-semibold" style={{ background: "#f3f4f6", color: "#374151" }}>{h.status.replace(/_/g, " ")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Approve button */}
+      <div className="px-5 py-3 flex items-center justify-between gap-3">
+        {err && <p className="text-xs text-red-500">{err}</p>}
+        <div className="flex-1" />
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+          onClick={handleApprove} disabled={approving}
+          className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
+          style={{ background: "linear-gradient(135deg,#b45309,#d97706)" }}>
+          {approving
+            ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+            : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+          {approving ? "Approving…" : "Approve — Allow Cashier to Proceed"}
+        </motion.button>
+      </div>
+    </div>
+  );
+}
 
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
   PENDING_APPROVAL: { label: "Pending Approval",     bg: "#fff7ed", color: "#c2410c", dot: "#f97316" },
@@ -1601,6 +1712,12 @@ function InitiatorGatePassDetailPageInner() {
                   </motion.button>
                 </div>
               </div>
+            )}
+
+            {/* ── APPROVER: Single Order Sign-off (CASHIER_REVIEW + singleOrderEscalated) ── */}
+            {isApproverView && data.status === "CASHIER_REVIEW" && data.singleOrderEscalated &&
+              data.singleOrderEscalatedApproverId === session?.user?.id && !approveResult && (
+              <SingleOrderApprovalPanel gatePassId={id} data={data} onApproved={() => { setApproveResult("approved"); setTimeout(() => router.push("/gate-pass/approve"), 2000); }} />
             )}
 
             {/* ── INITIATOR / AREA_SALES_OFFICER buttons (own passes only) ── */}

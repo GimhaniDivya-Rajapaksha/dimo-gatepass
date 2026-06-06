@@ -1151,5 +1151,112 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
+  // CASHIER: escalate a single remaining order to a selected approver
+  if (action === "cashier_single_order_escalate") {
+    if (session.user.role !== "CASHIER" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !gatePass.hasImmediate || gatePass.cashierCleared) {
+      return NextResponse.json({ error: "Pass is not eligible for single-order escalation" }, { status: 400 });
+    }
+    if ((gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "Escalation already sent" }, { status: 400 });
+    }
+
+    const approverId: string | undefined = body.approverId;
+    if (!approverId) return NextResponse.json({ error: "approverId is required" }, { status: 400 });
+
+    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true, role: true } });
+    if (!approverUser || approverUser.role !== "APPROVER") {
+      return NextResponse.json({ error: "Selected user is not an approver" }, { status: 400 });
+    }
+
+    // Count unpaid immediate orders to ensure exactly 1 remains
+    const unpaidCount = await prisma.serviceOrder.count({ where: { gatePassId: id, isAssigned: false } });
+    if (unpaidCount !== 1) {
+      return NextResponse.json({ error: `Exactly 1 unpaid order required to escalate (found ${unpaidCount})` }, { status: 400 });
+    }
+
+    // Fetch all orders and gate pass history for this vehicle for the approver notification
+    const allOrders = await prisma.serviceOrder.findMany({ where: { gatePassId: id } });
+    const paidCount = allOrders.filter(o => o.isAssigned).length;
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: { singleOrderEscalated: true, singleOrderEscalatedApproverId: approverId } as any,
+    });
+
+    // Notify the selected approver
+    await prisma.notification.create({
+      data: {
+        userId: approverId,
+        type: "CASHIER_REVIEW_REQUIRED",
+        title: "Single Order Approval Required",
+        message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — ${paidCount} of ${allOrders.length} orders cleared. 1 order requires your sign-off before the vehicle can be released.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    return NextResponse.json({ ok: true, singleOrderEscalated: true });
+  }
+
+  // APPROVER / ADMIN: approve the single remaining order escalation
+  if (action === "cashier_single_order_approve") {
+    if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !(gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "Pass is not eligible for single-order approval" }, { status: 400 });
+    }
+    // Verify this is the assigned approver
+    const assignedApproverId = (gatePass as any).singleOrderEscalatedApproverId;
+    if (assignedApproverId && assignedApproverId !== session.user.id && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "You are not the assigned approver for this escalation" }, { status: 403 });
+    }
+
+    const creditStillPending = gatePass.hasCredit && !gatePass.creditApproved;
+    const newStatus = creditStillPending ? "CASHIER_REVIEW" : "APPROVED";
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: {
+        cashierCleared: true,
+        ...(newStatus === "APPROVED" ? { status: "APPROVED", approvedById: session.user.id, approvedAt: new Date() } : {}),
+      } as any,
+    });
+
+    // Notify initiator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_APPROVED",
+        title: creditStillPending ? "Single Order Approved — Credit Review Pending" : "Single Order Approved — Vehicle Ready for Gate OUT",
+        message: `Gate pass ${gatePass.gatePassNumber} — the approver signed off on the remaining order.${creditStillPending ? " Credit orders are still under review." : " Security Officer will confirm Gate OUT."}`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    if (newStatus === "APPROVED") {
+      const fromLoc = gatePass.fromLocation as string | null;
+      const secWhere = fromLoc
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) }
+        : { role: "SECURITY_OFFICER" as any };
+      const secOfficers = await prisma.user.findMany({ where: secWhere });
+      if (secOfficers.length > 0) {
+        await prisma.notification.createMany({
+          data: secOfficers.map((s: { id: string }) => ({
+            userId: s.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Single Order Approved — Confirm Gate OUT",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — approver signed off on remaining order. Please confirm Gate OUT.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
+    return NextResponse.json({ ok: true, status: newStatus });
+  }
+
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }
