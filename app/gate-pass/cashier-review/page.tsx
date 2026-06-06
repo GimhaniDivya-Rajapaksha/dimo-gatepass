@@ -23,6 +23,8 @@ type GatePass = {
   hasImmediate?: boolean;
   cashierCleared?: boolean;
   cashierOverrideRequested?: boolean;
+  singleOrderEscalated?: boolean;
+  singleOrderEscalatedApproverId?: string | null;
   createdBy: { name: string; email: string };
   createdAt: string;
   parentPass: { id: string; gatePassNumber: string; vehicle: string; serviceJobNo: string | null } | null;
@@ -109,6 +111,10 @@ function OrderModal({
   const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
+  // Single-order escalation
+  const [approverList, setApproverList] = useState<{ id: string; name: string }[]>([]);
+  const [selectedEscalationApprover, setSelectedEscalationApprover] = useState("");
+  const [escalating, setEscalating] = useState(false);
 
 
   // Selected checkboxes on the left (available) side
@@ -606,12 +612,57 @@ function OrderModal({
             )}
           </div>
           {(() => {
-            // allPaid: all IMMEDIATE orders cleared (credit orders are approver's job)
             const allPaid = immediateOrders.length > 0 && available.length === 0;
-            const partial = immediateOrders.length > 0 && available.length > 0 && assigned.length > 0;
             const noOrders = immediateOrders.length === 0;
+            const oneRemaining = available.length === 1 && assigned.length >= 1;
 
-            // For all-paid case: show Slide to Confirm instead of a regular button
+            // Exactly 1 unpaid order left → show approver escalation instead of proceed
+            if (oneRemaining && !pass.singleOrderEscalated) {
+              return (
+                <div className="w-full rounded-2xl border p-4" style={{ background: "#fefce8", borderColor: "#fde68a" }}>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "#92400e" }}>
+                    1 order remaining — approver sign-off required
+                  </p>
+                  <p className="text-xs mb-3" style={{ color: "#b45309" }}>
+                    You cannot proceed with 1 unpaid order. Select an approver to review and authorise this order.
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    <select
+                      value={selectedEscalationApprover}
+                      onChange={e => setSelectedEscalationApprover(e.target.value)}
+                      className="flex-1 border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      style={{ background: "var(--surface2)", borderColor: "#fcd34d", color: "var(--text)", minWidth: 180 }}
+                    >
+                      <option value="">Select approver…</option>
+                      {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                    <button
+                      onClick={() => handleSingleOrderEscalate(pass.id)}
+                      disabled={!selectedEscalationApprover || escalating}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg,#d97706,#b45309)" }}
+                    >
+                      {escalating ? "Sending…" : "Send to Approver"}
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            if (oneRemaining && pass.singleOrderEscalated) {
+              return (
+                <div className="w-full rounded-2xl border px-4 py-3 flex items-center gap-3" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                  <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#16a34a" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm font-medium" style={{ color: "#15803d" }}>
+                    Escalated to approver — waiting for sign-off before proceeding.
+                  </p>
+                </div>
+              );
+            }
+
+            // All paid → Slide to confirm
             if (allPaid && !isCustomerDelivery) {
               return saving ? (
                 <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
@@ -630,14 +681,11 @@ function OrderModal({
             const bg = allPaid || isCustomerDelivery
               ? "linear-gradient(135deg,#059669,#10b981)"
               : "linear-gradient(135deg,#d97706,#b45309)";
-            const label = noOrders ? "No Immediate Orders — Proceed"
-              : partial ? "Some Unpaid — Proceed Anyway"
-              : "Proceed";
+            const label = noOrders ? "No Immediate Orders — Proceed" : "Proceed";
             return (
               <button
                 onClick={() => setConfirmProceed(true)}
                 disabled={saving}
-                title={noOrders ? "No immediate orders — proceed with cashier confirmation" : "Confirm and proceed"}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed transition-all hover:opacity-90"
                 style={{ background: bg, flexShrink: 0 }}
               >
@@ -649,12 +697,7 @@ function OrderModal({
                     </svg>
                     Processing…
                   </>
-                ) : (
-                  <>
-                    {partial && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
-                    {label}
-                  </>
-                )}
+                ) : label}
               </button>
             );
           })()}
@@ -1064,6 +1107,17 @@ export default function CashierReviewPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [modalPass, setModalPass] = useState<GatePass | null>(null);
+
+  function openModal(p: GatePass) {
+    setModalPass(p);
+    setSelectedEscalationApprover("");
+    if (approverList.length === 0) {
+      fetch("/api/users?role=APPROVER&limit=100")
+        .then(r => r.json())
+        .then((d: { users?: { id: string; name: string }[] }) => setApproverList(d.users ?? []))
+        .catch(() => {});
+    }
+  }
   const [toastMsg, setToastMsg] = useState<{ text: string; type: "success" | "info" } | null>(null);
   const [activeTab, setActiveTab] = useState<"AFTER_SALES" | "CUSTOMER_DELIVERY" | "CLEARED">("AFTER_SALES");
   const [search, setSearch] = useState("");
@@ -1123,6 +1177,22 @@ export default function CashierReviewPage() {
       showToast("Payment cleared — awaiting further processing.", "info");
     }
     void fetchPasses();
+  }
+
+  async function handleSingleOrderEscalate(passId: string) {
+    if (!selectedEscalationApprover) return;
+    setEscalating(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${passId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_single_order_escalate", approverId: selectedEscalationApprover }),
+      });
+      if (!res.ok) { const d = await res.json(); setError(d.error ?? "Failed to escalate"); return; }
+      showToast("Escalated to approver — they will be notified to sign off.", "success");
+      void fetchPasses();
+    } catch { setError("Network error"); }
+    finally { setEscalating(false); }
   }
 
   async function handleRequestOverride(passId: string) {
@@ -1333,7 +1403,7 @@ export default function CashierReviewPage() {
                         Invoice
                       </button>
                       <button
-                        onClick={() => setModalPass(p)}
+                        onClick={() => openModal(p)}
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90"
                         style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
                       >
@@ -1432,7 +1502,7 @@ export default function CashierReviewPage() {
                         </button>
                       )}
                       <button
-                        onClick={() => setModalPass(p)}
+                        onClick={() => openModal(p)}
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold shadow-sm transition-all hover:opacity-90"
                         style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
                       >
