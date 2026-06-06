@@ -687,7 +687,14 @@ export default function CreateGatePassPage() {
         (p: { chassis?: string; status: string; gatePassNumber: string; id: string }) =>
           p.chassis?.toLowerCase() === chassis.toLowerCase() && activeStatuses.includes(p.status)
       );
-      if (active) setActivePassWarning({ gatePassNumber: active.gatePassNumber, status: active.status, id: active.id });
+      if (active) {
+        setActivePassWarning({ gatePassNumber: active.gatePassNumber, status: active.status, id: active.id });
+        // Show the toast immediately so the user sees it without waiting for submit
+        setErrors(prev => ({
+          ...prev,
+          form: `Gate pass ${active.gatePassNumber} is already active for this vehicle (${active.status.replace(/_/g, " ").toLowerCase()}). Please complete or cancel it before creating a new one.`,
+        }));
+      }
     } catch { /* non-critical */ }
   }
   const [ltBulkVehicles, setLtBulkVehicles] = useState<Array<{
@@ -2135,6 +2142,13 @@ export default function CreateGatePassPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#f87171" }}>Action Blocked</p>
                 <p className="text-sm leading-snug" style={{ color: "#fca5a5" }}>{errors.form}</p>
+                {activePassWarning && (
+                  <a href={`/gate-pass/${activePassWarning.id}`} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 mt-1.5 text-xs font-semibold underline"
+                    style={{ color: "#fbbf24" }}>
+                    View gate pass {activePassWarning.gatePassNumber} →
+                  </a>
+                )}
               </div>
               {/* Close */}
               <button
