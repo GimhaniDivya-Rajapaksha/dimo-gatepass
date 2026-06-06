@@ -30,7 +30,7 @@ function Field({ children, label: lbl, required, error, className = "" }: {
   );
 }
 
-function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption, loading }: {
+function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption, loading, onSearch }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -40,21 +40,28 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
   onSelect?: (o: LookupOption) => void;
   renderOption?: (o: LookupOption) => React.ReactNode;
   loading?: boolean;
+  onSearch?: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function triggerSearch() {
+    onSearch?.(value);
+    setOpen(true);
+  }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Escape") { setOpen(false); return; }
     if (e.key === "Enter") {
       e.preventDefault();
-      if (options && options.length > 0 && onSelect) {
-        // Select the first (most relevant) result
+      if (onSearch) {
+        // Search-on-demand mode: Enter always triggers search, never auto-selects
+        triggerSearch();
+      } else if (options && options.length > 0 && onSelect) {
         if (blurTimer.current) clearTimeout(blurTimer.current);
         onSelect(options[0]);
         setOpen(false);
-      } else if (!options || options.length === 0) {
-        // No results yet — trigger the lookup
+      } else {
         onFocus?.();
         setOpen(true);
       }
@@ -67,11 +74,10 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         type="text"
         autoComplete="off"
         value={value}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onChange={(e) => { onChange(e.target.value); if (onSearch) setOpen(false); else setOpen(true); }}
         onFocus={() => {
           if (blurTimer.current) clearTimeout(blurTimer.current);
-          setOpen(true);
-          onFocus?.();
+          if (!onSearch) { setOpen(true); onFocus?.(); }
         }}
         onBlur={() => {
           blurTimer.current = setTimeout(() => setOpen(false), 200);
@@ -90,10 +96,10 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setOpen(o => !o)}
+          onClick={() => onSearch ? triggerSearch() : setOpen(o => !o)}
           className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-black/5 transition-colors"
           tabIndex={-1}
-          aria-label="Toggle results"
+          aria-label="Search"
         >
           <svg className="w-4 h-4" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1199,8 +1205,7 @@ export default function CreateGatePassPage() {
       })
       .catch(() => {})
       .finally(() => setLocationLoading(false));
-    // Vehicle lookup is separate (may call SAP)
-    void fetchLookup("vehicle");
+    // Vehicle lookup only fires when user types — do not pre-load all vehicles
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType]);
 
@@ -3480,14 +3485,13 @@ export default function CreateGatePassPage() {
                           value={lt.vehicle}
                           onChange={(v) => {
                             setL("vehicle", v);
-                            void fetchLookup("vehicle", v);
                             if (selectedVehicleDetail && v !== lt.vehicle) {
                               setSelectedVehicleDetail(null);
                               setActivePassWarning(null);
                               setErrors(p => { const n = { ...p }; delete n.toLocation; return n; });
                             }
                           }}
-                          onFocus={() => void fetchLookup("vehicle", "")}
+                          onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
                           placeholder="Search by vehicle no or chassis no"
                           error={errors.vehicle}
                           options={lookupOptions.vehicle}
@@ -4049,10 +4053,9 @@ export default function CreateGatePassPage() {
                               value={cd.vehicle}
                               onChange={(v) => {
                                 setC("vehicle", v);
-                                void fetchLookup("vehicle", v);
                                 if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); }
                               }}
-                              onFocus={() => void fetchLookup("vehicle", "")}
+                              onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
                                 const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
