@@ -24,6 +24,7 @@ type GatePassDetail = {
   mileage: string | null; insurance: string | null; garagePlate: string | null;
   comments: string | null; rejectionReason: string | null;
   resubmitCount: number; resubmitNote: string | null;
+  previousApprover: string | null; approverChangeReason: string | null;
   paymentType: string | null;
   hasCredit: boolean;
   hasImmediate: boolean;
@@ -987,6 +988,26 @@ function InitiatorGatePassDetailPageInner() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Approver reassignment info banner */}
+        {data.previousApprover && (
+          <div className="mb-4 px-4 py-3 rounded-2xl border no-print flex items-start gap-3" style={{ background: "#eff6ff", borderColor: "#93c5fd" }}>
+            <svg className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: "#1d4ed8" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold mb-0.5" style={{ color: "#1e40af" }}>Approver Reassigned</p>
+              <p className="text-xs" style={{ color: "#1d4ed8" }}>
+                This gate pass was originally submitted to <strong>{data.previousApprover}</strong> and redirected to you.
+              </p>
+              {data.approverChangeReason && (
+                <p className="text-xs mt-1" style={{ color: "#1d4ed8" }}>
+                  Reason: <strong>{data.approverChangeReason}</strong>
+                </p>
+              )}
             </div>
           </div>
         )}
