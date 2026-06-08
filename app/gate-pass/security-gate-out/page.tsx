@@ -242,7 +242,7 @@ function PassCard({ p, mode, onConfirmed }: {
             {/* Route — show whenever location data is available */}
             {(p.fromLocation || p.toLocation) && (
               <p className="text-[10px] mt-1 font-mono" style={{ color: "rgba(255,255,255,0.5)" }}>
-                {p.fromLocation || "?"} → {p.toLocation || "?"}
+                {p.fromLocation || "?"} → {p.toLocation || (p.passType === "CUSTOMER_DELIVERY" ? "Completed" : "?")}
               </p>
             )}
           </div>
