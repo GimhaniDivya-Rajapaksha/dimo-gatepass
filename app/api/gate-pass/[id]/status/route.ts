@@ -19,6 +19,13 @@ function ciStartsWithPlant(value: string | null | undefined) {
   return plant ? { startsWith: plant, mode: "insensitive" as const } : undefined;
 }
 
+// Typo-immune: match on the storage-description code after " - " (e.g. "DIMO 800")
+// so "Mercedes" vs "Mercedeze" differences in user defaultLocation don't break lookups.
+function ciContainsCode(value: string | null | undefined) {
+  const code = value?.trim().split(" - ").slice(1).join(" - ").trim() ?? "";
+  return code ? { contains: code, mode: "insensitive" as const } : undefined;
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -270,7 +277,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (needsSecurityNotify) {
       const fromLoc = gatePass.fromLocation as string | null;
       const securityWhere = fromLoc
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciStartsWithPlant(fromLoc) }
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciContainsCode(fromLoc) }
         : { role: "SECURITY_OFFICER" as any };
       const securityOfficers = await prisma.user.findMany({ where: securityWhere });
       if (securityOfficers.length > 0) {

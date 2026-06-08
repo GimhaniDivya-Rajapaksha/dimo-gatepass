@@ -531,11 +531,14 @@ export default function SecurityGateDashboard() {
     todayStart.setHours(0, 0, 0, 0);
     const todayISO = todayStart.toISOString();
 
-    // Match by plant name prefix so the security officer sees all sub-locations within their plant.
-    // e.g. "Weliweriya DM Logistics - Vehicle Park-1" → matches "Weliweriya DM Logistics - EVIN MOTERS" etc.
+    // Use plant code (storage description after " - ") for typo-immune matching.
+    // e.g. "Mercedeze Centre 800 - DIMO 800" → code = "DIMO 800" → matches gate passes with "Mercedes Centre 800 - DIMO 800"
+    const plantCode = myLocation ? myLocation.split(" - ").slice(1).join(" - ").trim() : null;
     const plantName = myLocation ? myLocation.split(" - ")[0].trim() : null;
-    const fromLocQ = plantName ? `&fromLocationPlant=${encodeURIComponent(plantName)}` : "";
-    const toLocQ   = plantName ? `&toLocationPlant=${encodeURIComponent(plantName)}`   : "";
+    const fromLocQ = plantCode ? `&fromLocationCode=${encodeURIComponent(plantCode)}`
+                               : (plantName ? `&fromLocationPlant=${encodeURIComponent(plantName)}` : "");
+    const toLocQ   = plantCode ? `&toLocationCode=${encodeURIComponent(plantCode)}`
+                               : (plantName ? `&toLocationPlant=${encodeURIComponent(plantName)}` : "");
 
     try {
       // Sequential fetches — connection pool limit is 1 on Supabase free tier

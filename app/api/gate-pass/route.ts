@@ -203,15 +203,20 @@ export async function GET(req: NextRequest) {
   // ADMIN sees all
 
   // toLocation / fromLocation filters (used by Security page and Vehicle Arrivals to scope by gate location)
-  // locationPlant variants do a startsWith match — one security officer covers all sub-locations in a plant.
+  // locationPlant   = startsWith match on the plant description (typo-sensitive)
+  // locationCode    = contains match on the storage-description code after " - " (typo-immune, preferred)
   const toLocationFilter = searchParams.get("toLocation");
   const toLocationPlant  = searchParams.get("toLocationPlant");
-  if (toLocationPlant)  where.toLocation   = { startsWith: toLocationPlant,  mode: "insensitive" };
+  const toLocationCode   = searchParams.get("toLocationCode");
+  if (toLocationCode)       where.toLocation = { contains: toLocationCode,   mode: "insensitive" };
+  else if (toLocationPlant) where.toLocation = { startsWith: toLocationPlant, mode: "insensitive" };
   else if (toLocationFilter) where.toLocation = ciEquals(toLocationFilter);
 
   const fromLocationFilter = searchParams.get("fromLocation");
   const fromLocationPlant  = searchParams.get("fromLocationPlant");
-  if (fromLocationPlant)  where.fromLocation = { startsWith: fromLocationPlant, mode: "insensitive" };
+  const fromLocationCode   = searchParams.get("fromLocationCode");
+  if (fromLocationCode)       where.fromLocation = { contains: fromLocationCode,   mode: "insensitive" };
+  else if (fromLocationPlant) where.fromLocation = { startsWith: fromLocationPlant, mode: "insensitive" };
   else if (fromLocationFilter) where.fromLocation = ciEquals(fromLocationFilter);
 
   if (passType) where.passType = passType;
