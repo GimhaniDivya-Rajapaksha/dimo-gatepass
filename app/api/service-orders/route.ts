@@ -33,6 +33,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "gatePassId and orderId required" }, { status: 400 });
   }
 
+  // Prevent duplicates — return existing record if same orderId already exists for this pass
+  const existing = await prisma.serviceOrder.findFirst({
+    where: { gatePassId, orderId: String(orderId) },
+  });
+  if (existing) {
+    return NextResponse.json({ order: existing }, { status: 200 });
+  }
+
   const order = await prisma.serviceOrder.create({
     data: {
       gatePassId,
