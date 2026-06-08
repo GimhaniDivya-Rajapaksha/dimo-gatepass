@@ -1333,8 +1333,7 @@ function InitiatorGatePassDetailPageInner() {
             {isInitiatorView && (
             <button type="button" onClick={(e) => {
                 e.stopPropagation();
-                if (data?.status === "APPROVED" &&
-                    (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY")) {
+                if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
                   setShowSapConfirm(true);
                 } else {
                   void handlePrintGatePass();
@@ -2265,7 +2264,9 @@ function InitiatorGatePassDetailPageInner() {
               {data?.passType === "CUSTOMER_DELIVERY" ? (
                 <>
                   <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
-                    Printing this gate pass will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.
+                    {data?.status === "APPROVED"
+                      ? <>Printing will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.</>
+                      : "Print a copy of this gate pass."}
                   </p>
                   <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
                     Make sure the vehicle and customer details are correct before printing.
@@ -2274,7 +2275,9 @@ function InitiatorGatePassDetailPageInner() {
               ) : (
                 <>
                   <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
-                    Printing this gate pass will release the vehicle for transit from <span className="font-semibold">{data?.fromLocation}</span> to <span className="font-semibold">{data?.toLocation}</span> and update the location in SAP.
+                    {data?.status === "APPROVED"
+                      ? <>Printing will release the vehicle for transit from <span className="font-semibold">{data?.fromLocation}</span> to <span className="font-semibold">{data?.toLocation}</span> and update the location in SAP.</>
+                      : "Print a copy of this gate pass."}
                   </p>
                   <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
                     Make sure the vehicle and destination details are correct before printing.
