@@ -1484,8 +1484,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const reason = rejectionReason || null;
 
-    // Reset escalation so cashier can escalate again or handle differently
-    await prisma.$executeRaw`UPDATE "GatePass" SET "singleOrderEscalated" = false, "singleOrderEscalatedApproverId" = null WHERE id = ${id}`;
+    // Reset escalation flag — keep singleOrderEscalatedApproverId so initiator can resubmit to same approver
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: false } });
+    // Store rejection reason via raw SQL (column post-dates last prisma generate; wrap so notification always fires)
+    try {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationRejectionReason" = ${reason} WHERE id = ${id}`;
+    } catch { /* escalationRejectionReason column may not exist on older deployments */ }
 
     // Notify cashiers at this location
     const fromLocRej = gatePass.fromLocation as string | null;
@@ -1518,6 +1522,65 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     return NextResponse.json({ ok: true, status: "CASHIER_REVIEW" });
+  }
+
+  // INITIATOR: resubmit escalation after approver rejected it (same GP number, same approver)
+  if (action === "initiator_resubmit_escalation") {
+    if (session.user.role !== "INITIATOR" && session.user.role !== "SERVICE_ADVISOR") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    // Must have a stored rejection reason (i.e. was rejected before) and not already escalated
+    const rejReason: { escalationRejectionReason: string | null }[] =
+      await prisma.$queryRaw`SELECT "escalationRejectionReason" FROM "GatePass" WHERE id = ${id} LIMIT 1`;
+    const storedReason = rejReason[0]?.escalationRejectionReason ?? null;
+    if (!storedReason) {
+      return NextResponse.json({ error: "No rejected escalation to resubmit" }, { status: 400 });
+    }
+    if ((gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "Escalation already in progress" }, { status: 400 });
+    }
+    // singleOrderEscalatedApproverId is preserved on rejection (not cleared), so it's always available here
+    const approverId = (gatePass as any).singleOrderEscalatedApproverId
+      ?? body.approverId as string | undefined;
+    if (!approverId) {
+      return NextResponse.json({ error: "No approver on record — contact cashier to re-escalate" }, { status: 400 });
+    }
+
+    // Re-escalate to the same approver; clear the rejection reason
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: true } });
+    try {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationRejectionReason" = null WHERE id = ${id}`;
+    } catch { /* ignore */ }
+
+    // Notify the approver
+    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true } });
+    if (approverUser) {
+      await prisma.notification.create({
+        data: {
+          userId: approverUser.id,
+          type: "GATE_PASS_SUBMITTED",
+          title: "Resubmitted — Single Order Sign-off Required",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — the initiator has resubmitted the order sign-off request after your rejection. Please review again.`,
+          gatePassId: gatePass.id,
+        },
+      });
+    }
+
+    // Notify initiator confirmation
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_SUBMITTED",
+        title: "Sign-off Resubmitted",
+        message: `Gate pass ${gatePass.gatePassNumber} — your resubmission has been sent to ${approverUser?.name ?? "the approver"} for review.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    return NextResponse.json({ ok: true, resubmitted: true });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

@@ -29,9 +29,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
 
   if (!pass) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // escalationRejectionReason (and escalationApproved) were added after the last prisma generate —
+  // read them via raw SQL so the rejection banner always shows to the initiator.
+  let escalationExtra: { escalationRejectionReason: string | null; escalationApproved: boolean } = {
+    escalationRejectionReason: null,
+    escalationApproved: false,
+  };
+  try {
+    const rows: { escalationRejectionReason: string | null; escalationApproved: boolean }[] =
+      await prisma.$queryRaw`SELECT "escalationRejectionReason", "escalationApproved" FROM "GatePass" WHERE id = ${pass.id} LIMIT 1`;
+    if (rows[0]) escalationExtra = rows[0];
+  } catch { /* columns may not exist on older deployments */ }
+
   return NextResponse.json({
     pass: withJourneyNumber({
       ...pass,
+      ...escalationExtra,
       subPasses: pass.subPasses.map((subPass) => withJourneyNumber(subPass)),
     }),
   });
