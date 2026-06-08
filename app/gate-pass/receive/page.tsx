@@ -87,29 +87,41 @@ export default function ReceivePage() {
     try {
       // locationView=true bypasses the INITIATOR "own passes only" filter so destination
       // initiators can see incoming passes they did not create.
-      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50", locationView: "true" });
-      // Only show GATE_OUT SUB_OUT — vehicle must have physically left source (source SO confirmed Gate OUT)
-      const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "50", locationView: "true" });
-      const ltCompParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20", locationView: "true" });
-      const asCompParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20", locationView: "true" });
-      if (myLocation) {
-        ltParams.set("toLocation", myLocation);
-        asGateOutParams.set("toLocation", myLocation);
-        ltCompParams.set("toLocation", myLocation);
-        asCompParams.set("toLocation", myLocation);
-      }
+      // No location filter in API — fetch all and match client-side using the plant code
+      // (the part after " - ", e.g. "DIMO 800") which is stable even when descriptions have typos.
+      const ltParams      = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT",  limit: "100", locationView: "true" });
+      const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT",  limit: "50",  locationView: "true" });
+      const ltCompParams  = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20",  locationView: "true" });
+      const asCompParams  = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20",  locationView: "true" });
 
       // Sequential fetches — connection pool limit is 1 on Supabase free tier
-      const ltRes       = await fetch(`/api/gate-pass?${ltParams}`);
-      const ltData      = ltRes.ok ? await ltRes.json() : { passes: [] };
+      const ltRes         = await fetch(`/api/gate-pass?${ltParams}`);
+      const ltData        = ltRes.ok ? await ltRes.json() : { passes: [] };
       const asGateOutRes  = await fetch(`/api/gate-pass?${asGateOutParams}`);
       const asGateOutData = asGateOutRes.ok ? await asGateOutRes.json() : { passes: [] };
-      const ltCompRes   = await fetch(`/api/gate-pass?${ltCompParams}`);
-      const ltCompData  = ltCompRes.ok ? await ltCompRes.json() : { passes: [] };
-      const asCompRes   = await fetch(`/api/gate-pass?${asCompParams}`);
-      const asCompData  = asCompRes.ok ? await asCompRes.json() : { passes: [] };
+      const ltCompRes     = await fetch(`/api/gate-pass?${ltCompParams}`);
+      const ltCompData    = ltCompRes.ok ? await ltCompRes.json() : { passes: [] };
+      const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}`);
+      const asCompData    = asCompRes.ok ? await asCompRes.json() : { passes: [] };
 
-      const locationMatch = (p: GatePass) => !myLocation || !p.toLocation || p.toLocation === myLocation;
+      // Robust location match: handles description typos ("Mercedes" vs "Mercedeze") by
+      // comparing the plant code (after " - ") and falling back to case-insensitive prefix.
+      const myCode  = myLocation ? myLocation.split(" - ").slice(1).join(" - ").trim().toLowerCase() : null;
+      const myPlant = myLocation ? myLocation.split(" - ")[0].trim().toLowerCase() : null;
+      const locationMatch = (p: GatePass) => {
+        if (!myLocation) return true;
+        const toLoc = (p.toLocation ?? "").toLowerCase().trim();
+        if (!toLoc) return true;
+        // Primary: match on plant code (e.g. "DIMO 800") — immune to description typos
+        if (myCode) {
+          const passCode = toLoc.split(" - ").slice(1).join(" - ").trim();
+          if (passCode === myCode) return true;
+        }
+        // Fallback: plant description prefix
+        if (myPlant && toLoc.startsWith(myPlant)) return true;
+        return false;
+      };
+
       setLtPending((ltData.passes ?? []).filter(locationMatch));
       setAsPending((asGateOutData.passes ?? []).filter(locationMatch));
       setCompleted([

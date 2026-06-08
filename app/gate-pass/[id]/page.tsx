@@ -422,6 +422,8 @@ function InitiatorGatePassDetailPageInner() {
         // Continue to print even if the status update fails
       }
     }
+    // Delay so any open modal has time to unmount before the print dialog opens
+    await new Promise((resolve) => setTimeout(resolve, 150));
     window.print();
   }
 
@@ -1131,13 +1133,22 @@ function InitiatorGatePassDetailPageInner() {
         {/* Print-only signature area */}
         <div className="hidden print:block mt-6 pt-4" style={{ borderTop: "1px solid #d1d5db" }}>
           <div className="grid grid-cols-3 gap-8 text-xs">
-            {["Prepared By / Initiator", `Authorized By / ${approvalActorLabel}`, "Received By / Gate Officer"].map((label) => (
-              <div key={label} className="text-center">
-                <div style={{ height: "48px", borderBottom: "1px solid #374151", marginBottom: "6px" }} />
-                <p style={{ color: "#6b7280", fontSize: "8pt" }}>{label}</p>
-                <p style={{ color: "#9ca3af", fontSize: "7pt", marginTop: "2px" }}>Signature &amp; Date</p>
-              </div>
-            ))}
+            {/* Initiator — show name, no signature line */}
+            <div className="text-center">
+              <p style={{ color: "#111827", fontSize: "8.5pt", fontWeight: 600, marginBottom: "4px" }}>{data.createdBy.name}</p>
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Prepared By / Initiator</p>
+            </div>
+            {/* Approver — show name, no signature line */}
+            <div className="text-center">
+              <p style={{ color: "#111827", fontSize: "8.5pt", fontWeight: 600, marginBottom: "4px" }}>{data.approvedBy?.name || "—"}</p>
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Authorized By / {approvalActorLabel}</p>
+            </div>
+            {/* Gate Officer — keep signature & date box */}
+            <div className="text-center">
+              <div style={{ height: "48px", borderBottom: "1px solid #374151", marginBottom: "6px" }} />
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Received By / Gate Officer</p>
+              <p style={{ color: "#9ca3af", fontSize: "7pt", marginTop: "2px" }}>Signature &amp; Date</p>
+            </div>
           </div>
           <p className="text-center mt-4" style={{ color: "#9ca3af", fontSize: "7.5pt" }}>
             This is an official gate pass document of DIMO Gate Pass System. Printed on {new Date().toLocaleString()}.
@@ -2241,7 +2252,7 @@ function InitiatorGatePassDetailPageInner() {
 
       {/* Print Gate Pass Confirmation Modal (CD + LT) */}
       {showSapConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
           <div className="rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm mx-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {/* Header */}
             <div className="px-6 py-5" style={{ background: data?.passType === "CUSTOMER_DELIVERY" ? "linear-gradient(135deg,#065f46,#059669)" : "linear-gradient(135deg,#1e3a8a,#2563eb)" }}>
@@ -2280,7 +2291,9 @@ function InitiatorGatePassDetailPageInner() {
                       : "Print a copy of this gate pass."}
                   </p>
                   <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-                    Make sure the vehicle and destination details are correct before printing.
+                    {data?.status === "APPROVED"
+                      ? "Make sure the vehicle and destination details are correct before printing."
+                      : "SAP will not be updated — vehicle location was already set when this pass was first released."}
                   </p>
                 </>
               )}

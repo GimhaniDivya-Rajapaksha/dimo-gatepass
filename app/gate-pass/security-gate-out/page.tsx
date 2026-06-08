@@ -651,6 +651,7 @@ export default function SecurityGateDashboard() {
   const filterPass = (p: Pass) =>
     !q ||
     p.vehicle.toLowerCase().includes(q) ||
+    (p.chassis ?? "").toLowerCase().includes(q) ||
     (p.make ?? "").toLowerCase().includes(q) ||
     (p.vehicleColor ?? "").toLowerCase().includes(q) ||
     p.gatePassNumber.toLowerCase().includes(q) ||
@@ -784,7 +785,7 @@ export default function SecurityGateDashboard() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by vehicle number, make, colour or GP number…"
+            placeholder="Search by vehicle, chassis, make, colour or GP number…"
             className="w-full pl-10 pr-4 py-3 rounded-2xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
             style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
           />

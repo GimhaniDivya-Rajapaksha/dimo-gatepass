@@ -542,29 +542,39 @@ export default function InitiatorDashboardClient({ user }: Props) {
         } finally { if (!cancelled) setMainInLoading(false); }
 
         try {
-          const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
           const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+          const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
           if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
           else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
-          const [arrivingRes, subOutRes] = await Promise.all([
+          // LT passes in GATE_OUT heading to this initiator's location
+          const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50" });
+          if (destinationPlant) ltParams.set("toLocationPlant", destinationPlant);
+          else if (user.defaultLocation) ltParams.set("toLocation", user.defaultLocation);
+          const [arrivingRes, subOutRes, ltRes] = await Promise.all([
             fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
             fetch(`/api/gate-pass?${subOutParams}`),
+            fetch(`/api/gate-pass?${ltParams}`),
           ]);
           if (!cancelled && arrivingRes.ok) {
             const d = await arrivingRes.json();
             const subOutData = subOutRes.ok ? await subOutRes.json() : { passes: [] };
+            const ltData = ltRes.ok ? await ltRes.json() : { passes: [] };
             const own = (d.passes || []).filter((p: GatePass) =>
               (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
               || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
             );
-            // Only show SUB_OUT passes heading TO this initiator's location (not leaving it)
+            // SUB_OUT passes heading TO this initiator's location
             const incoming = (subOutData.passes || []).filter((p: GatePass) =>
               p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
               && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
             );
+            // LT passes in transit to this initiator's location
+            const ltIncoming = (ltData.passes || []).filter((p: GatePass) =>
+              !destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase())
+            );
             const seen = new Set<string>();
             const merged: GatePass[] = [];
-            for (const p of [...own, ...incoming]) {
+            for (const p of [...own, ...incoming, ...ltIncoming]) {
               if (!seen.has(p.id)) { seen.add(p.id); merged.push(p); }
             }
             setArrivingVehicles(merged);
@@ -621,30 +631,39 @@ export default function InitiatorDashboardClient({ user }: Props) {
     if (isASO) return;
     setArrivingLoading(true);
     try {
-      // Own passes (SUB_OUT_IN, SUB_IN) + incoming SUB_OUT heading to my location
-      const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
       const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+      const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
       if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
       else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
-      const [ownRes, incomingRes] = await Promise.all([
+      // LT passes in GATE_OUT heading to this initiator's location
+      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50" });
+      if (destinationPlant) ltParams.set("toLocationPlant", destinationPlant);
+      else if (user.defaultLocation) ltParams.set("toLocation", user.defaultLocation);
+      const [ownRes, incomingRes, ltRes] = await Promise.all([
         fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
         fetch(`/api/gate-pass?${subOutParams}`),
+        fetch(`/api/gate-pass?${ltParams}`),
       ]);
       const ownData = ownRes.ok ? await ownRes.json() : { passes: [] };
       const incomingData = incomingRes.ok ? await incomingRes.json() : { passes: [] };
+      const ltData = ltRes.ok ? await ltRes.json() : { passes: [] };
 
       const own = (ownData.passes || []).filter((p: GatePass) =>
         (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
         || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
       );
-      // Only SUB_OUT passes heading TO this initiator's location (arriving, not leaving)
+      // SUB_OUT passes heading TO this initiator's location
       const incoming = (incomingData.passes || []).filter((p: GatePass) =>
         p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
         && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
       );
+      // LT passes in transit to this initiator's location
+      const ltIncoming = (ltData.passes || []).filter((p: GatePass) =>
+        !destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase())
+      );
       const seen = new Set<string>();
       const merged: GatePass[] = [];
-      for (const p of [...own, ...incoming]) {
+      for (const p of [...own, ...incoming, ...ltIncoming]) {
         if (!seen.has(p.id)) { seen.add(p.id); merged.push(p); }
       }
       prevArrivingCount.current = merged.length;
@@ -747,22 +766,10 @@ export default function InitiatorDashboardClient({ user }: Props) {
 
   const handlePrint = useCallback(async (p: GatePass) => {
     setPrintingId(p.id);
-    // APPROVED LT/CD: printing counts as Gate OUT — update status before navigating
-    if (p.status === "APPROVED" && (p.passType === "LOCATION_TRANSFER" || p.passType === "CUSTOMER_DELIVERY")) {
-      try {
-        await fetch(`/api/gate-pass/${p.id}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "print_gate_out" }),
-        });
-        fetchPasses();
-      } catch {
-        // Continue to print even if the status update fails
-      }
-    }
-    router.push(`/gate-pass/${p.id}?print=1`);
+    // Navigate to detail page — SAP write happens only when user confirms via popup on detail page
+    router.push(`/gate-pass/${p.id}`);
     setTimeout(() => setPrintingId(null), 500);
-  }, [router, fetchPasses]);
+  }, [router]);
 
   const handleConfirmArrived = useCallback(async (id: string) => {
     if (!confirm("Confirm vehicle has arrived?")) return;

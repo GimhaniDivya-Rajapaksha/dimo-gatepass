@@ -380,21 +380,8 @@ function GatePassListPageInner() {
 
   async function handlePrint(p: GatePass) {
     setPrintingId(p.id);
-    // APPROVED LT/CD: printing counts as Gate OUT — update status before navigating.
-    // Skip for DELIVERY_COORDINATOR: they print for reference only, no security side-effect.
-    if (!isDC && p.status === "APPROVED" && (p.passType === "LOCATION_TRANSFER" || p.passType === "CUSTOMER_DELIVERY")) {
-      try {
-        await fetch(`/api/gate-pass/${p.id}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "print_gate_out" }),
-        });
-        fetchPasses();
-      } catch {
-        // Continue to print even if the status update fails
-      }
-    }
-    router.push(`/gate-pass/${p.id}?print=1`);
+    // Navigate to detail page — SAP write happens only when user confirms via popup on detail page
+    router.push(`/gate-pass/${p.id}`);
     setTimeout(() => setPrintingId(null), 500);
   }
 
