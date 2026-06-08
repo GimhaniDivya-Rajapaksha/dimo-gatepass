@@ -16,7 +16,7 @@ export async function GET() {
     });
 
     return NextResponse.json({ notifications }, {
-      headers: { "Cache-Control": "private, max-age=20" },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch {
     return NextResponse.json({ notifications: [] });
