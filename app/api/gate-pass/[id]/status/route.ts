@@ -270,7 +270,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (needsSecurityNotify) {
       const fromLoc = gatePass.fromLocation as string | null;
       const securityWhere = fromLoc
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciStartsWithPlant(fromLoc) }
         : { role: "SECURITY_OFFICER" as any };
       const securityOfficers = await prisma.user.findMany({ where: securityWhere });
       if (securityOfficers.length > 0) {
