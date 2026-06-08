@@ -1333,7 +1333,8 @@ function InitiatorGatePassDetailPageInner() {
             {isInitiatorView && (
             <button type="button" onClick={(e) => {
                 e.stopPropagation();
-                if (data?.passType === "LOCATION_TRANSFER" && data?.status === "APPROVED") {
+                if (data?.status === "APPROVED" &&
+                    (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY")) {
                   setShowSapConfirm(true);
                 } else {
                   void handlePrintGatePass();
@@ -2244,46 +2245,88 @@ function InitiatorGatePassDetailPageInner() {
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
           <div className="rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm mx-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {/* Header */}
-            <div className="px-6 py-5" style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}>
+            <div className="px-6 py-5" style={{ background: data?.passType === "CUSTOMER_DELIVERY" ? "linear-gradient(135deg,#065f46,#059669)" : "linear-gradient(135deg,#1e3a8a,#2563eb)" }}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,255,255,0.2)" }}>
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
+                  {data?.passType === "CUSTOMER_DELIVERY" ? (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                    </svg>
+                  )}
                 </div>
                 <div>
-                  <p className="text-sm font-black text-white">Update SAP Location?</p>
+                  <p className="text-sm font-black text-white">
+                    {data?.passType === "CUSTOMER_DELIVERY" ? "Confirm Delivery & Print" : "Update SAP Location?"}
+                  </p>
                   <p className="text-xs text-white/70 mt-0.5">Vehicle: {data?.vehicle}</p>
                 </div>
               </div>
             </div>
             {/* Body */}
             <div className="px-6 py-5">
-              <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
-                Do you want to update the vehicle location in SAP from <span className="font-semibold">{data?.fromLocation}</span> to <span className="font-semibold">{data?.toLocation}</span>?
-              </p>
-              <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-                Select <span className="font-semibold">Yes</span> to write the new location to SAP now, or <span className="font-semibold">No</span> to print without updating SAP.
-              </p>
+              {data?.passType === "CUSTOMER_DELIVERY" ? (
+                <>
+                  <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                    Printing this gate pass will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.
+                  </p>
+                  <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    Make sure the vehicle and customer details are correct before printing.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                    Do you want to update the vehicle location in SAP from <span className="font-semibold">{data?.fromLocation}</span> to <span className="font-semibold">{data?.toLocation}</span>?
+                  </p>
+                  <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    Select <span className="font-semibold">Yes</span> to write the new location to SAP now, or <span className="font-semibold">No</span> to print without updating SAP.
+                  </p>
+                </>
+              )}
             </div>
             {/* Actions */}
             <div className="px-6 pb-5 flex gap-3">
               <button
                 type="button"
-                onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
+                onClick={() => setShowSapConfirm(false)}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
                 style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
               >
-                No — Skip SAP
+                Back
               </button>
-              <button
-                type="button"
-                onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(true); }}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-                style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}
-              >
-                Yes — Update SAP
-              </button>
+              {data?.passType === "CUSTOMER_DELIVERY" ? (
+                <button
+                  type="button"
+                  onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}
+                >
+                  Confirm &amp; Print
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                    style={{ borderColor: "#6b7280", color: "#6b7280", background: "var(--surface2)" }}
+                  >
+                    No — Skip SAP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(true); }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                    style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}
+                  >
+                    Yes — Update SAP
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
