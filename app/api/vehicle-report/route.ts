@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const searchTerms = [vehicleNo, chassisNo].filter(Boolean);
   if (searchTerms.length === 0) return NextResponse.json({ vehicleMaster: null, passes: [], stats: {} });
 
-  const [vehicleMaster, passes, plantRows, plantLocations] = await Promise.all([
+  const [vehicleMaster, passes, plantRows, plantLocations, dbLocations] = await Promise.all([
     prisma.vehicleOption.findFirst({
       where: {
         OR: searchTerms.flatMap((term) => ([
@@ -47,6 +47,9 @@ export async function GET(req: NextRequest) {
     }),
     fetchPlantVehicleRows().catch(() => []),
     fetchPlantLocationOptions().catch(() => []),
+    prisma.locationOption.findMany({
+      select: { plantCode: true, storageLocation: true, plantDescription: true, storageDescription: true },
+    }).catch(() => []),
   ]);
 
   const stats = {
@@ -59,12 +62,26 @@ export async function GET(req: NextRequest) {
     cancelled: passes.filter(p => p.status === "CANCELLED").length,
   };
 
-  const currentPlantLocation = findPlantVehicleRow(plantRows, [
+  const dbLocMap = new Map(
+    dbLocations.map((l) => [`${l.plantCode}|${l.storageLocation}`, l])
+  );
+
+  const rawPlantLocation = findPlantVehicleRow(plantRows, [
     vehicleNo,
     chassisNo,
     vehicleMaster?.vehicleNo ?? null,
     vehicleMaster?.chassisNo ?? null,
   ]);
+
+  // Prefer DB-seeded canonical names over raw SAP name1 to avoid SAP data quality typos
+  const currentPlantLocation = rawPlantLocation
+    ? (() => {
+        const db = dbLocMap.get(`${rawPlantLocation.plantCode}|${rawPlantLocation.storageLocation}`);
+        return db
+          ? { ...rawPlantLocation, plantDescription: db.plantDescription, storageDescription: db.storageDescription || rawPlantLocation.storageDescription }
+          : rawPlantLocation;
+      })()
+    : null;
 
   const currentLocation = currentPlantLocation
     ? [currentPlantLocation.plantDescription, currentPlantLocation.storageDescription]

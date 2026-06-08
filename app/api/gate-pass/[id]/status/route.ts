@@ -25,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await req.json();
-  const { action, rejectionReason, mismatch, mismatchNote, receivedChassis } = body;
+  const { action, rejectionReason, mismatch, mismatchNote, receivedChassis, writeSap } = body;
 
   const gatePass = await (prisma.gatePass as any).findUnique({ where: { id } });
   if (!gatePass) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -56,32 +56,37 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         data: { status: "APPROVED" },
       });
 
-      // Notify pass creator
+      const isCdPass = gatePass.passType === "CUSTOMER_DELIVERY";
+      // Notify pass creator — for CD, instruct to print (bypasses security); for others, security confirms
       await prisma.notification.create({
         data: {
           userId: gatePass.createdById,
           type: "GATE_PASS_APPROVED",
-          title: "All Checks Complete — Awaiting Security Gate Release",
-          message: `Gate pass ${gatePass.gatePassNumber} — credit approved and payment cleared. Security Officer will confirm Gate OUT.`,
+          title: isCdPass ? "Payment Cleared — Print Gate Pass to Release Vehicle" : "All Checks Complete — Awaiting Security Gate Release",
+          message: isCdPass
+            ? `Gate pass ${gatePass.gatePassNumber} — credit approved and payment cleared. Please print the gate pass to complete the delivery. No Security Officer step required.`
+            : `Gate pass ${gatePass.gatePassNumber} — credit approved and payment cleared. Security Officer will confirm Gate OUT.`,
           gatePassId: gatePass.id,
         },
       });
 
-      // Notify Security Officers
-      const securityWhere = gatePass.fromLocation
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
-        : { role: "SECURITY_OFFICER" as any };
-      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
-      if (securityOfficers.length > 0) {
-        await prisma.notification.createMany({
-          data: securityOfficers.map((s: { id: string }) => ({
-            userId: s.id,
-            type: "GATE_PASS_APPROVED",
-            title: "Vehicle Cleared — Ready for Gate OUT",
-            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — credit approved & cash cleared. Please confirm gate release.`,
-            gatePassId: gatePass.id,
-          })),
-        });
+      // Security Officers are only notified for non-CD passes — CD uses initiator print to bypass security
+      if (!isCdPass) {
+        const securityWhere = gatePass.fromLocation
+          ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
+          : { role: "SECURITY_OFFICER" as any };
+        const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+        if (securityOfficers.length > 0) {
+          await prisma.notification.createMany({
+            data: securityOfficers.map((s: { id: string }) => ({
+              userId: s.id,
+              type: "GATE_PASS_APPROVED",
+              title: "Vehicle Cleared — Ready for Gate OUT",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — credit approved & cash cleared. Please confirm gate release.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+        }
       }
       return NextResponse.json({ ok: true, status: "APPROVED" });
     } else {
@@ -95,6 +100,91 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           gatePassId: gatePass.id,
         },
       });
+      return NextResponse.json({ ok: true, status: "CASHIER_REVIEW" });
+    }
+  }
+
+  // APPROVER: reject credit portion of a mixed-payment CUSTOMER_DELIVERY pass
+  if (action === "credit_reject") {
+    if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    const eligibleForCreditReject =
+      gatePass.hasCredit && gatePass.status === "CASHIER_REVIEW";
+    if (!eligibleForCreditReject) {
+      return NextResponse.json({ error: "credit_reject only valid for mixed-payment passes in CASHIER_REVIEW" }, { status: 400 });
+    }
+    if (gatePass.creditApproved) {
+      return NextResponse.json({ error: "Credit has already been approved" }, { status: 400 });
+    }
+
+    await prisma.$executeRaw`UPDATE "GatePass" SET "creditRejected" = true, "approvedById" = ${session.user.id}, "approvedAt" = NOW() WHERE id = ${id}`;
+
+    const updatedPass = await (prisma.gatePass as any).findUnique({ where: { id } });
+    const cashierDone = updatedPass?.cashierCleared === true || updatedPass?.hasImmediate === false;
+
+    const reason = rejectionReason || null;
+
+    if (cashierDone) {
+      // Immediate already cleared — move to APPROVED; credit rejection is noted
+      await prisma.gatePass.update({ where: { id }, data: { status: "APPROVED" } });
+
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_APPROVED",
+          title: "Gate Pass Approved (Credit Rejected)",
+          message: `Gate pass ${gatePass.gatePassNumber} — immediate payment cleared by cashier. Credit orders were rejected by the approver.${reason ? ` Reason: ${reason}` : ""}`,
+          gatePassId: gatePass.id,
+        },
+      });
+
+      const securityWhere = gatePass.fromLocation
+        ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
+        : { role: "SECURITY_OFFICER" as any };
+      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+      if (securityOfficers.length > 0) {
+        await prisma.notification.createMany({
+          data: securityOfficers.map((s: { id: string }) => ({
+            userId: s.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Vehicle Cleared — Ready for Gate OUT",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — immediate payment cleared. Credit orders rejected. Please confirm gate release.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+
+      return NextResponse.json({ ok: true, status: "APPROVED" });
+    } else {
+      // Cashier still working — stay in CASHIER_REVIEW, notify initiator and cashiers
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_REJECTED",
+          title: "Credit Orders Rejected by Approver",
+          message: `Gate pass ${gatePass.gatePassNumber} — the approver rejected the credit orders.${reason ? ` Reason: ${reason}` : ""} Cashier will proceed with immediate payment orders only.`,
+          gatePassId: gatePass.id,
+        },
+      });
+
+      const cashiers = await prisma.user.findMany({
+        where: gatePass.fromLocation
+          ? { role: "CASHIER" as any, defaultLocation: gatePass.fromLocation }
+          : { role: "CASHIER" as any },
+      });
+      if (cashiers.length > 0) {
+        await prisma.notification.createMany({
+          data: cashiers.map((c: { id: string }) => ({
+            userId: c.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "Credit Rejected — Proceed with Immediate Orders",
+            message: `${gatePass.gatePassNumber} — approver rejected credit orders. Please generate invoice for immediate payment orders only.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+
       return NextResponse.json({ ok: true, status: "CASHIER_REVIEW" });
     }
   }
@@ -238,34 +328,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     if (newCdStatus === "APPROVED") {
-      // Notify initiator
+      // Notify initiator to print the gate pass — printing bypasses security for CD
       await prisma.notification.create({
         data: {
           userId: gatePass.createdById,
           type: "GATE_PASS_APPROVED",
-          title: "Payment Cleared — Vehicle Ready for Gate OUT",
-          message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by Cashier. Security Officer will confirm Gate OUT.`,
+          title: "Payment Cleared — Print Gate Pass to Release Vehicle",
+          message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by Cashier. Please print the gate pass to complete the delivery. No Security Officer step required.`,
           gatePassId: gatePass.id,
         },
       });
-
-      // Notify Security Officers at fromLocation
-      const fromLocCd = gatePass.fromLocation as string | null;
-      const secWhereCd = fromLocCd
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLocCd }
-        : { role: "SECURITY_OFFICER" as any };
-      const secOfficersCd = await prisma.user.findMany({ where: secWhereCd });
-      if (secOfficersCd.length > 0) {
-        await prisma.notification.createMany({
-          data: secOfficersCd.map((s: { id: string }) => ({
-            userId: s.id,
-            type: "GATE_PASS_APPROVED",
-            title: "Customer Delivery Cleared — Confirm Gate OUT",
-            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — payment cleared. Customer delivery ready for Gate OUT.`,
-            gatePassId: gatePass.id,
-          })),
-        });
-      }
+      // Security is NOT notified — for Customer Delivery the initiator prints to bypass Security Gate OUT.
     } else {
       // Cashier done but credit approval still pending — notify initiator
       await prisma.notification.create({
@@ -357,7 +430,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     const targetLabel = gatePass.toLocation as string | null;
-    if ((isLT || isSubOut || isSubOutIn || validApprovedMainIn || validSubIn) && targetLabel) {
+    if ((isSubOut || isSubOutIn || validApprovedMainIn || validSubIn) && targetLabel) {
       try {
         const plantOptions = await fetchPlantLocationOptions().catch(() => []);
         let targetLocation = findPlantLocationOption(plantOptions, targetLabel);
@@ -365,7 +438,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         // SAP live options only include locations with vehicles currently parked there.
         // Fall back to the DB LocationOption table which covers all configured locations.
         if (!targetLocation) {
-          const dbLocations = await prisma.locationOption.findMany();
+          // Order by plantCode ascending so numeric SAP Werks codes (e.g. "1106")
+          // are preferred over legacy descriptive codes (e.g. "MB800") for the same location.
+          const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
           targetLocation = findPlantLocationOption(
             dbLocations.map((l) => ({
               plantCode: l.plantCode,
@@ -534,7 +609,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Notify destination security, initiators, and plant ASOs for Location Transfer.
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+      const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
       const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
 
       const [destSecurity, destInitiators, asoUsers] = await Promise.all([
@@ -566,6 +641,37 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             };
           }),
         });
+      }
+
+      // SAP: update vehicle location to destination now that source Security confirmed Gate OUT
+      if (toLoc) {
+        try {
+          const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+          let targetLocation = findPlantLocationOption(plantOptions, toLoc);
+          if (!targetLocation) {
+            const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+            targetLocation = findPlantLocationOption(
+              dbLocations.map((l) => ({
+                plantCode: l.plantCode,
+                plantDescription: l.plantDescription,
+                storageLocation: l.storageLocation,
+                storageDescription: l.storageDescription,
+              })),
+              toLoc
+            );
+          }
+          if (targetLocation) {
+            await updateVehiclePlantLocation({
+              identifiers: [gatePass.vehicle, gatePass.chassis],
+              destination: targetLocation,
+              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+            });
+          } else {
+            console.warn("[security_gate_out] no matching SAP plant location for:", toLoc);
+          }
+        } catch (error) {
+          console.error("[security_gate_out] SAP location update failed:", error);
+        }
       }
     }
 
@@ -673,7 +779,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // For LT: notify destination security + initiators that vehicle is en route
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
+      const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
       const [destSecurity, destInitiators] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
         prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
@@ -692,6 +798,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             gatePassId: gatePass.id,
           })),
         });
+      }
+
+      // SAP: update vehicle location to destination now that initiator printed (bypasses source Security Gate OUT)
+      // Only runs if initiator confirmed SAP write in the confirmation dialog (writeSap === true)
+      if (writeSap !== false && toLoc) {
+        try {
+          const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+          let targetLocation = findPlantLocationOption(plantOptions, toLoc);
+          if (!targetLocation) {
+            const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+            targetLocation = findPlantLocationOption(
+              dbLocations.map((l) => ({
+                plantCode: l.plantCode,
+                plantDescription: l.plantDescription,
+                storageLocation: l.storageLocation,
+                storageDescription: l.storageDescription,
+              })),
+              toLoc
+            );
+          }
+          if (targetLocation) {
+            await updateVehiclePlantLocation({
+              identifiers: [gatePass.vehicle, gatePass.chassis],
+              destination: targetLocation,
+              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+            });
+          } else {
+            console.warn("[print_gate_out] no matching SAP plant location for:", toLoc);
+          }
+        } catch (error) {
+          console.error("[print_gate_out] SAP location update failed:", error);
+        }
       }
     }
 
@@ -1329,6 +1467,120 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     return NextResponse.json({ ok: true, status: newStatus });
+  }
+
+  // APPROVER / ADMIN: reject the escalated single-order sign-off
+  if (action === "cashier_single_order_reject") {
+    if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.status !== "CASHIER_REVIEW" || !(gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "Pass is not eligible for single-order rejection" }, { status: 400 });
+    }
+    const assignedApproverId = (gatePass as any).singleOrderEscalatedApproverId;
+    if (assignedApproverId && assignedApproverId !== session.user.id && session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "You are not the assigned approver for this escalation" }, { status: 403 });
+    }
+
+    const reason = rejectionReason || null;
+
+    // Reset escalation flag — keep singleOrderEscalatedApproverId so initiator can resubmit to same approver
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: false } });
+    // Store rejection reason via raw SQL (column post-dates last prisma generate; wrap so notification always fires)
+    try {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationRejectionReason" = ${reason} WHERE id = ${id}`;
+    } catch { /* escalationRejectionReason column may not exist on older deployments */ }
+
+    // Notify cashiers at this location
+    const fromLocRej = gatePass.fromLocation as string | null;
+    const plantPrefixRej = fromLocRej ? fromLocRej.split(" - ")[0].trim() : null;
+    const cashierWhereRej = plantPrefixRej
+      ? { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefixRej } }
+      : { role: "CASHIER" as any };
+    const cashiersRej = await prisma.user.findMany({ where: cashierWhereRej });
+    if (cashiersRej.length > 0) {
+      await prisma.notification.createMany({
+        data: cashiersRej.map((c: { id: string }) => ({
+          userId: c.id,
+          type: "GATE_PASS_REJECTED",
+          title: "Sign-off Rejected — Action Required",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — ${session.user.name ?? "Approver"} rejected the order sign-off.${reason ? ` Reason: ${reason}` : ""} Please resolve the pending orders.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    // Notify initiator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_REJECTED",
+        title: "Order Sign-off Rejected",
+        message: `Gate pass ${gatePass.gatePassNumber} — the approver rejected the cashier's sign-off request.${reason ? ` Reason: ${reason}` : ""}`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    return NextResponse.json({ ok: true, status: "CASHIER_REVIEW" });
+  }
+
+  // INITIATOR: resubmit escalation after approver rejected it (same GP number, same approver)
+  if (action === "initiator_resubmit_escalation") {
+    if (session.user.role !== "INITIATOR" && session.user.role !== "SERVICE_ADVISOR") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    // Must have a stored rejection reason (i.e. was rejected before) and not already escalated
+    const rejReason: { escalationRejectionReason: string | null }[] =
+      await prisma.$queryRaw`SELECT "escalationRejectionReason" FROM "GatePass" WHERE id = ${id} LIMIT 1`;
+    const storedReason = rejReason[0]?.escalationRejectionReason ?? null;
+    if (!storedReason) {
+      return NextResponse.json({ error: "No rejected escalation to resubmit" }, { status: 400 });
+    }
+    if ((gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "Escalation already in progress" }, { status: 400 });
+    }
+    // singleOrderEscalatedApproverId is preserved on rejection (not cleared), so it's always available here
+    const approverId = (gatePass as any).singleOrderEscalatedApproverId
+      ?? body.approverId as string | undefined;
+    if (!approverId) {
+      return NextResponse.json({ error: "No approver on record — contact cashier to re-escalate" }, { status: 400 });
+    }
+
+    // Re-escalate to the same approver; clear the rejection reason
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: true } });
+    try {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationRejectionReason" = null WHERE id = ${id}`;
+    } catch { /* ignore */ }
+
+    // Notify the approver
+    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true } });
+    if (approverUser) {
+      await prisma.notification.create({
+        data: {
+          userId: approverUser.id,
+          type: "GATE_PASS_SUBMITTED",
+          title: "Resubmitted — Single Order Sign-off Required",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — the initiator has resubmitted the order sign-off request after your rejection. Please review again.`,
+          gatePassId: gatePass.id,
+        },
+      });
+    }
+
+    // Notify initiator confirmation
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_SUBMITTED",
+        title: "Sign-off Resubmitted",
+        message: `Gate pass ${gatePass.gatePassNumber} — your resubmission has been sent to ${approverUser?.name ?? "the approver"} for review.`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    return NextResponse.json({ ok: true, resubmitted: true });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

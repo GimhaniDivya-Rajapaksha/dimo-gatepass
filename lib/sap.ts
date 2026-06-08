@@ -3,7 +3,7 @@
  *
  * Azure APIM Proxy (internet-accessible, POST-based):
  *   /dimogatepass/in     → Gate IN vehicles  (mmsta = 'QP30' — PO Created)
- *   /dimogatepass/out    → Gate OUT vehicles (sdsta = 'QS60' — Sales Order Completed)
+ *   /dimogatepass/out    → Gate OUT vehicles (sdsta in QS60/QS50/QS5X/QS40/QS4X per new FS §2.2)
  *   /dimogatepass/inout  → Gate IN-OUT invoices (filter by vbeln)
  *   /dimogatepass/order  → Orders for cashier review (filter by vhcle / vhvin)
  *
@@ -165,8 +165,9 @@ export async function fetchSapVehicles(
     apimPost("in", "mmsta eq 'QP30'")
       .then((rows) => rows.map(mapVehicle));
 
+  // New FS §2.2: accept QS60 (happy path) + QS50/QS5X/QS40/QS4X (intermediate invoice stages)
   const fetchOUT = () =>
-    apimPost("out", "sdsta eq 'QS60'")
+    apimPost("out", "sdsta eq 'QS60' or sdsta eq 'QS50' or sdsta eq 'QS5X' or sdsta eq 'QS40' or sdsta eq 'QS4X'")
       .then((rows) => rows.map(mapVehicle));
 
   let raw: SapVehicle[];

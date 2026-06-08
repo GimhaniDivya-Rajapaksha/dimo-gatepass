@@ -30,24 +30,30 @@ type GatePassDetail = {
   hasImmediate: boolean;
   cashierCleared: boolean;
   creditApproved: boolean;
+  creditRejected: boolean;
   cashierOverrideRequested: boolean;
   singleOrderEscalated: boolean;
   singleOrderEscalatedApproverId: string | null;
+  escalationRejectionReason: string | null;
   createdBy: { id: string; name: string; email: string }; approvedBy: { name: string } | null;
   createdAt: string; approvedAt: string | null;
   subPasses?: SubPassSummary[];
   parentPass?: { id: string; gatePassNumber: string; passSubType: string | null; status: string; toLocation: string | null } | null;
 };
 
-function SingleOrderApprovalPanel({ gatePassId, data, onApproved }: {
+function SingleOrderApprovalPanel({ gatePassId, data, onApproved, onRejected }: {
   gatePassId: string;
   data: GatePassDetail;
   onApproved: () => void;
+  onRejected: () => void;
 }) {
   const [history, setHistory] = useState<{ id: string; gatePassNumber: string; status: string; passType: string; createdAt: string; createdBy: { name: string } }[]>([]);
   const [orders, setOrders] = useState<{ id: string; orderId: string; payTerm: string; isAssigned: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejecting, setRejecting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -75,6 +81,21 @@ function SingleOrderApprovalPanel({ gatePassId, data, onApproved }: {
       onApproved();
     } catch { setErr("Network error"); }
     finally { setApproving(false); }
+  }
+
+  async function handleReject() {
+    if (!rejectReason.trim()) { setErr("Please enter a rejection reason."); return; }
+    setRejecting(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${gatePassId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_single_order_reject", rejectionReason: rejectReason }),
+      });
+      if (!res.ok) { const d = await res.json(); setErr(d.error ?? "Failed"); return; }
+      onRejected();
+    } catch { setErr("Network error"); }
+    finally { setRejecting(false); }
   }
 
   return (
@@ -130,12 +151,50 @@ function SingleOrderApprovalPanel({ gatePassId, data, onApproved }: {
         )}
       </div>
 
-      {/* Approve button */}
-      <div className="px-5 py-3 flex items-center justify-between gap-3">
-        {err && <p className="text-xs text-red-500">{err}</p>}
-        <div className="flex-1" />
+      {/* Reject reason input */}
+      {showRejectInput && (
+        <div className="px-5 pb-4 flex flex-col gap-2 border-b" style={{ borderColor: "var(--border)" }}>
+          <p className="text-xs font-semibold" style={{ color: "#dc2626" }}>Reason for rejecting (required)</p>
+          <textarea
+            rows={2}
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+            placeholder="Enter rejection reason…"
+            className="w-full rounded-xl border px-3 py-2 text-sm resize-none"
+            style={{ borderColor: "#fca5a5", background: "#fff1f2", color: "var(--text)" }}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setShowRejectInput(false); setRejectReason(""); setErr(null); }}
+              className="flex-1 py-2 rounded-xl text-sm font-medium border"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+              Cancel
+            </button>
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              onClick={handleReject} disabled={rejecting}
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg,#dc2626,#ef4444)" }}>
+              {rejecting ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg> : null}
+              {rejecting ? "Rejecting…" : "Confirm Rejection"}
+            </motion.button>
+          </div>
+        </div>
+      )}
+
+      {/* Approve + Reject buttons */}
+      <div className="px-5 py-3 flex items-center gap-3">
+        {err && <p className="text-xs text-red-500 flex-1">{err}</p>}
+        {!err && <div className="flex-1" />}
         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-          onClick={handleApprove} disabled={approving}
+          onClick={() => { setShowRejectInput(!showRejectInput); setErr(null); }}
+          disabled={approving || rejecting}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border disabled:opacity-50"
+          style={{ borderColor: "#ef4444", color: "#ef4444", background: "var(--surface)" }}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          Reject
+        </motion.button>
+        <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+          onClick={handleApprove} disabled={approving || rejecting}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
           style={{ background: "linear-gradient(135deg,#b45309,#d97706)" }}>
           {approving
@@ -273,6 +332,9 @@ function InitiatorGatePassDetailPageInner() {
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [approveResult, setApproveResult] = useState<"approved" | "rejected" | null>(null);
+  const [showCreditRejectBox, setShowCreditRejectBox] = useState(false);
+  const [creditRejectReason, setCreditRejectReason] = useState("");
+  const [creditRejectLoading, setCreditRejectLoading] = useState(false);
   const [showResubmitPanel, setShowResubmitPanel] = useState(false);
   const [resubmitNote, setResubmitNote] = useState("");
   const [resubmitDate, setResubmitDate] = useState("");
@@ -294,6 +356,9 @@ function InitiatorGatePassDetailPageInner() {
   type ServiceOrder = { id: string; orderId: string; orderStatus: string; payTerm: string; isAssigned: boolean };
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
   const [serviceOrdersLoading, setServiceOrdersLoading] = useState(false);
+  const [showSapConfirm, setShowSapConfirm] = useState(false);
+  const [escalationResubmitLoading, setEscalationResubmitLoading] = useState(false);
+  const [escalationResubmitted, setEscalationResubmitted] = useState(false);
 
   useEffect(() => {
     fetch(`/api/gate-pass/${id}/sub-passes`)
@@ -339,7 +404,7 @@ function InitiatorGatePassDetailPageInner() {
     }
   }
 
-  async function handlePrintGatePass() {
+  async function handlePrintGatePass(writeSap = true) {
     if (!data) return;
     // APPROVED LT/CD: printing counts as Gate OUT — update status before printing
     if (data.status === "APPROVED" && (data.passType === "LOCATION_TRANSFER" || data.passType === "CUSTOMER_DELIVERY")) {
@@ -347,7 +412,7 @@ function InitiatorGatePassDetailPageInner() {
         const res = await fetch(`/api/gate-pass/${id}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "print_gate_out" }),
+          body: JSON.stringify({ action: "print_gate_out", writeSap }),
         });
         if (res.ok) {
           const result = await res.json();
@@ -357,6 +422,8 @@ function InitiatorGatePassDetailPageInner() {
         // Continue to print even if the status update fails
       }
     }
+    // Delay so any open modal has time to unmount before the print dialog opens
+    await new Promise((resolve) => setTimeout(resolve, 150));
     window.print();
   }
 
@@ -427,6 +494,24 @@ function InitiatorGatePassDetailPageInner() {
     } catch {
       setApproveLoading(false);
       setError("Could not approve. Please try again.");
+    }
+  }
+
+  async function handleCreditReject() {
+    if (!creditRejectReason.trim()) { setError("Please enter a reason for rejecting the credit orders."); return; }
+    setCreditRejectLoading(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "credit_reject", rejectionReason: creditRejectReason }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setApproveResult("rejected");
+      setTimeout(() => router.push("/gate-pass/approve"), 2000);
+    } catch {
+      setCreditRejectLoading(false);
+      setError("Could not reject credit orders. Please try again.");
     }
   }
 
@@ -855,15 +940,21 @@ function InitiatorGatePassDetailPageInner() {
           </div>
           {(data.fromLocation || data.toLocation) && (
             <div className="mt-3 flex items-center gap-2 flex-wrap">
-              <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
-                {data.fromLocation || "?"}
-              </span>
-              <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-              </svg>
-              <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }}>
-                {data.toLocation || "?"}
-              </span>
+              {data.fromLocation && (
+                <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                  {data.fromLocation}
+                </span>
+              )}
+              {data.passType !== "CUSTOMER_DELIVERY" && data.toLocation && (
+                <>
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                  </svg>
+                  <span className="text-xs px-2.5 py-1 rounded-lg font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }}>
+                    {data.toLocation}
+                  </span>
+                </>
+              )}
             </div>
           )}
         </Section>
@@ -1042,13 +1133,22 @@ function InitiatorGatePassDetailPageInner() {
         {/* Print-only signature area */}
         <div className="hidden print:block mt-6 pt-4" style={{ borderTop: "1px solid #d1d5db" }}>
           <div className="grid grid-cols-3 gap-8 text-xs">
-            {["Prepared By / Initiator", `Authorized By / ${approvalActorLabel}`, "Received By / Gate Officer"].map((label) => (
-              <div key={label} className="text-center">
-                <div style={{ height: "48px", borderBottom: "1px solid #374151", marginBottom: "6px" }} />
-                <p style={{ color: "#6b7280", fontSize: "8pt" }}>{label}</p>
-                <p style={{ color: "#9ca3af", fontSize: "7pt", marginTop: "2px" }}>Signature &amp; Date</p>
-              </div>
-            ))}
+            {/* Initiator — show name, no signature line */}
+            <div className="text-center">
+              <p style={{ color: "#111827", fontSize: "8.5pt", fontWeight: 600, marginBottom: "4px" }}>{data.createdBy.name}</p>
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Prepared By / Initiator</p>
+            </div>
+            {/* Approver — show name, no signature line */}
+            <div className="text-center">
+              <p style={{ color: "#111827", fontSize: "8.5pt", fontWeight: 600, marginBottom: "4px" }}>{data.approvedBy?.name || "—"}</p>
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Authorized By / {approvalActorLabel}</p>
+            </div>
+            {/* Gate Officer — keep signature & date box */}
+            <div className="text-center">
+              <div style={{ height: "48px", borderBottom: "1px solid #374151", marginBottom: "6px" }} />
+              <p style={{ color: "#6b7280", fontSize: "8pt" }}>Received By / Gate Officer</p>
+              <p style={{ color: "#9ca3af", fontSize: "7pt", marginTop: "2px" }}>Signature &amp; Date</p>
+            </div>
           </div>
           <p className="text-center mt-4" style={{ color: "#9ca3af", fontSize: "7.5pt" }}>
             This is an official gate pass document of DIMO Gate Pass System. Printed on {new Date().toLocaleString()}.
@@ -1089,17 +1189,22 @@ function InitiatorGatePassDetailPageInner() {
                   <p className="text-[11px]" style={{ color: data.cashierCleared ? "#16a34a" : "#b45309" }}>{data.cashierCleared ? "Immediate orders cleared ✓" : "Clearing immediate orders…"}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: data.creditApproved ? "#f0fdf4" : data.hasCredit ? "#eff6ff" : "#f1f5f9", border: `1px solid ${data.creditApproved ? "#bbf7d0" : data.hasCredit ? "#bfdbfe" : "#e2e8f0"}` }}>
-                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: data.creditApproved ? "#22c55e" : data.hasCredit ? "#3b82f6" : "#94a3b8" }}>
+              <div className="flex items-center gap-3 p-3 rounded-xl" style={{
+                background: data.creditApproved ? "#f0fdf4" : data.creditRejected ? "#fef2f2" : data.hasCredit ? "#eff6ff" : "#f1f5f9",
+                border: `1px solid ${data.creditApproved ? "#bbf7d0" : data.creditRejected ? "#fecaca" : data.hasCredit ? "#bfdbfe" : "#e2e8f0"}`
+              }}>
+                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: data.creditApproved ? "#22c55e" : data.creditRejected ? "#ef4444" : data.hasCredit ? "#3b82f6" : "#94a3b8" }}>
                   {data.creditApproved
                     ? <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    : data.creditRejected
+                    ? <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                     : <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
                   }
                 </div>
                 <div>
-                  <p className="text-xs font-bold" style={{ color: data.creditApproved ? "#15803d" : data.hasCredit ? "#1d4ed8" : "#64748b" }}>Credit Approval</p>
-                  <p className="text-[11px]" style={{ color: data.creditApproved ? "#16a34a" : data.hasCredit ? "#3b82f6" : "#94a3b8" }}>
-                    {data.creditApproved ? "Credit orders approved ✓" : data.hasCredit ? "Awaiting approver…" : "No credit orders"}
+                  <p className="text-xs font-bold" style={{ color: data.creditApproved ? "#15803d" : data.creditRejected ? "#991b1b" : data.hasCredit ? "#1d4ed8" : "#64748b" }}>Credit Approval</p>
+                  <p className="text-[11px]" style={{ color: data.creditApproved ? "#16a34a" : data.creditRejected ? "#dc2626" : data.hasCredit ? "#3b82f6" : "#94a3b8" }}>
+                    {data.creditApproved ? "Credit orders approved ✓" : data.creditRejected ? "Credit orders rejected" : data.hasCredit ? "Awaiting approver…" : "No credit orders"}
                   </p>
                 </div>
               </div>
@@ -1239,7 +1344,11 @@ function InitiatorGatePassDetailPageInner() {
             {isInitiatorView && (
             <button type="button" onClick={(e) => {
                 e.stopPropagation();
-                void handlePrintGatePass();
+                if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
+                  setShowSapConfirm(true);
+                } else {
+                  void handlePrintGatePass();
+                }
               }}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
               style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
@@ -1360,7 +1469,7 @@ function InitiatorGatePassDetailPageInner() {
           })()}
 
           {/* ── APPROVER: Credit Approval banner (MAIN_OUT with credit orders pending) ── */}
-          {isApproverView && !approveResult && data?.hasCredit && !data?.creditApproved && data?.status === "CASHIER_REVIEW" && (() => {
+          {isApproverView && !approveResult && data?.hasCredit && !data?.creditApproved && !data?.creditRejected && data?.status === "CASHIER_REVIEW" && (() => {
             const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
             const isAfterSalesMainOut = data?.passType === "AFTER_SALES" && data?.passSubType === "MAIN_OUT";
             const creditOrders = serviceOrders.filter((o) => {
@@ -1449,10 +1558,40 @@ function InitiatorGatePassDetailPageInner() {
                 </div>
               ) : isAfterSalesMainOut && !serviceOrdersLoading && serviceOrders.length === 0 ? null : null}
 
+              {showCreditRejectBox && (
+                <div className="px-5 pb-4 flex flex-col gap-2">
+                  <p className="text-xs font-semibold" style={{ color: "#dc2626" }}>Reason for rejecting credit orders (required)</p>
+                  <textarea
+                    rows={2}
+                    value={creditRejectReason}
+                    onChange={e => setCreditRejectReason(e.target.value)}
+                    placeholder="Enter rejection reason…"
+                    className="w-full rounded-xl border px-3 py-2 text-sm resize-none"
+                    style={{ borderColor: "#fca5a5", background: "#fff1f2", color: "var(--text)" }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setShowCreditRejectBox(false); setCreditRejectReason(""); setError(""); }}
+                      className="flex-1 py-2 rounded-xl text-sm font-medium border"
+                      style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                      Cancel
+                    </button>
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={handleCreditReject} disabled={creditRejectLoading}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg,#dc2626,#ef4444)" }}>
+                      {creditRejectLoading
+                        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                        : null}
+                      {creditRejectLoading ? "Rejecting…" : "Confirm Rejection"}
+                    </motion.button>
+                  </div>
+                </div>
+              )}
               <div className="px-5 py-4 flex items-center gap-3" style={{ borderTop: "1px solid #bfdbfe" }}>
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                  onClick={() => { setShowRejectBox(!showRejectBox); setError(""); }}
-                  disabled={rejectLoading}
+                  onClick={() => { setShowCreditRejectBox(!showCreditRejectBox); setError(""); }}
+                  disabled={creditRejectLoading || approveLoading}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border disabled:opacity-50 transition-all"
                   style={{ background: "var(--surface)", borderColor: "#ef4444", color: "#ef4444" }}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1461,7 +1600,7 @@ function InitiatorGatePassDetailPageInner() {
                   Reject Credit Request
                 </motion.button>
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                  onClick={handleCreditApprove} disabled={approveLoading}
+                  onClick={handleCreditApprove} disabled={approveLoading || creditRejectLoading}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md disabled:opacity-50"
                   style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
                   {approveLoading
@@ -1717,12 +1856,74 @@ function InitiatorGatePassDetailPageInner() {
             {/* ── APPROVER: Single Order Sign-off (CASHIER_REVIEW + singleOrderEscalated) ── */}
             {isApproverView && data.status === "CASHIER_REVIEW" && data.singleOrderEscalated &&
               data.singleOrderEscalatedApproverId === session?.user?.id && !approveResult && (
-              <SingleOrderApprovalPanel gatePassId={id} data={data} onApproved={() => { setApproveResult("approved"); setTimeout(() => router.push("/gate-pass/approve"), 2000); }} />
+              <SingleOrderApprovalPanel gatePassId={id} data={data} onApproved={() => { setApproveResult("approved"); setTimeout(() => router.push("/gate-pass/approve"), 2000); }} onRejected={() => { setApproveResult("rejected"); setTimeout(() => router.push("/gate-pass/approve"), 2000); }} />
             )}
 
             {/* ── INITIATOR / AREA_SALES_OFFICER buttons (own passes only) ── */}
             {isInitiatorView && (
               <>
+                {/* Escalation rejection banner + resubmit */}
+                {data.status === "CASHIER_REVIEW" && !data.singleOrderEscalated && data.escalationRejectionReason && (
+                  <div className="w-full rounded-2xl border overflow-hidden mb-2 no-print"
+                    style={{ borderColor: "#fca5a5", background: "var(--surface)" }}>
+                    <div className="px-5 py-3 flex items-center gap-3"
+                      style={{ background: "linear-gradient(135deg,#fef2f2,#fee2e2)", borderBottom: "1px solid #fca5a5" }}>
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: "#fee2e2" }}>
+                        <svg className="w-4 h-4" fill="none" stroke="#dc2626" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#dc2626" }}>Sign-off Rejected</p>
+                        <p className="text-sm font-semibold mt-0.5" style={{ color: "#7f1d1d" }}>{data.escalationRejectionReason}</p>
+                      </div>
+                    </div>
+                    <div className="px-5 py-3 flex items-center justify-between gap-3">
+                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        You can resubmit this gate pass for sign-off approval using the same gate pass number.
+                      </p>
+                      {escalationResubmitted ? (
+                        <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold flex-shrink-0"
+                          style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac" }}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Resubmitted
+                        </div>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            setEscalationResubmitLoading(true);
+                            try {
+                              const res = await fetch(`/api/gate-pass/${id}/status`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "initiator_resubmit_escalation" }),
+                              });
+                              if (res.ok) {
+                                setEscalationResubmitted(true);
+                                setTimeout(() => window.location.reload(), 1500);
+                              } else {
+                                const e = await res.json().catch(() => ({}));
+                                setError(e.error || "Failed to resubmit");
+                              }
+                            } catch { setError("Network error"); }
+                            finally { setEscalationResubmitLoading(false); }
+                          }}
+                          disabled={escalationResubmitLoading}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-50 flex-shrink-0 transition-all hover:opacity-90"
+                          style={{ background: "linear-gradient(135deg,#dc2626,#ef4444)" }}>
+                          {escalationResubmitLoading
+                            ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                            : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+                          {escalationResubmitLoading ? "Resubmitting..." : "Resubmit for Sign-off"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {canCancel && (
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                     onClick={handleCancel} disabled={cancelLoading}
@@ -2048,6 +2249,88 @@ function InitiatorGatePassDetailPageInner() {
         )}
 
       </motion.div>
+
+      {/* Print Gate Pass Confirmation Modal (CD + LT) */}
+      {showSapConfirm && (
+        <div className="no-print fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+          <div className="rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm mx-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            {/* Header */}
+            <div className="px-6 py-5" style={{ background: data?.passType === "CUSTOMER_DELIVERY" ? "linear-gradient(135deg,#065f46,#059669)" : "linear-gradient(135deg,#1e3a8a,#2563eb)" }}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,255,255,0.2)" }}>
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-black text-white">
+                    {data?.passType === "CUSTOMER_DELIVERY" ? "Confirm Delivery & Print" : "Confirm & Print Gate Pass"}
+                  </p>
+                  <p className="text-xs text-white/70 mt-0.5">Vehicle: {data?.vehicle}</p>
+                </div>
+              </div>
+            </div>
+            {/* Body */}
+            <div className="px-6 py-5">
+              {data?.passType === "CUSTOMER_DELIVERY" ? (
+                <>
+                  <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                    {data?.status === "APPROVED"
+                      ? <>Printing will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.</>
+                      : "Print a copy of this gate pass."}
+                  </p>
+                  <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    Make sure the vehicle and customer details are correct before printing.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                    {data?.status === "APPROVED"
+                      ? <>Printing will release the vehicle for transit from <span className="font-semibold">{data?.fromLocation}</span> to <span className="font-semibold">{data?.toLocation}</span> and update the location in SAP.</>
+                      : "Print a copy of this gate pass."}
+                  </p>
+                  <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                    {data?.status === "APPROVED"
+                      ? "Make sure the vehicle and destination details are correct before printing."
+                      : "SAP will not be updated — vehicle location was already set when this pass was first released."}
+                  </p>
+                </>
+              )}
+            </div>
+            {/* Actions */}
+            <div className="px-6 pb-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowSapConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+              >
+                Back
+              </button>
+              {data?.passType === "CUSTOMER_DELIVERY" ? (
+                <button
+                  type="button"
+                  onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}
+                >
+                  Confirm &amp; Print
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(true); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}
+                >
+                  Confirm &amp; Print
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

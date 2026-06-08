@@ -18,7 +18,7 @@ async function main() {
       name: "Security - DIMO 800",
       email: "security.dimo800@dimo.lk",
       role: "SECURITY_OFFICER",
-      location: "Mercedeze Centre 800 - DIMO 800",
+      location: "Mercedes Centre 800 - DIMO 800",
     },
     {
       name: "Security - Embilipitiya Branch",

@@ -808,6 +808,7 @@ export default function CreateGatePassPage() {
   const [cdSapOrders, setCdSapOrders] = useState<SapPreviewOrder[]>([]);
   const [cdSapLoading, setCdSapLoading] = useState(false);
   const [cdSapLoaded, setCdSapLoaded] = useState(false);
+  const [cdSapError, setCdSapError] = useState<string | null>(null);
 
   useEffect(() => {
     const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
@@ -1218,16 +1219,20 @@ export default function CreateGatePassPage() {
   // Fetch SAP invoice data when a CD vehicle is selected
   useEffect(() => {
     if (passType !== "CUSTOMER_DELIVERY" || !selectedCdVehicleDetail) {
-      setCdSapOrders([]); setCdSapLoaded(false); return;
+      setCdSapOrders([]); setCdSapLoaded(false); setCdSapError(null); return;
     }
     const chassis = selectedCdVehicleDetail.chassisNo ?? "";
     const plate   = selectedCdVehicleDetail.vehicleNo ?? "";
     if (!chassis && !plate) return;
-    setCdSapLoading(true); setCdSapLoaded(false);
+    setCdSapLoading(true); setCdSapLoaded(false); setCdSapError(null);
     fetch(`/api/sap/orders?vin=${encodeURIComponent(chassis)}&licplate=${encodeURIComponent(plate)}`)
-      .then(r => r.ok ? r.json() : { orders: [] })
-      .then((d: { orders?: SapPreviewOrder[] }) => { setCdSapOrders(d.orders ?? []); setCdSapLoaded(true); })
-      .catch(() => { setCdSapOrders([]); setCdSapLoaded(true); })
+      .then(r => r.ok ? r.json() : { orders: [], error: "SAP request failed" })
+      .then((d: { orders?: SapPreviewOrder[]; error?: string }) => {
+        setCdSapOrders(d.orders ?? []);
+        setCdSapError(d.error ?? null);
+        setCdSapLoaded(true);
+      })
+      .catch(() => { setCdSapOrders([]); setCdSapError("SAP unavailable"); setCdSapLoaded(true); })
       .finally(() => setCdSapLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passType, selectedCdVehicleDetail]);
@@ -4172,6 +4177,14 @@ export default function CreateGatePassPage() {
                       <div className="px-5 py-4">
                         {cdSapLoading ? (
                           <p className="text-sm" style={{ color: "var(--text-muted)" }}>Checking SAP invoice records…</p>
+                        ) : cdSapError ? (
+                          <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
+                            style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-sm font-medium" style={{ color: "#dc2626" }}>SAP unavailable — invoice status could not be checked</p>
+                          </div>
                         ) : cdSapOrders.length === 0 ? (
                           <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
                             style={{ background: "#fef9c3", border: "1px solid #fde047" }}>

@@ -40,7 +40,8 @@ function canonicalVehicleBrand(make: string | null | undefined) {
 
 function brandMatches(userBrand: string | null | undefined, vehicleMake: string | null | undefined) {
   const requiredBrand = canonicalVehicleBrand(vehicleMake);
-  if (!requiredBrand) return true;
+  if (!requiredBrand) return true; // vehicle has no known brand → all approvers match
+  if (!userBrand?.trim()) return true; // approver has no brand restriction → matches all vehicles
 
   const requiredAliases = BRAND_ALIASES[requiredBrand] ?? [requiredBrand];
   return splitBrands(userBrand).some((brand) => {
@@ -85,7 +86,8 @@ export async function findApproversForLocationBrand(
   if (hasVehicleBrand) {
     const sameBrand = (await findUsers({ role: "APPROVER" })).filter((approver) => brandMatches(approver.brand, vehicleMake));
     if (sameBrand.length > 0) return sameBrand;
-    return [];
+    // No brand-matched approver found anywhere — fall back to location approvers
+    if (sameLocation.length > 0) return sameLocation;
   }
 
   if (sameLocation.length > 0) return sameLocation;
