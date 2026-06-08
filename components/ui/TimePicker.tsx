@@ -277,6 +277,11 @@ export default function TimePicker({
                 <p className="text-sm font-black text-white tracking-wide">Select Time</p>
               </div>
               <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setManualMode(m => !m); setManualValue(value || currentTimeValue()); }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-black transition-all hover:opacity-90 active:scale-95"
+                  style={{ background: manualMode ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)", color: manualMode ? "#1e3a8a" : "white" }}>
+                  {manualMode ? "Scroll" : "Type"}
+                </button>
                 <button type="button" onClick={selectNow}
                   className="px-3 py-1.5 rounded-xl text-xs font-black transition-all hover:opacity-90 active:scale-95"
                   style={{ background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)", color: "white" }}>

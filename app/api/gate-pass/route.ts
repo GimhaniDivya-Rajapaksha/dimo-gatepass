@@ -240,11 +240,18 @@ export async function GET(req: NextRequest) {
   // that CUSTOMER_DELIVERY mixed-payment passes are visible alongside After Sales ones.
   if (role === "APPROVER" && status === "PENDING_APPROVAL") {
     delete (where as any).status;
+    const approverName = (session.user as { name?: string | null }).name ?? "";
+    const approverMatchFilter = approverName
+      ? [{ OR: [
+          { intendedApprover: { equals: approverName, mode: "insensitive" as const } },
+          { intendedApprover: null },
+        ]}]
+      : [];
     const andArr: unknown[] = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
     andArr.push({
       OR: [
         { status: "PENDING_APPROVAL" },
-        { AND: [{ status: "CASHIER_REVIEW" }, { hasCredit: true }, { creditApproved: false }] },
+        { AND: [{ status: "CASHIER_REVIEW" }, { hasCredit: true }, { creditApproved: false }, { creditRejected: false }, ...approverMatchFilter] },
       ],
     });
     (where as any).AND = andArr;
