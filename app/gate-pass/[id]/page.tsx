@@ -34,6 +34,7 @@ type GatePassDetail = {
   cashierOverrideRequested: boolean;
   singleOrderEscalated: boolean;
   singleOrderEscalatedApproverId: string | null;
+  escalationRejectionReason: string | null;
   createdBy: { id: string; name: string; email: string }; approvedBy: { name: string } | null;
   createdAt: string; approvedAt: string | null;
   subPasses?: SubPassSummary[];
@@ -356,6 +357,8 @@ function InitiatorGatePassDetailPageInner() {
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
   const [serviceOrdersLoading, setServiceOrdersLoading] = useState(false);
   const [showSapConfirm, setShowSapConfirm] = useState(false);
+  const [escalationResubmitLoading, setEscalationResubmitLoading] = useState(false);
+  const [escalationResubmitted, setEscalationResubmitted] = useState(false);
 
   useEffect(() => {
     fetch(`/api/gate-pass/${id}/sub-passes`)
@@ -1848,6 +1851,68 @@ function InitiatorGatePassDetailPageInner() {
             {/* ── INITIATOR / AREA_SALES_OFFICER buttons (own passes only) ── */}
             {isInitiatorView && (
               <>
+                {/* Escalation rejection banner + resubmit */}
+                {data.status === "CASHIER_REVIEW" && !data.singleOrderEscalated && data.escalationRejectionReason && (
+                  <div className="w-full rounded-2xl border overflow-hidden mb-2 no-print"
+                    style={{ borderColor: "#fca5a5", background: "var(--surface)" }}>
+                    <div className="px-5 py-3 flex items-center gap-3"
+                      style={{ background: "linear-gradient(135deg,#fef2f2,#fee2e2)", borderBottom: "1px solid #fca5a5" }}>
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: "#fee2e2" }}>
+                        <svg className="w-4 h-4" fill="none" stroke="#dc2626" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#dc2626" }}>Sign-off Rejected</p>
+                        <p className="text-sm font-semibold mt-0.5" style={{ color: "#7f1d1d" }}>{data.escalationRejectionReason}</p>
+                      </div>
+                    </div>
+                    <div className="px-5 py-3 flex items-center justify-between gap-3">
+                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        You can resubmit this gate pass for sign-off approval using the same gate pass number.
+                      </p>
+                      {escalationResubmitted ? (
+                        <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold flex-shrink-0"
+                          style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac" }}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Resubmitted
+                        </div>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            setEscalationResubmitLoading(true);
+                            try {
+                              const res = await fetch(`/api/gate-pass/${id}/status`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ action: "initiator_resubmit_escalation" }),
+                              });
+                              if (res.ok) {
+                                setEscalationResubmitted(true);
+                                setTimeout(() => window.location.reload(), 1500);
+                              } else {
+                                const e = await res.json().catch(() => ({}));
+                                setError(e.error || "Failed to resubmit");
+                              }
+                            } catch { setError("Network error"); }
+                            finally { setEscalationResubmitLoading(false); }
+                          }}
+                          disabled={escalationResubmitLoading}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-sm disabled:opacity-50 flex-shrink-0 transition-all hover:opacity-90"
+                          style={{ background: "linear-gradient(135deg,#dc2626,#ef4444)" }}>
+                          {escalationResubmitLoading
+                            ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                            : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+                          {escalationResubmitLoading ? "Resubmitting..." : "Resubmit for Sign-off"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {canCancel && (
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                     onClick={handleCancel} disabled={cancelLoading}
