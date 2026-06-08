@@ -19,11 +19,33 @@ function ciStartsWithPlant(value: string | null | undefined) {
   return plant ? { startsWith: plant, mode: "insensitive" as const } : undefined;
 }
 
-// Typo-immune: match on the storage-description code after " - " (e.g. "DIMO 800")
-// so "Mercedes" vs "Mercedeze" differences in user defaultLocation don't break lookups.
-function ciContainsCode(value: string | null | undefined) {
-  const code = value?.trim().split(" - ").slice(1).join(" - ").trim() ?? "";
-  return code ? { contains: code, mode: "insensitive" as const } : undefined;
+// Resolve a location label to its SAP plant code via the LocationOption table,
+// then return all Security Officers whose defaultLocation resolves to the same plant code.
+// Falls back to ciStartsWithPlant if the location is not in the LocationOption table.
+async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string }[]> {
+  if (!fromLoc) return prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+
+  const allOpts = await prisma.locationOption.findMany();
+  const needle = fromLoc.trim().toLowerCase();
+  const srcOpt = allOpts.find(
+    (o) => `${o.plantDescription} - ${o.storageDescription}`.toLowerCase() === needle
+  );
+
+  if (!srcOpt) {
+    return prisma.user.findMany({
+      where: { role: "SECURITY_OFFICER" as any, defaultLocation: ciStartsWithPlant(fromLoc) },
+    });
+  }
+
+  // Match SOs whose defaultLocation also resolves to the same plant code
+  const allSOs = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
+  return allSOs.filter((so) => {
+    const soLower = (so.defaultLocation ?? "").toLowerCase();
+    const soOpt = allOpts.find(
+      (o) => `${o.plantDescription} - ${o.storageDescription}`.toLowerCase() === soLower
+    );
+    return soOpt?.plantCode === srcOpt.plantCode;
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -79,10 +101,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       // Security Officers are only notified for non-CD passes — CD uses initiator print to bypass security
       if (!isCdPass) {
-        const securityWhere = gatePass.fromLocation
-          ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
-          : { role: "SECURITY_OFFICER" as any };
-        const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+        const securityOfficers = await findSOsAtSamePlant(gatePass.fromLocation as string | null);
         if (securityOfficers.length > 0) {
           await prisma.notification.createMany({
             data: securityOfficers.map((s: { id: string }) => ({
@@ -146,10 +165,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         },
       });
 
-      const securityWhere = gatePass.fromLocation
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: gatePass.fromLocation }
-        : { role: "SECURITY_OFFICER" as any };
-      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+      const securityOfficers = await findSOsAtSamePlant(gatePass.fromLocation as string | null);
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
           data: securityOfficers.map((s: { id: string }) => ({
@@ -276,10 +292,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     );
     if (needsSecurityNotify) {
       const fromLoc = gatePass.fromLocation as string | null;
-      const securityWhere = fromLoc
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciContainsCode(fromLoc) }
-        : { role: "SECURITY_OFFICER" as any };
-      const securityOfficers = await prisma.user.findMany({ where: securityWhere });
+      const securityOfficers = await findSOsAtSamePlant(fromLoc);
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
           data: securityOfficers.map((s: { id: string }) => ({
@@ -870,9 +883,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // If NO:  skip to GATE_OUT directly and notify destination SO + Initiators
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {
       const fromLoc = gatePass.fromLocation as string | null;
-      const sourceSOs = fromLoc
-        ? await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) } })
-        : [];
+      const sourceSOs = await findSOsAtSamePlant(fromLoc);
       const bypassSourceSecurity = true;
 
       if (!bypassSourceSecurity && sourceSOs.length > 0) {
@@ -1302,10 +1313,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Notify Security Officers at fromLocation
     const fromLoc = gatePass.fromLocation as string | null;
-    const secWhere = fromLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) }
-      : { role: "SECURITY_OFFICER" as any };
-    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    const secOfficers = await findSOsAtSamePlant(fromLoc);
     if (secOfficers.length > 0) {
       await prisma.notification.createMany({
         data: secOfficers.map((s: { id: string }) => ({
@@ -1456,10 +1464,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (newStatus === "APPROVED") {
       const fromLoc = gatePass.fromLocation as string | null;
-      const secWhere = fromLoc
-        ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(fromLoc) }
-        : { role: "SECURITY_OFFICER" as any };
-      const secOfficers = await prisma.user.findMany({ where: secWhere });
+      const secOfficers = await findSOsAtSamePlant(fromLoc);
       if (secOfficers.length > 0) {
         await prisma.notification.createMany({
           data: secOfficers.map((s: { id: string }) => ({
