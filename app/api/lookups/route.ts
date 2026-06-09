@@ -188,12 +188,12 @@ export async function GET(req: NextRequest) {
           const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
           if (!value) continue;
 
-          // Match by explicit locationType stored in DB, or by description-based inference
+          // Match by explicit locationType stored in DB, or by exact description inference
           const inferredType = (() => {
             if (dbloc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
-            const text = `${dbloc.plantDescription} ${storageDesc}`.toLowerCase();
-            if (/(promo|promotion|campaign|event)/.test(text)) return "PROMOTION";
-            if (/(finan|finance|leasing|lease|bank|loan|credit)/.test(text)) return "FINANCE";
+            const desc = storageDesc.trim().toLowerCase();
+            if (desc === "promo location") return "PROMOTION";
+            if (desc === "finan institute" || desc === "financial instit" || desc === "financial institute") return "FINANCE";
             return "DIMO";
           })();
           if (dbloc.locationType !== locationType && inferredType !== locationType) continue;

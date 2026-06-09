@@ -1237,7 +1237,7 @@ export default function CreateGatePassPage() {
   }, [status, locationType]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !locationType || !selectedVehicleDetail?.matnr) return;
+    if (status !== "authenticated" || !locationType) return;
     void fetchLookup("location", "", locationType);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType, selectedVehicleDetail?.matnr]);
@@ -3888,7 +3888,7 @@ export default function CreateGatePassPage() {
                     .map(({ value: v, label: lbl }) => (
                       <label key={v || "other"} className="flex items-center gap-2 cursor-pointer">
                         <div
-                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); }}
+                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); setLookupOptions(prev => ({ ...prev, location: [] })); }}
                           onMouseDown={() => {
                             if (ltBulkMode) setLtBulkVehicles((prev) => prev.map((vehicle) => ({ ...vehicle, toLocation: "" })));
                           }}
