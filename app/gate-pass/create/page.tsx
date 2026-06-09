@@ -1092,17 +1092,9 @@ export default function CreateGatePassPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rejectedId, isRejectEditMode, router, session, status]);
 
-  // For ASO: auto-select After Sales tab and force srMode to "out"
+  // Keep srMode="out" for ASO when they are on the After Sales tab
   useEffect(() => {
-    if (session?.user?.role === "AREA_SALES_OFFICER") {
-      setPassType("AFTER_SALES");
-      setSrMode("out");
-    }
-  }, [session?.user?.role]);
-
-  // Keep srMode="out" for ASO even if passType gets reset
-  useEffect(() => {
-    if (session?.user?.role === "AREA_SALES_OFFICER") setSrMode("out");
+    if (session?.user?.role === "AREA_SALES_OFFICER" && passType === "AFTER_SALES") setSrMode("out");
   }, [session?.user?.role, passType]);
 
 
@@ -3888,7 +3880,7 @@ export default function CreateGatePassPage() {
                   <div className="flex flex-wrap gap-4">
                     {([
                       { value: "DEALER", label: "Dealer" },
-                      { value: "DIMO", label: "DIMO", asoHidden: true },
+                      { value: "DIMO", label: "DIMO" },
                       { value: "PROMOTION", label: "Promotion" },
                       { value: "FINANCE", label: "Finance Institution" },
                     ] as { value: LocationType | ""; label: string; asoHidden?: boolean }[])
