@@ -11,6 +11,14 @@ function normalize(text: string) {
   return text.trim();
 }
 
+function inferLocationType(loc: { storageLocation: string; plantDescription: string; storageDescription: string }): string {
+  if (loc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
+  const text = `${loc.plantDescription} ${loc.storageDescription}`.toLowerCase();
+  if (/(promo|promotion|campaign|event)/.test(text)) return "PROMOTION";
+  if (/(finan|finance|leasing|lease|bank|loan|credit)/.test(text)) return "FINANCE";
+  return "DIMO";
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,18 +45,29 @@ export async function GET(req: NextRequest) {
         fields.includes("carrierRegNo") ? prisma.carrierOption.findMany({ orderBy: { registrationNo: "asc" }, take: 50 }) : Promise.resolve([]),
       ]);
 
-      // Sync SAP-derived locations to DB so Gate IN can resolve destination codes
-      // even when no vehicle is currently parked at that location in SAP.
+      // Sync SAP-derived locations to DB with inferred locationType so the DB fallback
+      // can find non-DIMO destinations even when no vehicle is currently parked there.
+      // Using upsert (not createMany) so existing records with null locationType are also updated.
       if (apiLocations.length > 0) {
-        prisma.locationOption.createMany({
-          data: apiLocations.map((loc) => ({
-            plantCode: loc.plantCode,
-            plantDescription: loc.plantDescription,
-            storageLocation: loc.storageLocation,
-            storageDescription: loc.storageDescription,
-          })),
-          skipDuplicates: true,
-        }).catch(() => { /* non-critical */ });
+        Promise.all(
+          apiLocations.map((loc) =>
+            prisma.locationOption.upsert({
+              where: { plantCode_storageLocation: { plantCode: loc.plantCode, storageLocation: loc.storageLocation } },
+              create: {
+                plantCode: loc.plantCode,
+                plantDescription: loc.plantDescription,
+                storageLocation: loc.storageLocation,
+                storageDescription: loc.storageDescription,
+                locationType: inferLocationType(loc),
+              },
+              update: {
+                plantDescription: loc.plantDescription,
+                storageDescription: loc.storageDescription,
+                locationType: inferLocationType(loc),
+              },
+            }).catch(() => { /* non-critical */ })
+          )
+        ).catch(() => { /* non-critical */ });
       }
 
       const locations = filterApiLocations(apiLocations, "", locType);
