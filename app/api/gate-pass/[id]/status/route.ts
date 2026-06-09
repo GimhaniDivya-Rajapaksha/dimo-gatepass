@@ -628,6 +628,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     // Notify destination security, initiators, and plant ASOs for Location Transfer.
+    let liveLocationUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
+    let liveLocationUpdateError: string | null = null;
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
@@ -696,15 +698,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           }
 
           if (targetLocation) {
-            await updateVehiclePlantLocation({
+            liveLocationUpdate = await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
               destination: targetLocation,
               sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
             });
+            console.log("[security_gate_out] SAP location updated:", liveLocationUpdate.message);
           } else {
+            liveLocationUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
             console.warn("[security_gate_out] no matching SAP plant location for:", toLoc);
           }
         } catch (error) {
+          liveLocationUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
           console.error("[security_gate_out] SAP location update failed:", error);
         }
       }
@@ -764,7 +769,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    return NextResponse.json({ gatePass: updated });
+    return NextResponse.json({ gatePass: updated, liveLocationUpdate, liveLocationUpdateError });
   }
 
   // Print Gate OUT: initiator printing the gate pass counts as Gate OUT confirmation.
@@ -812,6 +817,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     // For LT: notify destination security + initiators that vehicle is en route
+    let printLiveUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
+    let printLiveUpdateError: string | null = null;
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
@@ -868,21 +875,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           }
 
           if (targetLocation) {
-            await updateVehiclePlantLocation({
+            printLiveUpdate = await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
               destination: targetLocation,
               sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
             });
+            console.log("[print_gate_out] SAP location updated:", printLiveUpdate.message);
           } else {
+            printLiveUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
             console.warn("[print_gate_out] no matching SAP plant location for:", toLoc);
           }
         } catch (error) {
+          printLiveUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
           console.error("[print_gate_out] SAP location update failed:", error);
         }
       }
     }
 
-    return NextResponse.json({ gatePass: updated });
+    return NextResponse.json({ gatePass: updated, liveLocationUpdate: printLiveUpdate, liveLocationUpdateError: printLiveUpdateError });
   }
 
   if (action === "gate_out") {
