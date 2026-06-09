@@ -76,7 +76,9 @@ model GatePass {
   chassis        String?
   make           String?
 
-  toLocation     String?
+  toLocation        String?
+  toPlantCode       String?
+  toStorageLocation String?
   arrivalDate    String?
   arrivalTime    String?
 

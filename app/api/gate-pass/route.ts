@@ -394,6 +394,8 @@ export async function POST(req: NextRequest) {
     chassis: body.chassis || null,
     make: body.make || null,
     toLocation: body.toLocation || null,
+    toPlantCode: body.toPlantCode || null,
+    toStorageLocation: body.toStorageLocation || null,
     arrivalDate: body.arrivalDate || null,
     arrivalTime: body.arrivalTime || null,
     vehicleDetails: body.vehicleDetails || null,
