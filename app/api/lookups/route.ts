@@ -127,9 +127,53 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ options: filterApiLocations(options, q, locationType).slice(0, take) });
       }
 
-      const apiLocations = await fetchPlantLocationOptions().catch(() => []);
-      const options = filterApiLocations(apiLocations, q, locationType).slice(0, take);
+      const isNonDimo = locationType === "PROMOTION" || locationType === "FINANCE" || locationType === "DEALER";
+      const [apiLocations, dbRows] = await Promise.all([
+        fetchPlantLocationOptions().catch(() => []),
+        isNonDimo ? prisma.locationOption.findMany() : Promise.resolve([]),
+      ]);
 
+      // SAP live — filtered by type + query
+      const filteredApi = filterApiLocations(apiLocations, q, locationType);
+      const apiKeys = new Set(filteredApi.map((l) => `${l.plantCode}|${l.storageLocation}`));
+
+      // DB fallback for non-DIMO types: adds locations that are in the DB (from prior syncs or manual adds)
+      // but currently have no vehicles in SAP so they're invisible in the live feed.
+      const dbAdditions: typeof filteredApi = [];
+      if (isNonDimo) {
+        for (const dbloc of dbRows) {
+          const key = `${dbloc.plantCode}|${dbloc.storageLocation}`;
+          if (apiKeys.has(key)) continue;
+          const storageDesc = dbloc.storageDescription || dbloc.storageLocation;
+          const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
+          if (!value) continue;
+
+          // Match by explicit locationType stored in DB, or by description-based inference
+          const inferredType = (() => {
+            if (dbloc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
+            const text = `${dbloc.plantDescription} ${storageDesc}`.toLowerCase();
+            if (/(promo|promotion|campaign|event)/.test(text)) return "PROMOTION";
+            if (/(finan|finance|leasing|lease|bank|loan|credit)/.test(text)) return "FINANCE";
+            return "DIMO";
+          })();
+          if (dbloc.locationType !== locationType && inferredType !== locationType) continue;
+
+          if (q && ![value, dbloc.plantCode, dbloc.storageLocation].join(" ").toLowerCase().includes(q.toLowerCase())) continue;
+
+          dbAdditions.push({
+            id: key,
+            value,
+            label: value,
+            plantCode: dbloc.plantCode,
+            plantDescription: dbloc.plantDescription,
+            storageLocation: dbloc.storageLocation,
+            storageDescription: storageDesc,
+            source: "db" as const,
+          });
+        }
+      }
+
+      const options = [...filteredApi, ...dbAdditions].slice(0, take);
       return NextResponse.json({ options });
     }
 
@@ -402,16 +446,30 @@ export async function POST(req: NextRequest) {
 
     const storageDescRaw = normalize(body.storageDescription ?? "");
     const storageDescription = storageDescRaw || (locationType === "PROMOTION" ? "Promo Location" : "Finan Institute");
-    const plantCode = plantDescription.split(/\s+/).map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 6);
+
+    // Use real SAP codes if provided by the caller; otherwise generate placeholder codes
+    const realPlantCode = normalize(body.plantCode ?? "").toUpperCase();
+    const realStorageLocation = normalize(body.storageLocation ?? "").toUpperCase();
+
+    let plantCode: string;
+    let storageLocation: string;
 
     try {
-      const existing = await prisma.locationOption.findMany({
-        where: { plantCode },
-        orderBy: { storageLocation: "desc" },
-        take: 1,
-      });
-      const lastNum = existing.length > 0 ? (parseInt(existing[0].storageLocation.replace(/\D/g, ""), 10) || 99) : 99;
-      const storageLocation = `S${lastNum + 1}`;
+      if (realPlantCode && realStorageLocation) {
+        // Caller supplied real SAP Werks + Lgort codes — use them directly
+        plantCode = realPlantCode;
+        storageLocation = realStorageLocation;
+      } else {
+        // Generate placeholder codes (description-lookup only; SAP writes will fail)
+        plantCode = realPlantCode || plantDescription.split(/\s+/).map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 6);
+        const existing = await prisma.locationOption.findMany({
+          where: { plantCode },
+          orderBy: { storageLocation: "desc" },
+          take: 1,
+        });
+        const lastNum = existing.length > 0 ? (parseInt(existing[0].storageLocation.replace(/\D/g, ""), 10) || 99) : 99;
+        storageLocation = `S${lastNum + 1}`;
+      }
 
       const created = await prisma.locationOption.create({
         data: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
