@@ -53,7 +53,7 @@ async function getCashiersForLocation(fromLocation: string | null) {
   const plantPrefix = fromLocation ? fromLocation.split(" - ")[0].trim() : null;
   if (plantPrefix) {
     const located = await prisma.user.findMany({
-      where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix } },
+      where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
     });
     if (located.length > 0) return located;
   }
