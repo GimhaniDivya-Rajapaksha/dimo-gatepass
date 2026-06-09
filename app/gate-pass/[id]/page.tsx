@@ -1341,20 +1341,6 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {isInitiatorView && (
-            <button type="button" onClick={(e) => {
-                e.stopPropagation();
-                if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
-                  setShowSapConfirm(true);
-                } else {
-                  void handlePrintGatePass();
-                }
-              }}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
-              style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
-              Print Gate Pass
-            </button>
-            )}
           </div>{/* end flex gap-3 */}
 
           {/* ── INITIATOR: Print Ready banner (APPROVED = all checks done) ── */}
