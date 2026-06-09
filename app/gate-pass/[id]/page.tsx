@@ -325,6 +325,7 @@ function InitiatorGatePassDetailPageInner() {
   const [data, setData] = useState<GatePassDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [sapWriteWarning, setSapWriteWarning] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -419,6 +420,11 @@ function InitiatorGatePassDetailPageInner() {
         if (res.ok) {
           const result = await res.json();
           setData((prev) => prev ? { ...prev, status: result.gatePass.status, departureDate: result.gatePass.departureDate, departureTime: result.gatePass.departureTime } : prev);
+          if (result.liveLocationUpdateError) {
+            setSapWriteWarning(`SAP location update failed: ${result.liveLocationUpdateError}`);
+          } else if (result.liveLocationUpdate?.currentLocation) {
+            setSapWriteWarning(null);
+          }
         }
       } catch {
         // Continue to print even if the status update fails
@@ -1159,6 +1165,12 @@ function InitiatorGatePassDetailPageInner() {
 
         {error && (
           <div className="mb-4 px-4 py-3 rounded-xl text-sm no-print" style={{ background: "#fef2f2", color: "#991b1b" }}>{error}</div>
+        )}
+
+        {sapWriteWarning && (
+          <div className="mb-4 px-4 py-3 rounded-xl text-sm no-print" style={{ background: "#fff7ed", color: "#9a3412", border: "1px solid #fed7aa" }}>
+            <strong>SAP Write Warning:</strong> {sapWriteWarning}
+          </div>
         )}
 
         {/* Approve result flash */}
