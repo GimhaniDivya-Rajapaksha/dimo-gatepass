@@ -85,11 +85,13 @@ function buildJsonHeaders(): HeadersInit {
 }
 
 function inferType(option: LocationOption): "PROMOTION" | "FINANCE" | "DEALER" | "DIMO" {
-  // D-prefix storageLocation = Dealer allocation (matches DB seed rule)
+  // D-prefix storageLocation = Dealer allocation (D001..D047)
   if (option.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
-  const text = `${option.plantDescription} ${option.storageDescription}`.toLowerCase();
-  if (/(promo|promotion|campaign|event)/.test(text)) return "PROMOTION";
-  if (/(finan|finance|leasing|lease|bank|loan|credit)/.test(text)) return "FINANCE";
+  // S-prefix: classify by exact SAP LgortDesc (storageDescription only — never plantDescription)
+  const desc = option.storageDescription.trim().toLowerCase();
+  if (desc === "promo location") return "PROMOTION";
+  if (desc === "finan institute" || desc === "financial instit" || desc === "financial institute") return "FINANCE";
+  // All other S-prefix locations (vehicle parks, showrooms, TATA Parts, oil stores, etc.) → DIMO
   return "DIMO";
 }
 

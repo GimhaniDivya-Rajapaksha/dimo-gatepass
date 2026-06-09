@@ -11,11 +11,11 @@ function normalize(text: string) {
   return text.trim();
 }
 
-function inferLocationType(loc: { storageLocation: string; plantDescription: string; storageDescription: string }): string {
+function inferLocationType(loc: { storageLocation: string; storageDescription: string }): string {
   if (loc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
-  const text = `${loc.plantDescription} ${loc.storageDescription}`.toLowerCase();
-  if (/(promo|promotion|campaign|event)/.test(text)) return "PROMOTION";
-  if (/(finan|finance|leasing|lease|bank|loan|credit)/.test(text)) return "FINANCE";
+  const desc = loc.storageDescription.trim().toLowerCase();
+  if (desc === "promo location") return "PROMOTION";
+  if (desc === "finan institute" || desc === "financial instit" || desc === "financial institute") return "FINANCE";
   return "DIMO";
 }
 
