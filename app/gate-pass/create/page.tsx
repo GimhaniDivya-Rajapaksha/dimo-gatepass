@@ -161,6 +161,8 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
   // ADD form state
   const [addPlant, setAddPlant] = useState("");
   const [addLocation, setAddLocation] = useState("");
+  const [addPlantCode, setAddPlantCode] = useState("");
+  const [addStorageLocation, setAddStorageLocation] = useState("");
   const [plantDropOpen, setPlantDropOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -197,13 +199,20 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
     setAdding(true); setAddError("");
     const res = await fetch("/api/lookups", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ field: "location", plantDescription: addPlant.trim(), storageDescription: addLocation.trim(), locationType }),
+      body: JSON.stringify({
+        field: "location",
+        plantDescription: addPlant.trim(),
+        storageDescription: addLocation.trim(),
+        locationType,
+        ...(addPlantCode.trim() ? { plantCode: addPlantCode.trim() } : {}),
+        ...(addStorageLocation.trim() ? { storageLocation: addStorageLocation.trim() } : {}),
+      }),
     });
     const data: { option?: LookupOption; error?: string } = await res.json();
     if (data.option) {
       setOptions(prev => [...prev, data.option!]);
       onNewLocation?.(data.option!);
-      setAddPlant(""); setAddLocation(""); setShowAdd(false);
+      setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setShowAdd(false);
     } else { setAddError(data.error ?? "Failed to add"); }
     setAdding(false);
   }
@@ -234,7 +243,7 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
           <div className="flex items-center border-b px-3 py-2 gap-2" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
             <span className="flex-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Plant Name</span>
             <span className="w-24 text-xs font-semibold uppercase tracking-wide text-right" style={{ color: "var(--text-muted)" }}>Location</span>
-            <button type="button" onClick={() => { setShowAdd(s => !s); setAddError(""); setAddPlant(""); setAddLocation(""); setPlantDropOpen(false); }}
+            <button type="button" onClick={() => { setShowAdd(s => !s); setAddError(""); setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setPlantDropOpen(false); }}
               className="text-xs px-3 py-1 rounded-lg text-white font-bold flex-shrink-0" style={{ background: "#16a34a", minWidth: "52px" }}>
               ADD
             </button>
@@ -295,6 +304,30 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
                 className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
                 style={{ borderColor: addError && !addLocation ? "#f87171" : "var(--border)", background: "var(--surface)", color: "var(--text)" }}
               />
+              {/* SAP codes — required for SAP location write to work */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xs mb-1 font-medium" style={{ color: "var(--text-muted)" }}>SAP Plant Code <span className="text-red-500">*</span></p>
+                  <input
+                    type="text" value={addPlantCode}
+                    onChange={e => { setAddPlantCode(e.target.value.toUpperCase()); setAddError(""); }}
+                    placeholder="e.g. 1000"
+                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                    style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
+                  />
+                </div>
+                <div>
+                  <p className="text-xs mb-1 font-medium" style={{ color: "var(--text-muted)" }}>SAP Storage Location <span className="text-red-500">*</span></p>
+                  <input
+                    type="text" value={addStorageLocation}
+                    onChange={e => { setAddStorageLocation(e.target.value.toUpperCase()); setAddError(""); }}
+                    placeholder="e.g. PR01"
+                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                    style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
+                  />
+                </div>
+              </div>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Get SAP codes from your TechLead — required for SAP location transfer to work.</p>
               {addError && <p className="text-red-500 text-xs">{addError}</p>}
               <div className="flex gap-2">
                 <button type="button" onClick={() => void handleAdd()} disabled={adding}
@@ -302,7 +335,7 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
                   style={{ background: "#16a34a" }}>
                   {adding ? "…" : "Save"}
                 </button>
-                <button type="button" onClick={() => { setShowAdd(false); setAddPlant(""); setAddLocation(""); setAddError(""); }}
+                <button type="button" onClick={() => { setShowAdd(false); setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setAddError(""); }}
                   className="px-4 py-1.5 rounded-lg text-sm border"
                   style={{ borderColor: "var(--border)", color: "var(--text)" }}>
                   Cancel
