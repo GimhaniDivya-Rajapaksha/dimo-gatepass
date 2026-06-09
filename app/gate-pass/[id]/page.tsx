@@ -1,5 +1,5 @@
 "use client";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import TimePicker from "@/components/ui/TimePicker";
@@ -315,6 +315,8 @@ function hasDisplayValue(value?: string | null) {
 function InitiatorGatePassDetailPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromPrintIcon = searchParams.get("print") === "true";
   const printRef = useRef<HTMLDivElement>(null);
 
   const { data: session } = useSession();
@@ -1341,6 +1343,23 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {isInitiatorView && fromPrintIcon && (
+              <button type="button" onClick={(e) => {
+                  e.stopPropagation();
+                  if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
+                    setShowSapConfirm(true);
+                  } else {
+                    void handlePrintGatePass();
+                  }
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
+                style={{ background: "var(--surface)", borderColor: "#10b981", color: "#10b981" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Print Gate Pass
+              </button>
+            )}
           </div>{/* end flex gap-3 */}
 
           {/* ── INITIATOR: Print Ready banner (APPROVED = all checks done) ── */}

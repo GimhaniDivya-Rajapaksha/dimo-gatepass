@@ -380,8 +380,7 @@ function GatePassListPageInner() {
 
   async function handlePrint(p: GatePass) {
     setPrintingId(p.id);
-    // Navigate to detail page — SAP write happens only when user confirms via popup on detail page
-    router.push(`/gate-pass/${p.id}`);
+    router.push(`/gate-pass/${p.id}?print=true`);
     setTimeout(() => setPrintingId(null), 500);
   }
 
