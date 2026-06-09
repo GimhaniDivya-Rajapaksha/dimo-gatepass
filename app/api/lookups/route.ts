@@ -123,13 +123,15 @@ export async function GET(req: NextRequest) {
 
         const seen = new Set<string>();
         const options: LocationOption[] = [];
-        for (const row of allRows.filter(r => r.materialNo && r.materialNo.toUpperCase() === matnr.toUpperCase())) {
+
+        // Use ALL rows from /plant (MARD join exposes every valid plant/sloc regardless
+        // of which material currently has stock there — not just rows matching matnr).
+        for (const row of allRows) {
           if (!row.plantDescription) continue;
-          // Fall back to storageLocation code when SAP leaves LgortDesc blank
           const id = [row.plantCode, row.storageLocation].join("|");
           if (seen.has(id)) continue;
-
           seen.add(id);
+
           const dbLoc = dbByKey.get(id);
           const plantDescription = dbLoc?.plantDescription || row.plantDescription;
           const storageDesc = dbLoc?.storageDescription || row.storageDescription || row.storageLocation;
@@ -143,6 +145,25 @@ export async function GET(req: NextRequest) {
             source: "api",
           });
         }
+
+        // DB fallback — locations that are in DB (from prior syncs) but currently have
+        // no vehicles in /plant so they don't appear in the live feed.
+        for (const dbloc of dbLocs) {
+          const key = `${dbloc.plantCode}|${dbloc.storageLocation}`;
+          if (seen.has(key)) continue;
+          const storageDesc = dbloc.storageDescription || dbloc.storageLocation;
+          const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
+          if (!value) continue;
+          options.push({
+            id: key, value, label: value,
+            plantCode: dbloc.plantCode,
+            plantDescription: dbloc.plantDescription,
+            storageLocation: dbloc.storageLocation,
+            storageDescription: storageDesc,
+            source: "db" as const,
+          });
+        }
+
         return NextResponse.json({ options: filterApiLocations(options, q, locationType).slice(0, take) });
       }
 
