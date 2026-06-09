@@ -460,7 +460,6 @@ export default function SecurityGateDashboard() {
 
   const [outPasses,        setOutPasses]        = useState<Pass[]>([]);
   const [inPasses,         setInPasses]         = useState<Pass[]>([]);
-  const [draftPasses,      setDraftPasses]      = useState<Pass[]>([]);
   const [releasedToday,    setReleasedToday]    = useState(0);
   const [clearedInToday,   setClearedInToday]   = useState(0);
   const [loading,          setLoading]          = useState(true);
@@ -556,8 +555,6 @@ export default function SecurityGateDashboard() {
       // Cleared IN Today: vehicles that ARRIVED at this gate and Gate IN was confirmed today.
       // toLocQ because the vehicle's toLocation = Security's gate.
       const clearedData            = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
-      const draftData              = await fetchJson("/api/gate-pass?status=DRAFT&limit=50");
-      setDraftPasses(draftData.passes ?? []);
 
       // Server already scoped by location — filter by pass type/subtype
       const approvedAll: Pass[] = outData.passes ?? [];
@@ -808,41 +805,6 @@ export default function SecurityGateDashboard() {
           </p>
         )}
       </div>
-
-      {/* ── DRAFT passes pending completion ── */}
-      {draftPasses.length > 0 && (
-        <div className="rounded-2xl border mb-6 overflow-hidden" style={{ background: "var(--surface)", borderColor: "#f59e0b80" }}>
-          <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: "var(--border)", background: "#fffbeb" }}>
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
-              <p className="text-sm font-bold" style={{ color: "#92400e" }}>Passes Awaiting Completion</p>
-              <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>{draftPasses.length}</span>
-            </div>
-            <p className="text-xs" style={{ color: "#b45309" }}>Initiator/Service Advisor has been notified</p>
-          </div>
-          <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
-            {draftPasses.map((p) => {
-              const dir = (p as any).gateDirection as string | null;
-              const typeLabel = p.passType === "AFTER_SALES" ? "After Sales" : p.passType === "LOCATION_TRANSFER" ? "Location Transfer" : "Customer Delivery";
-              return (
-                <div key={p.id} className="flex items-center gap-4 px-5 py-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold font-mono" style={{ color: "var(--accent)" }}>{p.parentPass?.gatePassNumber ?? p.gatePassNumber}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>{typeLabel}</span>
-                      {dir && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: dir === "IN" ? "#f0fdfa" : "#eef2ff", color: dir === "IN" ? "#0f766e" : "#3730a3" }}>Gate {dir}</span>}
-                    </div>
-                    <p className="text-sm font-semibold font-mono mt-0.5" style={{ color: "var(--text)" }}>{p.vehicle}</p>
-                  </div>
-                  <span className="text-xs px-3 py-1.5 rounded-xl font-semibold" style={{ background: "#fef3c7", color: "#92400e" }}>Pending Completion</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {loading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

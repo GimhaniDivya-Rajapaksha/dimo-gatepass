@@ -72,8 +72,10 @@ export async function findApproversForLocationBrand(
   const hasVehicleBrand = Boolean(canonicalVehicleBrand(vehicleMake));
 
   if (selectedName) {
+    // Honor the explicit name selection regardless of location — only fall through to
+    // location-based routing if no approver with that name exists at all.
     const exact = (await findUsers({
-      ...baseWhere,
+      role: "APPROVER",
       name: { equals: selectedName, mode: "insensitive" },
     })).filter((approver) => brandMatches(approver.brand, vehicleMake));
     if (exact.length > 0) return exact;

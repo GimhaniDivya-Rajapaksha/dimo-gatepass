@@ -2,8 +2,9 @@ export type NavItem = {
   label: string;
   href: string;
   icon: React.ReactNode;
-  showDraftBadge?: boolean;    // shows live DRAFT count badge in sidebar
-  showOverrideBadge?: boolean; // shows live payment-override count badge in sidebar (APPROVER only)
+  showDraftBadge?: boolean;               // shows live DRAFT count badge in sidebar
+  showOverrideBadge?: boolean;            // shows live payment-override count badge in sidebar (APPROVER only)
+  showPendingCompletionBadge?: boolean;   // shows live DRAFT count badge in sidebar (SECURITY_OFFICER)
 };
 
 const DashboardIcon = () => (
@@ -66,6 +67,11 @@ const OrdersReportIcon = () => (
 const ArrivalsIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" />
+  </svg>
+);
+const PendingCompletionIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
   </svg>
 );
 
@@ -132,8 +138,9 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
   ],
   SECURITY_OFFICER: [
-    { label: "Gate IN / OUT", href: "/gate-pass/security-gate-out", icon: <BoxIcon /> },
-    { label: "Create Pass",  href: "/gate-pass/security-create",    icon: <ListIcon /> },
+    { label: "Gate IN / OUT",         href: "/gate-pass/security-gate-out",       icon: <BoxIcon /> },
+    { label: "Pending Completion",    href: "/gate-pass/pending-completion",       icon: <PendingCompletionIcon />, showPendingCompletionBadge: true },
+    { label: "Create Pass",           href: "/gate-pass/security-create",          icon: <ListIcon /> },
   ],
   SERVICE_ADVISOR: [
     { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
