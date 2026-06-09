@@ -20,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const body = await req.json();
   const {
-    toLocation, fromLocation, departureDate, departureTime,
+    toLocation, toPlantCode, toStorageLocation, fromLocation, departureDate, departureTime,
     arrivalDate, arrivalTime, approver, outReason, comments,
     passSubType, serviceJobNo, requestedBy,
     transportMode, companyName, carrierRegNo, driverName, driverNIC,
@@ -48,8 +48,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data: {
       status:        nextStatus,
       // For Gate IN drafts, preserve the already-set toLocation/fromLocation if body doesn't provide them
-      toLocation:    toLocation    || pass.toLocation    || null,
-      fromLocation:  fromLocation  || pass.fromLocation  || null,
+      toLocation:        toLocation        || pass.toLocation        || null,
+      toPlantCode:       toPlantCode       || pass.toPlantCode       || null,
+      toStorageLocation: toStorageLocation || pass.toStorageLocation || null,
+      fromLocation:      fromLocation      || pass.fromLocation      || null,
       departureDate: departureDate || null,
       departureTime: departureTime || null,
       arrivalDate:   arrivalDate   || null,

@@ -1837,6 +1837,8 @@ export default function CreateGatePassPage() {
       const draftPayload = isLtLike
         ? {
             toLocation: lt.toLocation || null,
+            toPlantCode: selectedLocationDetail?.plantCode || null,
+            toStorageLocation: selectedLocationDetail?.storageLocation || null,
             fromLocation: lt.fromLocation || null,
             departureDate: lt.departureDate || null,
             departureTime: lt.departureTime || null,
@@ -1904,6 +1906,7 @@ export default function CreateGatePassPage() {
       const resubmitPayload = isLtLike
         ? {
             toLocation: lt.toLocation || undefined,
+            ...(selectedLocationDetail ? { toPlantCode: selectedLocationDetail.plantCode, toStorageLocation: selectedLocationDetail.storageLocation } : {}),
             fromLocation: lt.fromLocation || undefined,
             outReason: lt.outReason || null,
             approver: lt.approver || null,
@@ -2004,6 +2007,8 @@ export default function CreateGatePassPage() {
           make: selectedVehicleDetail?.make || null,
           vehicleColor: selectedVehicleDetail?.colour || null,
           toLocation: lt.toLocation,
+          toPlantCode: selectedLocationDetail?.plantCode || null,
+          toStorageLocation: selectedLocationDetail?.storageLocation || null,
           fromLocation: lt.fromLocation || null,
           outReason: lt.outReason,
           approver: lt.approver,

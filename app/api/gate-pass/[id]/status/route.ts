@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation } from "@/lib/location-api";
+import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciLocation(value: string | null | undefined) {
@@ -667,20 +667,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // SAP: update vehicle location to destination now that source Security confirmed Gate OUT
       if (toLoc) {
         try {
-          const plantOptions = await fetchPlantLocationOptions().catch(() => []);
-          let targetLocation = findPlantLocationOption(plantOptions, toLoc);
-          if (!targetLocation) {
-            const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
-            targetLocation = findPlantLocationOption(
-              dbLocations.map((l) => ({
-                plantCode: l.plantCode,
-                plantDescription: l.plantDescription,
-                storageLocation: l.storageLocation,
-                storageDescription: l.storageDescription,
-              })),
-              toLoc
-            );
+          let targetLocation: PlantLocationTarget | null = null;
+
+          // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
+          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
+            targetLocation = {
+              plantCode: gatePass.toPlantCode,
+              plantDescription: gatePass.toLocation ?? "",
+              storageLocation: gatePass.toStorageLocation,
+              storageDescription: "",
+            };
+          } else {
+            // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
+            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+            targetLocation = findPlantLocationOption(plantOptions, toLoc);
+            if (!targetLocation) {
+              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+              targetLocation = findPlantLocationOption(
+                dbLocations.map((l) => ({
+                  plantCode: l.plantCode,
+                  plantDescription: l.plantDescription,
+                  storageLocation: l.storageLocation,
+                  storageDescription: l.storageDescription,
+                })),
+                toLoc
+              );
+            }
           }
+
           if (targetLocation) {
             await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
@@ -825,20 +839,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Only runs if initiator confirmed SAP write in the confirmation dialog (writeSap === true)
       if (writeSap !== false && toLoc) {
         try {
-          const plantOptions = await fetchPlantLocationOptions().catch(() => []);
-          let targetLocation = findPlantLocationOption(plantOptions, toLoc);
-          if (!targetLocation) {
-            const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
-            targetLocation = findPlantLocationOption(
-              dbLocations.map((l) => ({
-                plantCode: l.plantCode,
-                plantDescription: l.plantDescription,
-                storageLocation: l.storageLocation,
-                storageDescription: l.storageDescription,
-              })),
-              toLoc
-            );
+          let targetLocation: PlantLocationTarget | null = null;
+
+          // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
+          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
+            targetLocation = {
+              plantCode: gatePass.toPlantCode,
+              plantDescription: gatePass.toLocation ?? "",
+              storageLocation: gatePass.toStorageLocation,
+              storageDescription: "",
+            };
+          } else {
+            // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
+            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+            targetLocation = findPlantLocationOption(plantOptions, toLoc);
+            if (!targetLocation) {
+              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+              targetLocation = findPlantLocationOption(
+                dbLocations.map((l) => ({
+                  plantCode: l.plantCode,
+                  plantDescription: l.plantDescription,
+                  storageLocation: l.storageLocation,
+                  storageDescription: l.storageDescription,
+                })),
+                toLoc
+              );
+            }
           }
+
           if (targetLocation) {
             await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
@@ -1119,6 +1147,55 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    // SAP: confirm vehicle arrived at destination for Location Transfer passes.
+    // This is a safety-net write — security_gate_out already writes to SAP, but if that failed
+    // (e.g. legacy pass without stored codes and destination not in live SAP feed at that time),
+    // this ensures SAP is updated when the vehicle physically arrives.
+    if (gatePass.passType === "LOCATION_TRANSFER") {
+      const toLoc = gatePass.toLocation as string | null;
+      if (toLoc) {
+        try {
+          let targetLocation: PlantLocationTarget | null = null;
+
+          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
+            targetLocation = {
+              plantCode: gatePass.toPlantCode,
+              plantDescription: gatePass.toLocation ?? "",
+              storageLocation: gatePass.toStorageLocation,
+              storageDescription: "",
+            };
+          } else {
+            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+            targetLocation = findPlantLocationOption(plantOptions, toLoc);
+            if (!targetLocation) {
+              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+              targetLocation = findPlantLocationOption(
+                dbLocations.map((l) => ({
+                  plantCode: l.plantCode,
+                  plantDescription: l.plantDescription,
+                  storageLocation: l.storageLocation,
+                  storageDescription: l.storageDescription,
+                })),
+                toLoc
+              );
+            }
+          }
+
+          if (targetLocation) {
+            await updateVehiclePlantLocation({
+              identifiers: [gatePass.vehicle, gatePass.chassis],
+              destination: targetLocation,
+              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+            });
+          } else {
+            console.warn("[gate_in] no matching SAP plant location for:", toLoc);
+          }
+        } catch (error) {
+          console.error("[gate_in] SAP location update failed:", error);
+        }
+      }
+    }
+
     // SUB_OUT COMPLETED (ASO confirmed vehicle arrived at sub-location) → notify Initiator
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {
       await prisma.notification.create({
@@ -1152,7 +1229,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       resubmitNote,
       // All editable fields — initiator can correct any data before resubmitting
       vehicle, chassis, make, vehicleColor,
-      toLocation, fromLocation, outReason,
+      toLocation, toPlantCode, toStorageLocation, fromLocation, outReason,
       approver,
       departureDate, departureTime, arrivalDate, arrivalTime,
       transportMode, carrierName, carrierRegNo, companyName,
@@ -1171,8 +1248,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(chassis        !== undefined ? { chassis }        : {}),
         ...(make           !== undefined ? { make }           : {}),
         ...(vehicleColor   !== undefined ? { vehicleColor }   : {}),
-        ...(toLocation     ? { toLocation }     : {}),
-        ...(fromLocation   !== undefined ? { fromLocation }   : {}),
+        ...(toLocation         ? { toLocation }         : {}),
+        ...(toPlantCode        !== undefined ? { toPlantCode:        toPlantCode        || null } : {}),
+        ...(toStorageLocation  !== undefined ? { toStorageLocation:  toStorageLocation  || null } : {}),
+        ...(fromLocation       !== undefined ? { fromLocation }      : {}),
         ...(outReason      !== undefined ? { outReason }      : {}),
         ...(departureDate  ? { departureDate }  : {}),
         ...(departureTime  ? { departureTime }  : {}),
