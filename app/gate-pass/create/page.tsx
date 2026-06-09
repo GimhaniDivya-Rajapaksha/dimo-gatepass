@@ -971,7 +971,7 @@ export default function CreateGatePassPage() {
             fromLocation: pass.fromLocation ?? "",
             toLocation: pass.toLocation ?? "",
             outReason: pass.outReason ?? "",
-            approver: pass.approvedBy?.name ?? prev.approver,
+            approver: pass.intendedApprover ?? pass.approvedBy?.name ?? prev.approver,
             departureDate: pass.departureDate ?? "",
             departureTime: pass.departureTime ?? "",
             arrivalDate: pass.arrivalDate ?? "",
@@ -999,6 +999,7 @@ export default function CreateGatePassPage() {
             ...prev,
             vehicle: pass.vehicle ?? "",
             fromLocation: pass.fromLocation ?? "",
+            approver: pass.intendedApprover ?? "",
             departureDate: pass.departureDate ?? "",
             departureTime: pass.departureTime ?? "",
             companyName: pass.companyName ?? "",
@@ -1905,6 +1906,7 @@ export default function CreateGatePassPage() {
             toLocation: lt.toLocation || undefined,
             fromLocation: lt.fromLocation || undefined,
             outReason: lt.outReason || null,
+            approver: lt.approver || null,
             departureDate: lt.departureDate || undefined,
             departureTime: lt.departureTime || undefined,
             arrivalDate: lt.arrivalDate || null,
@@ -1934,6 +1936,7 @@ export default function CreateGatePassPage() {
             ...srCarrierMileage,
           }
         : {
+            approver: cd.approver || null,
             departureDate: cd.departureDate || undefined,
             departureTime: cd.departureTime || undefined,
             transportMode,

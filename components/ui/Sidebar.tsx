@@ -42,6 +42,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const [mounted, setMounted] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
   const [overrideCount, setOverrideCount] = useState(0);
+  const [pendingCompletionCount, setPendingCompletionCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
 
@@ -70,6 +71,19 @@ export default function Sidebar({ user, role }: SidebarProps) {
     };
     fetchOverrides();
     const id = setInterval(fetchOverrides, 60_000);
+    return () => clearInterval(id);
+  }, [role]);
+
+  useEffect(() => {
+    if (role !== "SECURITY_OFFICER") return;
+    const fetchPendingCompletion = () => {
+      fetch("/api/gate-pass?status=DRAFT&limit=1")
+        .then(r => r.json())
+        .then(d => setPendingCompletionCount(d.total ?? 0))
+        .catch(() => {});
+    };
+    fetchPendingCompletion();
+    const id = setInterval(fetchPendingCompletion, 60_000);
     return () => clearInterval(id);
   }, [role]);
 
@@ -178,7 +192,13 @@ export default function Sidebar({ user, role }: SidebarProps) {
                     {overrideCount}
                   </span>
                 )}
-                {isActive && !item.showDraftBadge && (
+                {item.showPendingCompletionBadge && pendingCompletionCount > 0 && (
+                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
+                    style={{ background: "#f59e0b", color: "#1c1400" }}>
+                    {pendingCompletionCount}
+                  </span>
+                )}
+                {isActive && !item.showDraftBadge && !item.showOverrideBadge && !item.showPendingCompletionBadge && (
                   <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>

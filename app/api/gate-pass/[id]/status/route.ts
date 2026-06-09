@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation } from "@/lib/location-api";
+import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciLocation(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -1152,6 +1153,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // All editable fields — initiator can correct any data before resubmitting
       vehicle, chassis, make, vehicleColor,
       toLocation, fromLocation, outReason,
+      approver,
       departureDate, departureTime, arrivalDate, arrivalTime,
       transportMode, carrierName, carrierRegNo, companyName,
       driverName, driverNIC, driverContact,
@@ -1187,15 +1189,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(insurance      !== undefined ? { insurance }      : {}),
         ...(garagePlate    !== undefined ? { garagePlate }    : {}),
         ...(requestedBy    !== undefined ? { requestedBy }    : {}),
+        ...(approver !== undefined ? { intendedApprover: (typeof approver === "string" ? approver.trim() || null : null) } : {}),
       },
     });
 
-    // Notify all approvers and admins
-    const [approvers, admins] = await Promise.all([
-      prisma.user.findMany({ where: { role: "APPROVER" } }),
+    // Notify only the (possibly new) intended approver + admins
+    const newIntendedApprover = (typeof approver === "string" ? approver.trim() : null) || gatePass.intendedApprover;
+    const [targetApprovers, admins] = await Promise.all([
+      findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make),
       prisma.user.findMany({ where: { role: "ADMIN" } }),
     ]);
-    const resubmitRecipients = [...approvers, ...admins];
+    const resubmitRecipients = [...targetApprovers, ...admins];
     if (resubmitRecipients.length > 0) {
       await prisma.notification.createMany({
         data: resubmitRecipients.map((a) => ({
