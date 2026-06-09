@@ -651,7 +651,7 @@ export async function POST(req: NextRequest) {
       const plateNo = (createData.vehicle as string) ?? "";
       const sapOrders = await fetchSapOrders(chassisNo, plateNo);
       const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
-      const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction"];
+      const immediateTerms = ["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"];
 
       if (active.length > 0) {
         await prisma.serviceOrder.createMany({
@@ -663,9 +663,9 @@ export async function POST(req: NextRequest) {
             isAssigned: false,
           })),
         });
-        hasImmediate = active.some((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()));
+        hasImmediate = active.some((o) => immediateTerms.includes((o.payTerm || o.payTermCode || "").toLowerCase().trim()));
         hasCredit = active.some((o) => {
-          const t = (o.payTerm || "").toLowerCase().trim();
+          const t = (o.payTerm || o.payTermCode || "").toLowerCase().trim();
           return t !== "" && !immediateTerms.includes(t);
         });
       }
