@@ -901,13 +901,113 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!canGateOut) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
+
+    // ASO-created Location Transfer: "Vehicle Go" slider
+    // Allowed by the creator OR the requestedBy person (if they are an ASO/INITIATOR in the app)
+    if (gatePass.passType === "LOCATION_TRANSFER" && gatePass.asoCreated) {
+      const isCreator = gatePass.createdById === session.user.id;
+      const isRequestedBy =
+        gatePass.requestedByEmail &&
+        session.user.email === gatePass.requestedByEmail &&
+        ["AREA_SALES_OFFICER", "INITIATOR"].includes(session.user.role ?? "");
+
+      if (!isCreator && !isRequestedBy) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (gatePass.status !== "APPROVED") {
+        return NextResponse.json({ error: "Gate pass must be APPROVED before release" }, { status: 400 });
+      }
+
+      const now = new Date();
+      const departureDate = now.toISOString().split("T")[0];
+      const departureTime = now.toTimeString().slice(0, 5);
+
+      const updated = await prisma.gatePass.update({
+        where: { id },
+        data: { status: "GATE_OUT", departureDate, departureTime },
+      });
+
+      // SAP write — uses toPlantCode + toStorageLocation
+      let liveLocationUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
+      let liveLocationUpdateError: string | null = null;
+      if (writeSap !== false && gatePass.toPlantCode && gatePass.toStorageLocation) {
+        try {
+          const targetLocation: PlantLocationTarget = {
+            plantCode: gatePass.toPlantCode,
+            plantDescription: gatePass.toLocation ?? "",
+            storageLocation: gatePass.toStorageLocation,
+            storageDescription: "",
+          };
+          liveLocationUpdate = await updateVehiclePlantLocation({
+            identifiers: [gatePass.vehicle, gatePass.chassis],
+            destination: targetLocation,
+            sapFallback: { internalNo: gatePass.sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+          });
+          console.log("[gate_out ASO LT] SAP location updated:", liveLocationUpdate.message);
+        } catch (error) {
+          liveLocationUpdateError = error instanceof Error ? error.message : "SAP location update failed.";
+          console.error("[gate_out ASO LT] SAP location update failed:", error);
+        }
+      }
+
+      // Notify creator + requestedBy person + destination ASOs/initiators
+      const notifyMap = new Map<string, { title: string; message: string }>();
+      const baseMsg = `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle released to ${gatePass.toLocation ?? "destination"}.`;
+
+      notifyMap.set(gatePass.createdById, {
+        title: "Vehicle Released — Gate Out Confirmed",
+        message: baseMsg,
+      });
+
+      // Notify requestedBy person if they are an app user
+      if (gatePass.requestedByEmail) {
+        const rbUser = await prisma.user.findUnique({ where: { email: gatePass.requestedByEmail }, select: { id: true } });
+        if (rbUser && rbUser.id !== gatePass.createdById) {
+          notifyMap.set(rbUser.id, { title: "Vehicle Released — Gate Out Confirmed", message: baseMsg });
+        }
+      }
+
+      // Notify destination ASOs and initiators
+      if (gatePass.toLocation) {
+        const destUsers = await prisma.user.findMany({
+          where: {
+            role: { in: ["AREA_SALES_OFFICER", "INITIATOR"] as any[] },
+            defaultLocation: ciStartsWithPlant(gatePass.toLocation),
+          },
+          select: { id: true, role: true },
+        });
+        for (const u of destUsers) {
+          if (!notifyMap.has(u.id)) {
+            notifyMap.set(u.id, {
+              title: "Incoming Vehicle — Confirm Arrival",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${gatePass.toLocation}. Open your dashboard to confirm when it arrives.`,
+            });
+          }
+        }
+      }
+
+      if (notifyMap.size > 0) {
+        await prisma.notification.createMany({
+          data: Array.from(notifyMap.entries()).map(([userId, n]) => ({
+            userId,
+            type: "GATE_PASS_RECEIVED",
+            title: n.title,
+            message: n.message,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+
+      return NextResponse.json({ gatePass: updated, liveLocationUpdate, liveLocationUpdateError });
+    }
+
     if (gatePass.createdById !== session.user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     if (gatePass.status !== "APPROVED") {
       return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
     }
-    // MAIN_OUT, LOCATION_TRANSFER, and CUSTOMER_DELIVERY passes must go through Security Officer directly
+    // MAIN_OUT, LOCATION_TRANSFER (non-ASO), and CUSTOMER_DELIVERY must go through Security Officer
     // MAIN_IN uses initiator_gate_in action (not gate_out)
     if (
       (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") ||

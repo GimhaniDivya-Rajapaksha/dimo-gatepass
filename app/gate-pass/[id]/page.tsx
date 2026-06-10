@@ -355,6 +355,13 @@ function InitiatorGatePassDetailPageInner() {
   const securityInTrackRef = useRef<HTMLDivElement>(null);
   const securityInStartXRef = useRef(0);
 
+  // ASO LT "Vehicle Go" slider state
+  const [asoLtSlidePos, setAsoLtSlidePos] = useState(0);
+  const [asoLtDragging, setAsoLtDragging] = useState(false);
+  const [asoLtConfirming, setAsoLtConfirming] = useState(false);
+  const asoLtTrackRef = useRef<HTMLDivElement>(null);
+  const asoLtStartXRef = useRef(0);
+
   // Service orders — fetched for AFTER_SALES MAIN_OUT in PENDING_APPROVAL (approver review)
   type ServiceOrder = { id: string; orderId: string; orderStatus: string; payTerm: string; isAssigned: boolean };
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
@@ -469,6 +476,40 @@ function InitiatorGatePassDetailPageInner() {
       setActionLoading(false);
       setError("Action failed. Please try again.");
     }
+  }
+
+  async function handleAsoLtGateOut() {
+    setAsoLtConfirming(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "gate_out", writeSap: true }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const result = await res.json();
+      setData((prev) => prev ? { ...prev, status: result.gatePass.status, departureDate: result.gatePass.departureDate, departureTime: result.gatePass.departureTime } : prev);
+      if (result.liveLocationUpdateError) {
+        setSapWriteWarning(`SAP location update failed: ${result.liveLocationUpdateError}`);
+      } else if (result.liveLocationUpdate?.currentLocation) {
+        setSapWriteWarning(null);
+      }
+      setDone(true);
+      setTimeout(() => router.push(role === "AREA_SALES_OFFICER" ? "/aso" : "/initiator"), 2000);
+    } catch {
+      setAsoLtConfirming(false);
+      setAsoLtSlidePos(0);
+      setError("Action failed. Please try again.");
+    }
+  }
+
+  function handleAsoLtSlide(clientX: number) {
+    const track = asoLtTrackRef.current;
+    if (!track) return;
+    const maxSlide = track.clientWidth - 64;
+    const newPos = Math.max(0, Math.min(clientX - asoLtStartXRef.current, maxSlide));
+    setAsoLtSlidePos(newPos);
+    if (newPos >= maxSlide * 0.85) void handleAsoLtGateOut();
   }
 
   async function handleApprove() {
@@ -724,6 +765,11 @@ function InitiatorGatePassDetailPageInner() {
   const pendingApproval = data.status === "PENDING_APPROVAL";
   // Check if current user created this pass (to determine gate_out eligibility)
   const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
+  // ASO LT: can operate the Vehicle Go slider if they created it OR are the requestedBy app user
+  const isAsoLtPass = (data as any).asoCreated === true && data.passType === "LOCATION_TRANSFER";
+  const isRequestedByUser = (data as any).requestedByEmail && session?.user?.email === (data as any).requestedByEmail &&
+    (role === "AREA_SALES_OFFICER" || role === "INITIATOR");
+  const canAsoLtSlide = isAsoLtPass && (isCreator || isRequestedByUser);
   // Security B confirms SUB_IN gate IN — Initiator/ASO do NOT confirm SUB_IN directly
   const canDirectGateIn = false;
   // MAIN_IN (Service/Repair) — vehicle arriving at DIMO, button label differs from outbound passes
@@ -1993,6 +2039,64 @@ function InitiatorGatePassDetailPageInner() {
                         <p className="text-sm font-bold" style={{ color: "#6d28d9" }}>Departure Confirmed — Awaiting Security Gate Release</p>
                         <p className="text-xs mt-0.5" style={{ color: "#7c3aed" }}>You confirmed vehicle departure. Security Officer will physically confirm Gate OUT at the gate.</p>
                       </div>
+                    </div>
+                  ) : data.status === "APPROVED" && canAsoLtSlide ? (
+                    // ASO-created LT — "Vehicle Go" slider (no Security Officer step)
+                    <div className="w-full">
+                      {asoLtConfirming ? (
+                        <div className="relative rounded-2xl overflow-hidden"
+                          style={{ height: 60, background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
+                          <div className="absolute bottom-3.5 left-4 right-4 flex gap-1.5">
+                            {Array.from({ length: 12 }).map((_, i) => (
+                              <div key={i} className="flex-1 h-px rounded-full" style={{ background: "rgba(255,255,255,0.25)" }} />
+                            ))}
+                          </div>
+                          <motion.div className="absolute bottom-2.5"
+                            animate={{ x: ["-40px", "400px"] }}
+                            transition={{ duration: 1.4, repeat: Infinity, ease: "easeIn" }}>
+                            <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+                          </motion.div>
+                          <div className="absolute inset-0 flex items-start justify-center pt-2">
+                            <span className="text-xs font-bold text-white/90 tracking-widest uppercase">Releasing Vehicle…</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          ref={asoLtTrackRef}
+                          className="relative rounded-2xl select-none overflow-hidden"
+                          style={{ height: 60, background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}
+                          onMouseMove={(e) => { if (asoLtDragging) handleAsoLtSlide(e.clientX); }}
+                          onMouseUp={() => { if (asoLtDragging) { setAsoLtDragging(false); setAsoLtSlidePos(0); } }}
+                          onMouseLeave={() => { if (asoLtDragging) { setAsoLtDragging(false); setAsoLtSlidePos(0); } }}
+                          onTouchMove={(e) => { if (asoLtDragging) handleAsoLtSlide(e.touches[0].clientX); }}
+                          onTouchEnd={() => { if (asoLtDragging) { setAsoLtDragging(false); setAsoLtSlidePos(0); } }}
+                        >
+                          <div className="absolute bottom-3.5 pointer-events-none flex gap-1" style={{ left: 68, right: 4 }}>
+                            {Array.from({ length: 10 }).map((_, i) => (
+                              <div key={i} className="flex-1 h-px rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
+                            ))}
+                          </div>
+                          <div className="absolute inset-y-0 left-0 rounded-2xl pointer-events-none"
+                            style={{ width: asoLtSlidePos + 60, background: "linear-gradient(90deg,rgba(255,255,255,0.18),rgba(255,255,255,0.05))", transition: asoLtDragging ? "none" : "width 0.12s" }} />
+                          <div className="absolute inset-0 flex items-center justify-center gap-1.5 pointer-events-none">
+                            <span className="text-xs font-bold tracking-widest uppercase text-white/80">Slide to Release Vehicle</span>
+                            <svg className="w-3.5 h-3.5 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            </svg>
+                          </div>
+                          <motion.div
+                            className="absolute top-1/2 -translate-y-1/2 w-[56px] h-[52px] rounded-2xl flex items-center justify-center cursor-grab active:cursor-grabbing"
+                            style={{ left: asoLtSlidePos, background: "rgba(255,255,255,0.2)", border: "1.5px solid rgba(255,255,255,0.4)", backdropFilter: "blur(8px)" }}
+                            onMouseDown={(e) => { setAsoLtDragging(true); asoLtStartXRef.current = e.clientX - asoLtSlidePos; }}
+                            onTouchStart={(e) => { setAsoLtDragging(true); asoLtStartXRef.current = e.touches[0].clientX - asoLtSlidePos; }}
+                          >
+                            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+                          </motion.div>
+                        </div>
+                      )}
+                      <p className="text-[10px] text-center mt-1.5" style={{ color: "var(--text-muted)" }}>
+                        Drag → right to confirm vehicle departure and write to SAP
+                      </p>
                     </div>
                   ) : data.status === "APPROVED" && isCreator && (data.passType === "LOCATION_TRANSFER" || data.passType === "CUSTOMER_DELIVERY") ? (
                     <div className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border"

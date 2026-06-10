@@ -343,10 +343,17 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
 
-  // AREA_SALES_OFFICER can only create AFTER_SALES sub-passes
   if (session.user.role === "AREA_SALES_OFFICER") {
-    if (body.passType !== "AFTER_SALES" || !["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
-      return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
+    if (body.passType === "LOCATION_TRANSFER") {
+      if (!body.approver) {
+        return NextResponse.json({ error: "Approver is required for ASO location transfers" }, { status: 400 });
+      }
+    } else if (body.passType === "AFTER_SALES") {
+      if (!["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
+        return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
+      }
+    } else {
+      return NextResponse.json({ error: "Unauthorized pass type for ASO" }, { status: 403 });
     }
   }
 
@@ -420,7 +427,10 @@ export async function POST(req: NextRequest) {
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
     fromLocation: body.fromLocation || (session.user as { defaultLocation?: string | null }).defaultLocation || null,
+    fromPlantCode: body.fromPlantCode || null,
+    fromStorageLocation: body.fromStorageLocation || null,
     sapVehicleId: body.sapVehicleId || null,
+    asoCreated: session.user.role === "AREA_SALES_OFFICER" && body.passType === "LOCATION_TRANSFER",
     createdById: session.user.id,
     // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
     ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),

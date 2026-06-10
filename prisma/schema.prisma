@@ -127,8 +127,11 @@ model GatePass {
   parentPassId      String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
   subPasses      GatePass[] @relation("SubPasses")
-  fromLocation   String?
-  sapVehicleId   String?
+  fromLocation        String?
+  fromPlantCode       String?
+  fromStorageLocation String?
+  sapVehicleId        String?
+  asoCreated          Boolean  @default(false)
 
   createdById    String
   createdBy      User           @relation("InitiatedBy", fields: [createdById], references: [id])

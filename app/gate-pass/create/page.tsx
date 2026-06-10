@@ -653,8 +653,12 @@ export default function CreateGatePassPage() {
   const [assignedApprover, setAssignedApprover] = useState<{ id: string; name: string } | null>(null);
   const [primaryApprover, setPrimaryApprover] = useState<{ id: string; name: string } | null>(null);
   const [backupApprover, setBackupApprover] = useState<{ id: string; name: string } | null>(null);
+  const [creatingForSelf, setCreatingForSelf] = useState(true);
   const [selectedLocationDetail, setSelectedLocationDetail] = useState<{
     plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string;
+  } | null>(null);
+  const [selectedFromLocationDetail, setSelectedFromLocationDetail] = useState<{
+    plantCode: string; storageLocation: string;
   } | null>(null);
   const [selectedVehicleDetail, setSelectedVehicleDetail] = useState<{
     chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
@@ -836,11 +840,11 @@ export default function CreateGatePassPage() {
 
         if (pass.passType === "LOCATION_TRANSFER") {
           // For Gate IN drafts: fromLocation is auto-fetched from SAP at creation; only fall back to live SAP if still null
-          const sapLocation = !pass.fromLocation
+          const sapLocationResult = !pass.fromLocation
             ? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "")
             : undefined;
           if (!active) return;
-          const resolvedFromLocation = pass.fromLocation ?? sapLocation ?? "";
+          const resolvedFromLocation = pass.fromLocation ?? sapLocationResult?.location ?? "";
           // For Gate IN: toLocation = Security's gate location; fall back to the creator's defaultLocation if not saved
           const resolvedToLocation = pass.toLocation ?? (pass.gateDirection === "IN" ? (pass.createdBy?.defaultLocation ?? "") : "");
           setLt((prev) => ({
@@ -1268,7 +1272,13 @@ export default function CreateGatePassPage() {
   const linkedAfterSalesMinDate = asFoundPass?.departureDate || asFoundPass?.arrivalDate || today;
 
   // Determine vehicle's current location from the live plant API first, then fall back.
-  const fetchVehicleCurrentLocation = async (vehicleNo: string, chassisNo?: string): Promise<string | undefined> => {
+  type VehicleLocationResult = {
+    location: string;
+    plantCode?: string;
+    storageLocation?: string;
+  };
+
+  const fetchVehicleCurrentLocation = async (vehicleNo: string, chassisNo?: string): Promise<VehicleLocationResult | undefined> => {
     const normalizedVehicleNo = vehicleNo.trim();
     const normalizedChassisNo = chassisNo?.trim() ?? "";
     if (!normalizedVehicleNo && !normalizedChassisNo) return undefined;
@@ -1278,13 +1288,9 @@ export default function CreateGatePassPage() {
       if (normalizedChassisNo) liveParams.set("chassisNo", normalizedChassisNo);
       const liveRes = await fetch(`/api/vehicle-report?${liveParams.toString()}`);
       const liveData = await liveRes.json();
-      const liveLocation = liveData.currentPlantLocation
-        ? [
-            liveData.currentPlantLocation.plantDescription,
-            liveData.currentPlantLocation.storageDescription,
-          ]
-            .filter(Boolean)
-            .join(" - ")
+      const sapRow = liveData.currentPlantLocation;
+      const liveLocation = sapRow
+        ? [sapRow.plantDescription, sapRow.storageDescription].filter(Boolean).join(" - ")
         : liveData.currentLocation;
 
       if (typeof liveLocation === "string" && liveLocation.trim()) {
@@ -1293,8 +1299,8 @@ export default function CreateGatePassPage() {
         // institution (e.g. "HNB") lives only in the DB via gate pass toLocation. So for
         // Finance/Promo slocs, look up the most recent COMPLETED pass whose toLocation
         // starts with the same plant description and return that richer label instead.
-        const storageDesc = liveData.currentPlantLocation?.storageDescription ?? "";
-        const plantDesc = liveData.currentPlantLocation?.plantDescription ?? "";
+        const storageDesc = sapRow?.storageDescription ?? "";
+        const plantDesc = sapRow?.plantDescription ?? "";
         const isFinancePromo = /(finan|finance|leasing|lease|bank|loan|credit|promo|promotion|campaign|event)/i.test(storageDesc);
 
         if (isFinancePromo && plantDesc) {
@@ -1310,13 +1316,17 @@ export default function CreateGatePassPage() {
                 p.toLocation.includes(" - ") &&
                 p.toLocation.toLowerCase().startsWith(plantDesc.toLowerCase())
             );
-            if (matched?.toLocation) return matched.toLocation;
+            if (matched?.toLocation) return { location: matched.toLocation };
           } catch {
             // fall through and return the SAP location
           }
         }
 
-        return liveLocation;
+        return {
+          location: liveLocation,
+          plantCode: sapRow?.plantCode,
+          storageLocation: sapRow?.storageLocation,
+        };
       }
 
       const fallbackKey = normalizedVehicleNo || normalizedChassisNo;
@@ -1326,10 +1336,12 @@ export default function CreateGatePassPage() {
       // Most recent COMPLETED -> vehicle arrived at toLocation
       // Only trust locations in full "PlantDescription - StorageDescription" format
       const completed = passes.find((p) => p.status === "COMPLETED" && p.toLocation && p.toLocation.includes(" - "));
-      if (completed?.toLocation) return completed.toLocation;
-      return session?.user?.defaultLocation ?? undefined;
+      if (completed?.toLocation) return { location: completed.toLocation };
+      const def = session?.user?.defaultLocation;
+      return def ? { location: def } : undefined;
     } catch {
-      return session?.user?.defaultLocation ?? undefined;
+      const def = session?.user?.defaultLocation;
+      return def ? { location: def } : undefined;
     }
   };
 
@@ -1988,10 +2000,16 @@ export default function CreateGatePassPage() {
           toStorageLocation: selectedLocationDetail?.storageLocation || null,
           sapVehicleId: selectedVehicleDetail?.internalNo || null,
           fromLocation: lt.fromLocation || null,
+          fromPlantCode: selectedFromLocationDetail?.plantCode || null,
+          fromStorageLocation: selectedFromLocationDetail?.storageLocation || null,
           outReason: lt.outReason,
           approver: lt.approver,
-          requestedBy: lt.requestedBy || null,
-          requestedByEmail: ltRequestedByEmail || null,
+          requestedBy: creatingForSelf && session?.user?.role === "AREA_SALES_OFFICER"
+            ? (session?.user?.name || null)
+            : (lt.requestedBy || null),
+          requestedByEmail: creatingForSelf && session?.user?.role === "AREA_SALES_OFFICER"
+            ? (session?.user?.email || null)
+            : (ltRequestedByEmail || null),
           departureDate: lt.departureDate,
           departureTime: lt.departureTime,
           arrivalDate: lt.arrivalDate || null,
@@ -3521,14 +3539,18 @@ export default function CreateGatePassPage() {
                             setL("toLocation", "");
                             setSelectedLocationDetail(null);
                             if (!ltBulkMode) void checkActivePass(o.chassisNo ?? "");
-                            void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
-                              if (loc) {
+                            void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                              if (result) {
+                                const loc = result.location;
                                 if (ltBulkMode) {
                                   setLtBulkVehicles((prev) => prev.map((v) => v.vehicle === detail.vehicle ? { ...v, currentLocation: loc } : v));
                                   if (ltBulkVehicles.length === 0) setSelectedVehicleDetail({ ...detail, currentLocation: loc });
                                 } else {
                                   setL("fromLocation", loc);
                                   setSelectedVehicleDetail({ ...detail, currentLocation: loc });
+                                  if (result.plantCode && result.storageLocation) {
+                                    setSelectedFromLocationDetail({ plantCode: result.plantCode, storageLocation: result.storageLocation });
+                                  }
                                 }
                               }
                             });
@@ -3748,33 +3770,81 @@ export default function CreateGatePassPage() {
               {/* Requested By */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                 <SectionTitle>Requested By</SectionTitle>
-                <Field label="Requested By" className="mt-3">
-                  <SearchInput
-                    value={lt.requestedBy}
-                    onChange={(v) => {
-                      setLt(p => ({ ...p, requestedBy: v }));
-                      setLtRequestedByEmail("");
-                      if (!v) { setLtRequestedByOptions([]); return; }
-                      setLtRequestedByLoading(true);
-                      fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
-                        .then(r => r.json())
-                        .then((d: { users?: { id: string; name: string; email: string }[] }) => {
-                          setLtRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
-                        })
-                        .finally(() => setLtRequestedByLoading(false));
-                    }}
-                    placeholder="Search by name or email..."
-                    options={ltRequestedByOptions}
-                    loading={ltRequestedByLoading}
-                    onSelect={(o) => { setLt(p => ({ ...p, requestedBy: o.value })); setLtRequestedByEmail((o as any).email ?? ""); setLtRequestedByOptions([]); }}
-                    renderOption={(o) => (
-                      <div>
-                        <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{o.label}</p>
-                        <p className="text-xs" style={{ color: "var(--text-muted)" }}>{(o as { email?: string }).email ?? ""}</p>
-                      </div>
-                    )}
-                  />
-                </Field>
+
+                {/* ASO: Creating for Myself / On Behalf toggle */}
+                {session?.user?.role === "AREA_SALES_OFFICER" && (
+                  <div className="flex gap-2 mb-4">
+                    {[
+                      { value: true, label: "Creating for Myself" },
+                      { value: false, label: "On Behalf of Another User" },
+                    ].map(({ value: v, label }) => (
+                      <button
+                        key={String(v)}
+                        type="button"
+                        onClick={() => {
+                          setCreatingForSelf(v);
+                          if (v) { setLt(p => ({ ...p, requestedBy: "" })); setLtRequestedByEmail(""); }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all"
+                        style={creatingForSelf === v
+                          ? { background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff", border: "none" }
+                          : { background: "var(--surface2)", color: "var(--text-muted)", borderColor: "var(--border)" }
+                        }
+                      >
+                        {v
+                          ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                          : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        }
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Show Requested By field only when NOT creating for self (or for non-ASO roles) */}
+                {(session?.user?.role !== "AREA_SALES_OFFICER" || !creatingForSelf) && (
+                  <Field label="Requested By" className="mt-3">
+                    <SearchInput
+                      value={lt.requestedBy}
+                      onChange={(v) => {
+                        setLt(p => ({ ...p, requestedBy: v }));
+                        setLtRequestedByEmail("");
+                        if (!v) { setLtRequestedByOptions([]); return; }
+                        setLtRequestedByLoading(true);
+                        fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
+                          .then(r => r.json())
+                          .then((d: { users?: { id: string; name: string; email: string }[] }) => {
+                            setLtRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
+                          })
+                          .finally(() => setLtRequestedByLoading(false));
+                      }}
+                      placeholder="Search by name or email..."
+                      options={ltRequestedByOptions}
+                      loading={ltRequestedByLoading}
+                      onSelect={(o) => { setLt(p => ({ ...p, requestedBy: o.value })); setLtRequestedByEmail((o as any).email ?? ""); setLtRequestedByOptions([]); }}
+                      renderOption={(o) => (
+                        <div>
+                          <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{o.label}</p>
+                          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{(o as { email?: string }).email ?? ""}</p>
+                        </div>
+                      )}
+                    />
+                  </Field>
+                )}
+
+                {/* ASO creating for self: show their own name as a locked badge */}
+                {session?.user?.role === "AREA_SALES_OFFICER" && creatingForSelf && (
+                  <div className="flex items-center gap-2 px-4 py-3 rounded-xl border mt-3"
+                    style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+                    <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: "#1d4ed8" }}>Requested by you</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#1e40af" }}>{session?.user?.name}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Location Details — hidden entirely for Gate IN drafts (route is already known) */}
@@ -4048,10 +4118,10 @@ export default function CreateGatePassPage() {
                                 const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
                                 setSelectedCdVehicleDetail(detail);
                                 void checkActivePass(o.chassisNo ?? "");
-                                void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((loc) => {
-                                  if (loc) {
-                                    setSelectedCdVehicleDetail((prev) => prev ? { ...prev, currentLocation: loc } : prev);
-                                    setC("fromLocation", loc);
+                                void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                                  if (result) {
+                                    setSelectedCdVehicleDetail((prev) => prev ? { ...prev, currentLocation: result.location } : prev);
+                                    setC("fromLocation", result.location);
                                   }
                                 });
                               }}
