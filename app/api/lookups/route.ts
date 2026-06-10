@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
   const rawLimit = parseInt(searchParams.get("limit") ?? "20", 10);
   const take = field === "location" ? Math.min(rawLimit, 500) : Math.min(rawLimit, 50);
   const locationType = searchParams.get("locationType") ?? undefined;
+  const chassisNo = searchParams.get("chassisNo") ?? undefined;
 
   const fieldsParam = searchParams.get("fields");
   if (fieldsParam) {
@@ -103,68 +104,62 @@ export async function GET(req: NextRequest) {
     if (field === "location") {
       const matnr = searchParams.get("matnr") ?? undefined;
 
-      if (matnr) {
-        const [allRows, dbLocs] = await Promise.all([
-          fetchPlantVehicleRows().catch(() => []),
-          prisma.locationOption.findMany({
-            select: {
-              plantCode: true,
-              plantDescription: true,
-              storageLocation: true,
-              storageDescription: true,
-              locationType: true,
-            },
-          }),
-        ]);
+      if (chassisNo || matnr) {
+        const allRows = await fetchPlantVehicleRows().catch(() => []);
 
-        const dbByKey = new Map(
-          dbLocs.map((loc) => [`${loc.plantCode}|${loc.storageLocation}`, loc])
-        );
+        // Find vehicle rows — prefer chassisNo (VIN), fallback to matnr
+        let vehicleRows = chassisNo
+          ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
+          : [];
+        if (!vehicleRows.length && matnr) {
+          vehicleRows = allRows.filter(r => r.materialNo === matnr);
+        }
 
+        // Build one option per unique ext_plant|ext_sloc destination.
+        // Descriptions come directly from ext_p_des / ext_sloc_des fields in the API response.
         const seen = new Set<string>();
         const options: LocationOption[] = [];
-
-        // Use ALL rows from /plant (MARD join exposes every valid plant/sloc regardless
-        // of which material currently has stock there — not just rows matching matnr).
-        for (const row of allRows) {
-          if (!row.plantDescription) continue;
-          const id = [row.plantCode, row.storageLocation].join("|");
+        for (const row of vehicleRows) {
+          if (!row.extPlant || !row.extSloc) continue;
+          const id = `${row.extPlant}|${row.extSloc}`;
           if (seen.has(id)) continue;
           seen.add(id);
 
-          const dbLoc = dbByKey.get(id);
-          const plantDescription = dbLoc?.plantDescription || row.plantDescription;
-          const storageDesc = dbLoc?.storageDescription || row.storageDescription || row.storageLocation;
-          const value = [plantDescription, storageDesc].filter(Boolean).join(" - ");
+          const plantDesc = row.extPlantDesc || row.extPlant;
+          const slocDesc  = row.extSlocDesc  || row.extSloc;
           options.push({
-            id, value, label: value,
-            plantCode: row.plantCode,
-            plantDescription,
-            storageLocation: row.storageLocation,
-            storageDescription: storageDesc,
+            id, value: `${plantDesc} - ${slocDesc}`, label: `${plantDesc} - ${slocDesc}`,
+            plantCode: row.extPlant, plantDescription: plantDesc,
+            storageLocation: row.extSloc, storageDescription: slocDesc,
             source: "api",
           });
         }
 
-        // DB fallback — locations that are in DB (from prior syncs) but currently have
-        // no vehicles in /plant so they don't appear in the live feed.
-        for (const dbloc of dbLocs) {
-          const key = `${dbloc.plantCode}|${dbloc.storageLocation}`;
-          if (seen.has(key)) continue;
-          const storageDesc = dbloc.storageDescription || dbloc.storageLocation;
-          const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
-          if (!value) continue;
-          options.push({
-            id: key, value, label: value,
-            plantCode: dbloc.plantCode,
-            plantDescription: dbloc.plantDescription,
-            storageLocation: dbloc.storageLocation,
-            storageDescription: storageDesc,
-            source: "db" as const,
-          });
+        // Filter by locationType FIRST (while storageDescription still has the raw SAP value
+        // so inferType can correctly classify "Promo location" → PROMOTION, etc.).
+        // Overlaying custom DB labels before this step would break inferType for renamed entries.
+        const filteredOptions = filterApiLocations(options, q, locationType);
+
+        // Overlay custom labels from DB for PROMO/FINANCE entries only
+        const promoFinanceOpts = filteredOptions.filter(o => {
+          const d = o.storageDescription.toLowerCase();
+          return d === "promo location" || d.includes("finan");
+        });
+        if (promoFinanceOpts.length > 0) {
+          const dbLabels = await prisma.locationOption.findMany({
+            where: { OR: promoFinanceOpts.map(o => ({ plantCode: o.plantCode, storageLocation: o.storageLocation })) },
+          }).catch(() => []);
+          for (const opt of filteredOptions) {
+            const dbEntry = dbLabels.find(d => d.plantCode === opt.plantCode && d.storageLocation === opt.storageLocation);
+            if (dbEntry?.storageDescription && dbEntry.storageDescription !== opt.storageDescription) {
+              opt.storageDescription = dbEntry.storageDescription;
+              opt.value = `${opt.plantDescription} - ${dbEntry.storageDescription}`;
+              opt.label = opt.value;
+            }
+          }
         }
 
-        return NextResponse.json({ options: filterApiLocations(options, q, locationType).slice(0, take) });
+        return NextResponse.json({ options: filteredOptions.slice(0, take) });
       }
 
       const isNonDimo = locationType === "PROMOTION" || locationType === "FINANCE" || locationType === "DEALER";
@@ -476,60 +471,46 @@ export async function POST(req: NextRequest) {
   const field = body.field as LookupField | undefined;
 
   if (field === "location") {
+    // Plant code + sloc code MUST come from the API — no placeholder generation.
+    // This only saves a custom display label for an existing API-sourced PROMO/FINANCE location.
+    const plantCode = normalize(body.plantCode ?? "").toUpperCase();
+    const storageLocation = normalize(body.storageLocation ?? "").toUpperCase();
     const plantDescription = normalize(body.plantDescription ?? "");
+    const storageDescription = normalize(body.storageDescription ?? "");
     const locationType = normalize(body.locationType ?? "") as string;
 
-    if (!plantDescription) return NextResponse.json({ error: "plantDescription required" }, { status: 400 });
+    if (!plantCode || !storageLocation) {
+      return NextResponse.json({ error: "plantCode and storageLocation are required" }, { status: 400 });
+    }
+    if (!storageDescription) {
+      return NextResponse.json({ error: "Label (storageDescription) is required" }, { status: 400 });
+    }
     if (!["PROMOTION", "FINANCE"].includes(locationType)) {
       return NextResponse.json({ error: "locationType must be PROMOTION or FINANCE" }, { status: 400 });
     }
 
-    const storageDescRaw = normalize(body.storageDescription ?? "");
-    const storageDescription = storageDescRaw || (locationType === "PROMOTION" ? "Promo Location" : "Finan Institute");
-
-    // Use real SAP codes if provided by the caller; otherwise generate placeholder codes
-    const realPlantCode = normalize(body.plantCode ?? "").toUpperCase();
-    const realStorageLocation = normalize(body.storageLocation ?? "").toUpperCase();
-
-    let plantCode: string;
-    let storageLocation: string;
-
     try {
-      if (realPlantCode && realStorageLocation) {
-        // Caller supplied real SAP Werks + Lgort codes — use them directly
-        plantCode = realPlantCode;
-        storageLocation = realStorageLocation;
-      } else {
-        // Generate placeholder codes (description-lookup only; SAP writes will fail)
-        plantCode = realPlantCode || plantDescription.split(/\s+/).map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 6);
-        const existing = await prisma.locationOption.findMany({
-          where: { plantCode },
-          orderBy: { storageLocation: "desc" },
-          take: 1,
-        });
-        const lastNum = existing.length > 0 ? (parseInt(existing[0].storageLocation.replace(/\D/g, ""), 10) || 99) : 99;
-        storageLocation = `S${lastNum + 1}`;
-      }
-
-      const created = await prisma.locationOption.create({
-        data: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
+      const upserted = await prisma.locationOption.upsert({
+        where: { plantCode_storageLocation: { plantCode, storageLocation } },
+        create: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
+        update: { storageDescription, locationType, ...(plantDescription ? { plantDescription } : {}) },
       });
 
       return NextResponse.json({
         option: {
-          id: created.id,
-          value: `${created.plantDescription} - ${created.storageDescription}`,
-          label: `${created.plantDescription} - ${created.storageDescription}`,
-          plantCode: created.plantCode,
-          plantDescription: created.plantDescription,
-          storageLocation: created.storageLocation,
-          storageDescription: created.storageDescription,
+          id: upserted.id,
+          value: `${upserted.plantDescription} - ${upserted.storageDescription}`,
+          label: `${upserted.plantDescription} - ${upserted.storageDescription}`,
+          plantCode: upserted.plantCode,
+          plantDescription: upserted.plantDescription,
+          storageLocation: upserted.storageLocation,
+          storageDescription: upserted.storageDescription,
           source: "db",
         },
       });
     } catch (e) {
-      console.error("Location create error:", e);
-      return NextResponse.json({ error: "Failed to create location." }, { status: 500 });
+      console.error("Location upsert error:", e);
+      return NextResponse.json({ error: "Failed to save location label." }, { status: 500 });
     }
   }
 
