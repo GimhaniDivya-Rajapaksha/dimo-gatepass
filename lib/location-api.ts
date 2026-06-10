@@ -27,6 +27,10 @@ export type PlantVehicleRow = {
   vehicleGuid: string;
   moduleGuid: string;
   modelCode: string;
+  extPlant: string;
+  extSloc: string;
+  extPlantDesc: string;
+  extSlocDesc: string;
 };
 
 export type PlantLocationTarget = {
@@ -128,8 +132,8 @@ export function filterApiLocations(
   });
 }
 
-export async function fetchPlantLocationOptions(): Promise<LocationOption[]> {
-  const rows = await fetchPlantVehicleRows();
+export async function fetchPlantLocationOptions(vehicleFilter?: string): Promise<LocationOption[]> {
+  const rows = await fetchPlantVehicleRows(vehicleFilter);
   const seen = new Set<string>();
   const options: LocationOption[] = [];
 
@@ -184,8 +188,11 @@ export function findPlantLocationOption(
   return null;
 }
 
-export async function fetchPlantVehicleRows(): Promise<PlantVehicleRow[]> {
-  const res = await fetch(`${APIM_BASE}/dimogatepass/plant`, {
+export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<PlantVehicleRow[]> {
+  const url = vehicleFilter
+    ? `${APIM_BASE}/dimogatepass/plant?filter=${encodeURIComponent(vehicleFilter)}`
+    : `${APIM_BASE}/dimogatepass/plant`;
+  const res = await fetch(url, {
     method: "GET",
     headers: buildHeaders(),
     cache: "no-store",
@@ -206,7 +213,8 @@ export async function fetchPlantVehicleRows(): Promise<PlantVehicleRow[]> {
       pick(row, "Vhvin"),
       pick(row, "Werks"),
       pick(row, "Lgort"),
-      pick(row, "Vguid"),
+      pick(row, "ext_plant"),
+      pick(row, "ext_sloc"),
     ].join("|"),
     internalNo: pick(row, "Vhcle"),
     externalNo: pick(row, "Vhcex"),
@@ -219,6 +227,10 @@ export async function fetchPlantVehicleRows(): Promise<PlantVehicleRow[]> {
     vehicleGuid: pick(row, "Vguid"),
     moduleGuid: pick(row, "Modguid"),
     modelCode: pick(row, "Mcodecs"),
+    extPlant: pick(row, "ext_plant"),
+    extSloc: pick(row, "ext_sloc"),
+    extPlantDesc: pick(row, "ext_p_des"),
+    extSlocDesc: pick(row, "ext_sloc_des"),
   }));
 }
 
@@ -273,6 +285,7 @@ export async function updateVehiclePlantLocation(params: {
       materialNo: "", plantCode: "", plantDescription: "",
       storageLocation: "", storageDescription: "",
       vehicleGuid: "", moduleGuid: "", modelCode: "",
+      extPlant: "", extSloc: "", extPlantDesc: "", extSlocDesc: "",
     };
   }
 
@@ -288,14 +301,15 @@ export async function updateVehiclePlantLocation(params: {
 
   // Use Vhcle only — sending Vhvin or Vhcex triggers a different SAP transaction
   // that changes the vehicle status as a side effect.
+  const resolvedRow = vehicleRow as PlantVehicleRow;
   const uniquePayloadCandidates: Record<string, string>[] = [];
-  if (vehicleRow.internalNo) {
-    uniquePayloadCandidates.push({ Vhcle: vehicleRow.internalNo, ...destinationPayload });
-  } else if (vehicleRow.chassisNo) {
+  if (resolvedRow.internalNo) {
+    uniquePayloadCandidates.push({ Vhcle: resolvedRow.internalNo, ...destinationPayload });
+  } else if (resolvedRow.chassisNo) {
     // Fallback only when Vhcle is unavailable
-    uniquePayloadCandidates.push({ Vhvin: vehicleRow.chassisNo, ...destinationPayload });
-  } else if (vehicleRow.externalNo) {
-    uniquePayloadCandidates.push({ Vhcex: vehicleRow.externalNo, ...destinationPayload });
+    uniquePayloadCandidates.push({ Vhvin: resolvedRow.chassisNo, ...destinationPayload });
+  } else if (resolvedRow.externalNo) {
+    uniquePayloadCandidates.push({ Vhcex: resolvedRow.externalNo, ...destinationPayload });
   }
 
   let lastMessage = "Vehicle location update failed.";

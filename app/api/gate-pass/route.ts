@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendApprovalRequestEmail } from "@/lib/email";
+import { sendApprovalRequestEmail, sendRequestedByNotificationEmail } from "@/lib/email";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciEquals(value: string | null | undefined) {
@@ -402,6 +402,7 @@ export async function POST(req: NextRequest) {
     departureDate: body.departureDate || null,
     departureTime: body.departureTime || null,
     requestedBy: body.requestedBy || null,
+    requestedByEmail: body.requestedByEmail || null,
     intendedApprover: (typeof body.approver === "string" ? body.approver.trim() : null) || null,
     outReason: body.outReason || null,
     transportMode: body.transportMode || null,
@@ -419,6 +420,7 @@ export async function POST(req: NextRequest) {
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
     fromLocation: body.fromLocation || (session.user as { defaultLocation?: string | null }).defaultLocation || null,
+    sapVehicleId: body.sapVehicleId || null,
     createdById: session.user.id,
     // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
     ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
@@ -432,6 +434,25 @@ export async function POST(req: NextRequest) {
   const gatePass = await (prisma.gatePass.create as any)({
     data: createData,
   });
+
+  // Notify the "Requested By" person (if selected from AD and email is known)
+  if (createData.requestedByEmail && createData.requestedBy) {
+    sendRequestedByNotificationEmail(
+      createData.requestedByEmail as string,
+      createData.requestedBy as string,
+      {
+        gatePassNumber: gatePass.gatePassNumber,
+        passType: gatePass.passType,
+        vehicle: gatePass.vehicle,
+        chassis: gatePass.chassis,
+        toLocation: gatePass.toLocation,
+        fromLocation: gatePass.fromLocation,
+        departureDate: gatePass.departureDate,
+        departureTime: gatePass.departureTime,
+        createdByName: session.user.name || "Unknown",
+      }
+    ).catch((e: unknown) => console.error("[email] requestedBy notification failed:", e));
+  }
 
   // CUSTOMER_DELIVERY: auto-route based on SAP payTerm at creation
   // IMMEDIATE payment terms → Cashier (CASHIER_REVIEW)

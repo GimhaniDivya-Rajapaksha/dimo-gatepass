@@ -484,6 +484,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             // SAP removes vehicles from /plant after a location transfer is processed.
             // Provide typed fallback identifiers so the update still works.
             sapFallback: {
+              internalNo: (gatePass as any).sapVehicleId,
               externalNo: gatePass.vehicle,
               chassisNo: body.receivedChassis || gatePass.chassis,
             },
@@ -701,7 +702,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             liveLocationUpdate = await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
               destination: targetLocation,
-              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
             });
             console.log("[security_gate_out] SAP location updated:", liveLocationUpdate.message);
           } else {
@@ -878,7 +879,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             printLiveUpdate = await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
               destination: targetLocation,
-              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
             });
             console.log("[print_gate_out] SAP location updated:", printLiveUpdate.message);
           } else {
@@ -1195,7 +1196,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             await updateVehiclePlantLocation({
               identifiers: [gatePass.vehicle, gatePass.chassis],
               destination: targetLocation,
-              sapFallback: { externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
             });
           } else {
             console.warn("[gate_in] no matching SAP plant location for:", toLoc);

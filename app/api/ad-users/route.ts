@@ -3,9 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
 async function getGraphToken(): Promise<string> {
-  const tenantId = process.env.AZURE_AD_TENANT_ID?.replace(/^["']|["']$/g, "").trim();
-  const clientId = process.env.AZURE_AD_CLIENT_ID?.replace(/^["']|["']$/g, "").trim();
-  const clientSecret = process.env.AZURE_AD_CLIENT_SECRET?.replace(/^["']|["']$/g, "").trim();
+  const tenantId = (process.env.GRAPH_TENANT_ID || process.env.AZURE_AD_TENANT_ID)?.replace(/^["']|["']$/g, "").trim();
+  const clientId = (process.env.GRAPH_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID)?.replace(/^["']|["']$/g, "").trim();
+  const clientSecret = (process.env.GRAPH_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET)?.replace(/^["']|["']$/g, "").trim();
 
   if (!tenantId || !clientId || !clientSecret) throw new Error("Azure AD env vars missing");
 
@@ -35,29 +35,34 @@ export async function GET(req: NextRequest) {
   try {
     const token = await getGraphToken();
 
-    // Use $search for reliable user lookup across displayName, mail, userPrincipalName
+    // $search requires ConsistencyLevel: eventual and is incompatible with $orderby.
+    // Searching displayName, mail, and userPrincipalName covers all name/email variations.
     const searchQuery = `"displayName:${q}" OR "mail:${q}" OR "userPrincipalName:${q}"`;
-    const graphUrl = `https://graph.microsoft.com/v1.0/users?$search=${encodeURIComponent(searchQuery)}&$select=id,displayName,mail,userPrincipalName&$top=15&$count=true&$orderby=displayName`;
+    const graphUrl = `https://graph.microsoft.com/v1.0/users?$search=${encodeURIComponent(searchQuery)}&$select=id,displayName,mail,userPrincipalName&$top=15&$count=true`;
 
     const graphRes = await fetch(graphUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
         ConsistencyLevel: "eventual",
+        Accept: "application/json",
       },
     });
 
     if (!graphRes.ok) {
       const err = await graphRes.json().catch(() => ({}));
-      console.error("[ad-users] Graph API error:", JSON.stringify(err));
-      return NextResponse.json({ users: [], error: String(err?.error?.message ?? "Graph API error") });
+      console.error("[ad-users] Graph API error:", graphRes.status, JSON.stringify(err));
+      return NextResponse.json({ users: [], error: String((err as any)?.error?.message ?? "Graph API error") });
     }
 
-    const data = await graphRes.json() as { value: { id: string; displayName: string; mail: string; userPrincipalName: string }[] };
-    const users = (data.value ?? []).map((u) => ({
-      id: u.id,
-      name: u.displayName,
-      email: u.mail || u.userPrincipalName,
-    }));
+    const data = await graphRes.json() as { value: { id: string; displayName: string; mail: string | null; userPrincipalName: string }[] };
+    const users = (data.value ?? [])
+      .map((u) => ({
+        id: u.id,
+        name: u.displayName ?? "",
+        email: u.mail ?? u.userPrincipalName ?? "",
+      }))
+      .filter((u) => u.name && u.email)
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return NextResponse.json({ users });
   } catch (e) {

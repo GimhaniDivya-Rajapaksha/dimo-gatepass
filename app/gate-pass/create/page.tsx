@@ -145,76 +145,66 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
 }
 
 /* ─── Location Picker (Promotion / Finance) ─────────────────────────── */
-function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, onNewLocation, matnr }: {
+function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, chassisNo }: {
   value: string; displayValue?: string;
   onSelect: (o: LookupOption) => void;
   locationType: "PROMOTION" | "FINANCE";
   error?: string;
-  onNewLocation?: (o: LookupOption) => void;
-  matnr?: string;
+  chassisNo?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<LookupOption[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState("");
-  // ADD form state
-  const [addPlant, setAddPlant] = useState("");
-  const [addLocation, setAddLocation] = useState("");
-  const [addPlantCode, setAddPlantCode] = useState("");
-  const [addStorageLocation, setAddStorageLocation] = useState("");
-  const [plantDropOpen, setPlantDropOpen] = useState(false);
+  const [labelingId, setLabelingId] = useState<string | null>(null);
+  const [labelInput, setLabelInput] = useState("");
+  const [labelSaving, setLabelSaving] = useState(false);
+  const [labelError, setLabelError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const DEFAULT_DESCS = ["promo location", "finan institute", "financial instit", "financial institute", "finan.institute"];
+  const isDefault = (desc: string) => DEFAULT_DESCS.includes(desc.toLowerCase().trim());
 
   async function load() {
     const params = new URLSearchParams({ field: "location", locationType, limit: "200" });
-    if (matnr) params.set("matnr", matnr);
+    if (chassisNo) params.set("chassisNo", chassisNo);
     const res = await fetch(`/api/lookups?${params.toString()}`);
     const data: { options: LookupOption[] } = await res.json();
     setOptions(data.options ?? []);
   }
-  useEffect(() => { void load(); }, [locationType, matnr]);
-
-  // Unique plant names for the ADD form dropdown
-  const plantNames = useMemo(() => {
-    const seen = new Set<string>();
-    options.forEach(o => seen.add(o.plantDescription));
-    return [...seen].sort();
-  }, [options]);
+  useEffect(() => { void load(); }, [locationType, chassisNo]);
 
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false); setShowAdd(false); setPlantDropOpen(false);
+        setOpen(false); setLabelingId(null);
       }
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  async function handleAdd() {
-    if (!addPlant.trim()) { setAddError("Plant name is required"); return; }
-    if (!addLocation.trim()) { setAddError("Location name is required"); return; }
-    setAdding(true); setAddError("");
+  async function handleSaveLabel(opt: LookupOption) {
+    if (!labelInput.trim()) { setLabelError("Label is required"); return; }
+    setLabelSaving(true); setLabelError("");
     const res = await fetch("/api/lookups", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         field: "location",
-        plantDescription: addPlant.trim(),
-        storageDescription: addLocation.trim(),
+        plantCode: opt.plantCode,
+        storageLocation: opt.storageLocation,
+        plantDescription: opt.plantDescription,
+        storageDescription: labelInput.trim(),
         locationType,
-        ...(addPlantCode.trim() ? { plantCode: addPlantCode.trim() } : {}),
-        ...(addStorageLocation.trim() ? { storageLocation: addStorageLocation.trim() } : {}),
       }),
     });
     const data: { option?: LookupOption; error?: string } = await res.json();
     if (data.option) {
-      setOptions(prev => [...prev, data.option!]);
-      onNewLocation?.(data.option!);
-      setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setShowAdd(false);
-    } else { setAddError(data.error ?? "Failed to add"); }
-    setAdding(false);
+      setOptions(prev => prev.map(o => o.id === opt.id
+        ? { ...o, storageDescription: data.option!.storageDescription, value: data.option!.value, label: data.option!.label }
+        : o));
+      setLabelingId(null); setLabelInput("");
+    } else { setLabelError(data.error ?? "Failed to save"); }
+    setLabelSaving(false);
   }
 
   const typeLabel = locationType === "PROMOTION" ? "Promo Location" : "Finance Institution";
@@ -222,7 +212,6 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
 
   return (
     <div ref={containerRef} className="relative">
-      {/* Trigger */}
       <button
         type="button"
         onClick={() => { setOpen(o => !o); void load(); }}
@@ -239,128 +228,88 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
         <div className="absolute z-30 mt-1 w-full rounded-xl border shadow-xl overflow-hidden"
           style={{ background: "var(--surface)", borderColor: "var(--border)", minWidth: "320px" }}>
 
-          {/* Column header + ADD */}
-          <div className="flex items-center border-b px-3 py-2 gap-2" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
-            <span className="flex-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Plant Name</span>
-            <span className="w-24 text-xs font-semibold uppercase tracking-wide text-right" style={{ color: "var(--text-muted)" }}>Location</span>
-            <button type="button" onClick={() => { setShowAdd(s => !s); setAddError(""); setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setPlantDropOpen(false); }}
-              className="text-xs px-3 py-1 rounded-lg text-white font-bold flex-shrink-0" style={{ background: "#16a34a", minWidth: "52px" }}>
-              ADD
-            </button>
+          {/* Column headers */}
+          <div className="flex items-center border-b px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+            <span className="flex-1 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Plant</span>
+            <span className="w-36 text-xs font-semibold uppercase tracking-wide text-right" style={{ color: "var(--text-muted)" }}>Label</span>
           </div>
 
-          {/* ADD inline form */}
-          {showAdd && (
-            <div className="border-b px-3 py-3 space-y-2" style={{ borderColor: "var(--border)", background: "#f0fdf4" }}>
-              {/* Plant selector */}
-              <div className="relative">
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <button
-                      type="button"
-                      onClick={() => setPlantDropOpen(p => !p)}
-                      className="w-full border rounded-lg px-3 py-1.5 text-sm text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-green-300"
-                      style={{ borderColor: addError && !addPlant ? "#f87171" : "var(--border)", background: "var(--surface)", color: addPlant ? "var(--text)" : "var(--text-muted)" }}
-                    >
-                      <span className="truncate">{addPlant || "Select or type plant name…"}</span>
-                      <svg className="w-3 h-3 ml-1 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    {plantDropOpen && (
-                      <div className="absolute z-40 mt-0.5 w-full rounded-lg border shadow-lg max-h-36 overflow-auto"
-                        style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                        {/* Type new plant name */}
-                        <div className="px-2 pt-2 pb-1">
-                          <input
-                            autoFocus type="text"
-                            value={addPlant}
-                            onChange={e => setAddPlant(e.target.value)}
-                            placeholder="Type new plant name…"
-                            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-300"
-                            style={{ borderColor: "var(--border)", background: "var(--surface2)", color: "var(--text)" }}
-                          />
-                        </div>
-                        {plantNames.map(p => (
-                          <button key={p} type="button"
-                            onClick={() => { setAddPlant(p); setPlantDropOpen(false); }}
-                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-500/10 border-t transition-colors"
-                            style={{ borderColor: "var(--border)", color: "var(--text)" }}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
+          {/* All API locations */}
+          <div className="max-h-72 overflow-auto">
+            {options.length === 0 ? (
+              <p className="text-center text-sm py-4" style={{ color: "var(--text-muted)" }}>No extended locations found for this vehicle</p>
+            ) : options.map(o => (
+              <div key={o.id} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
+                {/* Row */}
+                <div className="flex items-center text-sm hover:bg-blue-500/10 transition-colors"
+                  style={{ background: displayText === o.value ? "rgba(37,99,235,0.08)" : undefined }}>
+                  <button type="button"
+                    className="flex-1 flex items-center px-3 py-2.5 text-left min-w-0 gap-2"
+                    onClick={() => {
+                      if (isDefault(o.storageDescription)) return; // must label first
+                      onSelect(o); setOpen(false); setLabelingId(null);
+                    }}
+                    style={{ cursor: isDefault(o.storageDescription) ? "default" : "pointer" }}>
+                    <span className="flex-1 font-medium truncate" style={{ color: "var(--text)" }}>{o.plantDescription}</span>
+                    {isDefault(o.storageDescription) ? (
+                      /* No label yet — show muted SAP desc */
+                      <span className="w-36 text-right text-xs flex-shrink-0 italic" style={{ color: "var(--text-muted)" }}>
+                        {o.storageDescription}
+                      </span>
+                    ) : (
+                      /* Has custom label — show it, no edit */
+                      <span className="w-36 text-right text-xs flex-shrink-0 font-semibold" style={{ color: "var(--text)" }}>
+                        {o.storageDescription}
+                      </span>
                     )}
-                  </div>
-                </div>
-              </div>
-              {/* Location name input */}
-              <input
-                type="text" value={addLocation}
-                onChange={e => { setAddLocation(e.target.value); setAddError(""); }}
-                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void handleAdd(); } }}
-                placeholder="Location name…"
-                className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
-                style={{ borderColor: addError && !addLocation ? "#f87171" : "var(--border)", background: "var(--surface)", color: "var(--text)" }}
-              />
-              {/* SAP codes — required for SAP location write to work */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className="text-xs mb-1 font-medium" style={{ color: "var(--text-muted)" }}>SAP Plant Code <span className="text-red-500">*</span></p>
-                  <input
-                    type="text" value={addPlantCode}
-                    onChange={e => { setAddPlantCode(e.target.value.toUpperCase()); setAddError(""); }}
-                    placeholder="e.g. 1000"
-                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
-                    style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs mb-1 font-medium" style={{ color: "var(--text-muted)" }}>SAP Storage Location <span className="text-red-500">*</span></p>
-                  <input
-                    type="text" value={addStorageLocation}
-                    onChange={e => { setAddStorageLocation(e.target.value.toUpperCase()); setAddError(""); }}
-                    placeholder="e.g. PR01"
-                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
-                    style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--text)" }}
-                  />
-                </div>
-              </div>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>Get SAP codes from your TechLead — required for SAP location transfer to work.</p>
-              {addError && <p className="text-red-500 text-xs">{addError}</p>}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => void handleAdd()} disabled={adding}
-                  className="px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
-                  style={{ background: "#16a34a" }}>
-                  {adding ? "…" : "Save"}
-                </button>
-                <button type="button" onClick={() => { setShowAdd(false); setAddPlant(""); setAddLocation(""); setAddPlantCode(""); setAddStorageLocation(""); setAddError(""); }}
-                  className="px-4 py-1.5 rounded-lg text-sm border"
-                  style={{ borderColor: "var(--border)", color: "var(--text)" }}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
+                  </button>
 
-          {/* Rows — hide generic placeholder entries */}
-          <div className="max-h-52 overflow-auto">
-            {options.filter(o => o.storageDescription !== "Finan Institute" && o.storageDescription !== "Promo Location")
-              .length === 0 ? (
-              <p className="text-center text-sm py-4" style={{ color: "var(--text-muted)" }}>No options — click ADD to create one</p>
-            ) : options
-                .filter(o => o.storageDescription !== "Finan Institute" && o.storageDescription !== "Promo Location")
-                .map(o => (
-              <button key={o.id} type="button"
-                onClick={() => { onSelect(o); setOpen(false); setShowAdd(false); }}
-                className="w-full flex items-center px-3 py-2.5 text-sm border-b last:border-0 hover:bg-blue-500/10 transition-colors"
-                style={{ borderColor: "var(--border)", color: "var(--text)", background: displayText === o.storageDescription ? "rgba(37,99,235,0.08)" : undefined }}
-              >
-                <span className="flex-1 font-medium text-left truncate">{o.plantDescription}</span>
-                <span className="w-24 text-right text-xs flex-shrink-0 pr-1" style={{ color: "var(--text-muted)" }}>{o.storageDescription}</span>
-                <div style={{ minWidth: "52px" }} />
-              </button>
+                  {/* Show "+ Add label" only for unlabelled entries */}
+                  {isDefault(o.storageDescription) && (
+                    <button type="button" title="Add label"
+                      onClick={() => {
+                        setLabelingId(labelingId === o.id ? null : o.id);
+                        setLabelInput("");
+                        setLabelError("");
+                      }}
+                      className="flex items-center gap-1 px-2 mr-1 py-1 rounded text-xs font-semibold flex-shrink-0 hover:bg-green-100 transition-colors"
+                      style={{ color: "#16a34a", border: "1px solid #bbf7d0" }}>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add
+                    </button>
+                  )}
+                </div>
+
+                {/* Inline label input — only for unlabelled entries */}
+                {labelingId === o.id && (
+                  <div className="px-3 pb-3 pt-2 space-y-1.5" style={{ background: "#f0fdf4" }}>
+                    <p className="text-xs font-semibold" style={{ color: "#15803d" }}>Add label for {o.plantDescription}</p>
+                    <div className="flex gap-2">
+                      <input
+                        autoFocus type="text" value={labelInput}
+                        onChange={e => { setLabelInput(e.target.value); setLabelError(""); }}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void handleSaveLabel(o); } }}
+                        placeholder="e.g. HNB Bank, BOC…"
+                        className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                        style={{ borderColor: labelError ? "#f87171" : "var(--border)", background: "var(--surface)", color: "var(--text)" }}
+                      />
+                      <button type="button" onClick={() => void handleSaveLabel(o)} disabled={labelSaving}
+                        className="px-3 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
+                        style={{ background: "#16a34a" }}>
+                        {labelSaving ? "…" : "Save"}
+                      </button>
+                      <button type="button" onClick={() => { setLabelingId(null); setLabelInput(""); setLabelError(""); }}
+                        className="px-3 py-1.5 rounded-lg text-sm border"
+                        style={{ borderColor: "var(--border)", color: "var(--text)" }}>
+                        ✕
+                      </button>
+                    </div>
+                    {labelError && <p className="text-red-500 text-xs">{labelError}</p>}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -711,6 +660,7 @@ export default function CreateGatePassPage() {
     chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
     matnr?: string;
     currentLocation?: string;
+    internalNo?: string;
   } | null>(null);
   const [activePassWarning, setActivePassWarning] = useState<{ gatePassNumber: string; status: string; id: string } | null>(null);
 
@@ -780,6 +730,7 @@ export default function CreateGatePassPage() {
   });
   const [ltRequestedByOptions, setLtRequestedByOptions] = useState<LookupOption[]>([]);
   const [ltRequestedByLoading, setLtRequestedByLoading] = useState(false);
+  const [ltRequestedByEmail, setLtRequestedByEmail] = useState("");
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
@@ -1193,6 +1144,7 @@ export default function CreateGatePassPage() {
       const params = new URLSearchParams({ field, q, limit });
       if (field === "location" && lt_type) params.set("locationType", lt_type);
       if (field === "location" && selectedVehicleDetail?.matnr) params.set("matnr", selectedVehicleDetail.matnr);
+      if (field === "location" && selectedVehicleDetail?.chassisNo) params.set("chassisNo", selectedVehicleDetail.chassisNo);
       // Tell the vehicle lookup which SAP API to query based on current pass type
       if (field === "vehicle" && passType && passType !== "AFTER_SALES") {
         params.set("passType", passType);
@@ -1240,7 +1192,7 @@ export default function CreateGatePassPage() {
     if (status !== "authenticated" || !locationType) return;
     void fetchLookup("location", "", locationType);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, locationType, selectedVehicleDetail?.matnr]);
+  }, [status, locationType, selectedVehicleDetail?.matnr, selectedVehicleDetail?.chassisNo]);
 
   // Fetch SAP invoice data when a CD vehicle is selected
   useEffect(() => {
@@ -2034,10 +1986,12 @@ export default function CreateGatePassPage() {
           toLocation: lt.toLocation,
           toPlantCode: selectedLocationDetail?.plantCode || null,
           toStorageLocation: selectedLocationDetail?.storageLocation || null,
+          sapVehicleId: selectedVehicleDetail?.internalNo || null,
           fromLocation: lt.fromLocation || null,
           outReason: lt.outReason,
           approver: lt.approver,
           requestedBy: lt.requestedBy || null,
+          requestedByEmail: ltRequestedByEmail || null,
           departureDate: lt.departureDate,
           departureTime: lt.departureTime,
           arrivalDate: lt.arrivalDate || null,
@@ -2236,6 +2190,8 @@ export default function CreateGatePassPage() {
                   make:         opt.make         ?? "",
                   colourFamily: opt.colourFamily ?? "",
                   colour:       opt.colour       ?? "",
+                  internalNo:   opt.internalNo   ?? "",
+                  matnr:        (opt as any).matnr ?? "",
                 });
                 void fetchLookup("vehicle", opt.value);
                 void checkActivePass(opt.chassisNo ?? "");
@@ -3685,14 +3641,9 @@ export default function CreateGatePassPage() {
                                           value={v.toLocation ?? ""}
                                           displayValue={v.toLocationStorage}
                                           locationType={v.toLocationType}
-                                          matnr={v.matnr}
+                                          chassisNo={v.chassisNo}
                                           error={errors.toLocation && !v.toLocation ? errors.toLocation : undefined}
                                           onSelect={(option) => updateLtBulkVehicle(v.vehicle, {
-                                            toLocation: option.value,
-                                            toLocationPlant: option.plantDescription ?? "",
-                                            toLocationStorage: option.storageDescription ?? "",
-                                          })}
-                                          onNewLocation={(option) => updateLtBulkVehicle(v.vehicle, {
                                             toLocation: option.value,
                                             toLocationPlant: option.plantDescription ?? "",
                                             toLocationStorage: option.storageDescription ?? "",
@@ -3802,6 +3753,7 @@ export default function CreateGatePassPage() {
                     value={lt.requestedBy}
                     onChange={(v) => {
                       setLt(p => ({ ...p, requestedBy: v }));
+                      setLtRequestedByEmail("");
                       if (!v) { setLtRequestedByOptions([]); return; }
                       setLtRequestedByLoading(true);
                       fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
@@ -3814,7 +3766,7 @@ export default function CreateGatePassPage() {
                     placeholder="Search by name or email..."
                     options={ltRequestedByOptions}
                     loading={ltRequestedByLoading}
-                    onSelect={(o) => { setLt(p => ({ ...p, requestedBy: o.value })); setLtRequestedByOptions([]); }}
+                    onSelect={(o) => { setLt(p => ({ ...p, requestedBy: o.value })); setLtRequestedByEmail((o as any).email ?? ""); setLtRequestedByOptions([]); }}
                     renderOption={(o) => (
                       <div>
                         <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{o.label}</p>
@@ -3924,6 +3876,7 @@ export default function CreateGatePassPage() {
                         value={lt.toLocation}
                         displayValue={selectedLocationDetail?.storageDescription}
                         locationType={locationType}
+                        chassisNo={selectedVehicleDetail?.chassisNo}
                         error={errors.toLocation}
                         onSelect={(o) => {
                           setL("toLocation", o.value);
@@ -3933,10 +3886,6 @@ export default function CreateGatePassPage() {
                           } else {
                             setErrors(p => { const n = { ...p }; delete n.toLocation; return n; });
                           }
-                        }}
-                        onNewLocation={(o) => {
-                          setL("toLocation", o.value);
-                          setSelectedLocationDetail({ plantCode: o.plantCode ?? "", plantDescription: o.plantDescription ?? "", storageLocation: o.storageLocation ?? "", storageDescription: o.storageDescription ?? "" });
                         }}
                       />
                       {errors.toLocation && <p className="text-red-500 text-xs mt-1">{errors.toLocation}</p>}

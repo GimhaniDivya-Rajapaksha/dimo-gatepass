@@ -232,6 +232,89 @@ export async function sendApprovalRequestEmail(
   );
 }
 
+export async function sendRequestedByNotificationEmail(
+  requestedByEmail: string,
+  requestedByName: string,
+  pass: GatePassEmailData
+): Promise<void> {
+  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+  const viewUrl = `${baseUrl}/gate-pass/${pass.gatePassNumber}`;
+
+  const passTypeLabel =
+    pass.passType === "LOCATION_TRANSFER" ? "Location Transfer" :
+    pass.passType === "CUSTOMER_DELIVERY" ? "Customer Delivery" :
+    pass.passType === "AFTER_SALES"       ? "Service / Repair" :
+    pass.passType;
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; margin: 0; padding: 20px; }
+    .container { max-width: 580px; margin: 0 auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    .header { background: linear-gradient(135deg, #1a4f9e, #2563eb); padding: 28px 32px; }
+    .header h1 { color: #fff; margin: 0; font-size: 20px; font-weight: 700; }
+    .header p { color: #bfdbfe; margin: 6px 0 0; font-size: 13px; }
+    .body { padding: 28px 32px; }
+    .pass-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .pass-number { font-family: monospace; font-size: 22px; font-weight: 800; color: #1a4f9e; margin-bottom: 4px; }
+    .pass-type { display: inline-block; background: #dbeafe; color: #1d4ed8; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin-bottom: 16px; }
+    .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .detail-item label { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px; }
+    .detail-item span { font-size: 14px; color: #111827; font-weight: 500; }
+    .btn { display: inline-block; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 700; text-decoration: none; background: linear-gradient(135deg,#1a4f9e,#2563eb); color: #fff; }
+    .footer { background: #f8fafc; padding: 20px 32px; text-align: center; font-size: 12px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>&#x1F4CB; Gate Pass Created — You Are Listed as Requested By</h1>
+      <p>DIMO Gate Pass System — For Your Information</p>
+    </div>
+    <div class="body">
+      <p style="font-size:15px;color:#1f2937;">Hello <strong>${requestedByName}</strong>,</p>
+      <p style="font-size:14px;color:#374151;margin-bottom:20px;">
+        A gate pass has been created and you have been listed as the <strong>Requested By</strong> person by <strong>${pass.createdByName}</strong>.
+      </p>
+
+      <div class="pass-card">
+        <div class="pass-number">${pass.gatePassNumber}</div>
+        <div class="pass-type">${passTypeLabel}</div>
+        <div class="details-grid">
+          <div class="detail-item">
+            <label>Vehicle</label>
+            <span>${pass.vehicle}</span>
+          </div>
+          ${pass.chassis ? `<div class="detail-item"><label>Chassis No</label><span>${pass.chassis}</span></div>` : ""}
+          ${pass.fromLocation ? `<div class="detail-item"><label>From Location</label><span>${pass.fromLocation}</span></div>` : ""}
+          ${pass.toLocation ? `<div class="detail-item"><label>To Location</label><span>${pass.toLocation}</span></div>` : ""}
+          ${pass.departureDate ? `<div class="detail-item"><label>Departure Date</label><span>${pass.departureDate}</span></div>` : ""}
+          ${pass.departureTime ? `<div class="detail-item"><label>Departure Time</label><span>${pass.departureTime}</span></div>` : ""}
+          <div class="detail-item">
+            <label>Created By</label>
+            <span>${pass.createdByName}</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size:13px;color:#6b7280;">This is an informational email. No action is required from you.</p>
+    </div>
+    <div class="footer">DIMO Gate Pass System &bull; This email was sent automatically.<br>Do not reply to this email.</div>
+  </div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    requestedByEmail,
+    `Gate Pass ${pass.gatePassNumber} — You are listed as Requested By`,
+    html
+  );
+}
+
 export async function sendRejectionNotificationEmail(
   initiatorEmail: string,
   initiatorName: string,
