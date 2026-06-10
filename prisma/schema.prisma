@@ -171,6 +171,16 @@ model LocationOption {
   @@unique([plantCode, storageLocation])
 }
 
+model LocationLabel {
+  id              String   @id @default(cuid())
+  plantCode       String
+  storageLocation String
+  label           String
+  createdAt       DateTime @default(now())
+
+  @@unique([plantCode, storageLocation, label])
+}
+
 model RequestedByOption {
   id        String   @id @default(cuid())
   name      String   @unique

@@ -19,6 +19,48 @@ function inferLocationType(loc: { storageLocation: string; storageDescription: s
   return "DIMO";
 }
 
+const PROMO_FINANCE_DESCS = ["promo location", "finan institute", "financial instit", "financial institute", "finan.institute"];
+function isPromoFinanceOption(opt: LocationOption) {
+  return PROMO_FINANCE_DESCS.includes(opt.storageDescription.toLowerCase().trim());
+}
+
+async function expandByLocationLabels(db: typeof prisma, options: LocationOption[]): Promise<LocationOption[]> {
+  const pfOpts = options.filter(isPromoFinanceOption);
+  if (pfOpts.length === 0) return options;
+
+  const dbLabels = await (db as any).locationLabel.findMany({
+    where: { OR: pfOpts.map(o => ({ plantCode: o.plantCode, storageLocation: o.storageLocation })) },
+    orderBy: { createdAt: "asc" },
+  }).catch(() => []) as { plantCode: string; storageLocation: string; label: string }[];
+
+  const labelsMap = new Map<string, string[]>();
+  for (const lbl of dbLabels) {
+    const key = `${lbl.plantCode}|${lbl.storageLocation}`;
+    if (!labelsMap.has(key)) labelsMap.set(key, []);
+    labelsMap.get(key)!.push(lbl.label);
+  }
+
+  const expanded: LocationOption[] = [];
+  for (const opt of options) {
+    const key = `${opt.plantCode}|${opt.storageLocation}`;
+    const labels = labelsMap.get(key);
+    if (labels && labels.length > 0) {
+      for (const lbl of labels) {
+        expanded.push({
+          ...opt,
+          id: `${key}|${encodeURIComponent(lbl)}`,
+          value: `${opt.plantDescription} - ${lbl}`,
+          label: `${opt.plantDescription} - ${lbl}`,
+          storageDescription: lbl,
+        });
+      }
+    } else {
+      expanded.push(opt); // unlabelled — kept as-is
+    }
+  }
+  return expanded;
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -105,15 +147,19 @@ export async function GET(req: NextRequest) {
       const matnr = searchParams.get("matnr") ?? undefined;
 
       if (chassisNo || matnr) {
-        const allRows = await fetchPlantVehicleRows().catch(() => []);
+        // Per-vehicle query: /plant?filter=VIN returns one row per ext destination for that vehicle.
+        // The unfiltered /plant call returns current-location rows only (no ext_plant/ext_sloc).
+        const vehicleFilter = chassisNo || matnr || "";
+        const allRows = await fetchPlantVehicleRows(vehicleFilter).catch(() => []);
 
-        // Find vehicle rows — prefer chassisNo (VIN), fallback to matnr
+        // Defensive in-memory filter in case the SAP filter returns extra rows
         let vehicleRows = chassisNo
-          ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
+          ? allRows.filter(r => !r.chassisNo || r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
           : [];
         if (!vehicleRows.length && matnr) {
           vehicleRows = allRows.filter(r => r.materialNo === matnr);
         }
+        if (!vehicleRows.length) vehicleRows = allRows; // use all if filter didn't narrow down
 
         // Build one option per unique ext_plant|ext_sloc destination.
         // Descriptions come directly from ext_p_des / ext_sloc_des fields in the API response.
@@ -140,26 +186,7 @@ export async function GET(req: NextRequest) {
         // Overlaying custom DB labels before this step would break inferType for renamed entries.
         const filteredOptions = filterApiLocations(options, q, locationType);
 
-        // Overlay custom labels from DB for PROMO/FINANCE entries only
-        const promoFinanceOpts = filteredOptions.filter(o => {
-          const d = o.storageDescription.toLowerCase();
-          return d === "promo location" || d.includes("finan");
-        });
-        if (promoFinanceOpts.length > 0) {
-          const dbLabels = await prisma.locationOption.findMany({
-            where: { OR: promoFinanceOpts.map(o => ({ plantCode: o.plantCode, storageLocation: o.storageLocation })) },
-          }).catch(() => []);
-          for (const opt of filteredOptions) {
-            const dbEntry = dbLabels.find(d => d.plantCode === opt.plantCode && d.storageLocation === opt.storageLocation);
-            if (dbEntry?.storageDescription && dbEntry.storageDescription !== opt.storageDescription) {
-              opt.storageDescription = dbEntry.storageDescription;
-              opt.value = `${opt.plantDescription} - ${dbEntry.storageDescription}`;
-              opt.label = opt.value;
-            }
-          }
-        }
-
-        return NextResponse.json({ options: filteredOptions.slice(0, take) });
+        return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
 
       const isNonDimo = locationType === "PROMOTION" || locationType === "FINANCE" || locationType === "DEALER";
@@ -208,8 +235,8 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const options = [...filteredApi, ...dbAdditions].slice(0, take);
-      return NextResponse.json({ options });
+      const allOptions = [...filteredApi, ...dbAdditions];
+      return NextResponse.json({ options: (await expandByLocationLabels(prisma, allOptions)).slice(0, take) });
     }
 
     if (field === "requestedBy") {
@@ -462,7 +489,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR"];
+  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR", "AREA_SALES_OFFICER"];
   if (!session || !allowedToPost.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -472,7 +499,7 @@ export async function POST(req: NextRequest) {
 
   if (field === "location") {
     // Plant code + sloc code MUST come from the API — no placeholder generation.
-    // This only saves a custom display label for an existing API-sourced PROMO/FINANCE location.
+    // Saves a new label for a PROMO/FINANCE sloc; multiple labels per sloc are allowed.
     const plantCode = normalize(body.plantCode ?? "").toUpperCase();
     const storageLocation = normalize(body.storageLocation ?? "").toUpperCase();
     const plantDescription = normalize(body.plantDescription ?? "");
@@ -483,33 +510,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "plantCode and storageLocation are required" }, { status: 400 });
     }
     if (!storageDescription) {
-      return NextResponse.json({ error: "Label (storageDescription) is required" }, { status: 400 });
+      return NextResponse.json({ error: "Label is required" }, { status: 400 });
     }
     if (!["PROMOTION", "FINANCE"].includes(locationType)) {
       return NextResponse.json({ error: "locationType must be PROMOTION or FINANCE" }, { status: 400 });
     }
 
     try {
-      const upserted = await prisma.locationOption.upsert({
+      // Cache plant/sloc in LocationOption (for non-chassis fallback path)
+      await prisma.locationOption.upsert({
         where: { plantCode_storageLocation: { plantCode, storageLocation } },
-        create: { plantCode, plantDescription, storageLocation, storageDescription, locationType },
-        update: { storageDescription, locationType, ...(plantDescription ? { plantDescription } : {}) },
+        create: {
+          plantCode, plantDescription, storageLocation,
+          storageDescription: locationType === "PROMOTION" ? "Promo location" : "Finan Institute",
+          locationType,
+        },
+        update: { locationType, ...(plantDescription ? { plantDescription } : {}) },
+      });
+
+      // Add new label — labels are immutable once saved (no update field)
+      await (prisma as any).locationLabel.upsert({
+        where: { plantCode_storageLocation_label: { plantCode, storageLocation, label: storageDescription } },
+        create: { plantCode, storageLocation, label: storageDescription },
+        update: {},
       });
 
       return NextResponse.json({
         option: {
-          id: upserted.id,
-          value: `${upserted.plantDescription} - ${upserted.storageDescription}`,
-          label: `${upserted.plantDescription} - ${upserted.storageDescription}`,
-          plantCode: upserted.plantCode,
-          plantDescription: upserted.plantDescription,
-          storageLocation: upserted.storageLocation,
-          storageDescription: upserted.storageDescription,
+          id: `${plantCode}|${storageLocation}|${encodeURIComponent(storageDescription)}`,
+          value: `${plantDescription} - ${storageDescription}`,
+          label: `${plantDescription} - ${storageDescription}`,
+          plantCode,
+          plantDescription,
+          storageLocation,
+          storageDescription,
           source: "db",
         },
       });
     } catch (e) {
-      console.error("Location upsert error:", e);
+      console.error("Location label save error:", e);
       return NextResponse.json({ error: "Failed to save location label." }, { status: 500 });
     }
   }

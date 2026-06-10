@@ -199,9 +199,7 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
     });
     const data: { option?: LookupOption; error?: string } = await res.json();
     if (data.option) {
-      setOptions(prev => prev.map(o => o.id === opt.id
-        ? { ...o, storageDescription: data.option!.storageDescription, value: data.option!.value, label: data.option!.label }
-        : o));
+      await load(); // reload list — new label appears as an additional selectable row
       setLabelingId(null); setLabelInput("");
     } else { setLabelError(data.error ?? "Failed to save"); }
     setLabelSaving(false);
@@ -264,25 +262,22 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
                     )}
                   </button>
 
-                  {/* Show "+ Add label" only for unlabelled entries */}
-                  {isDefault(o.storageDescription) && (
-                    <button type="button" title="Add label"
-                      onClick={() => {
-                        setLabelingId(labelingId === o.id ? null : o.id);
-                        setLabelInput("");
-                        setLabelError("");
-                      }}
-                      className="flex items-center gap-1 px-2 mr-1 py-1 rounded text-xs font-semibold flex-shrink-0 hover:bg-green-100 transition-colors"
-                      style={{ color: "#16a34a", border: "1px solid #bbf7d0" }}>
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Add
-                    </button>
-                  )}
+                  {/* "+ Add" label button — available on all rows so multiple labels can be added per sloc */}
+                  <button type="button" title="Add label"
+                    onClick={() => {
+                      setLabelingId(labelingId === o.id ? null : o.id);
+                      setLabelInput("");
+                      setLabelError("");
+                    }}
+                    className="flex items-center gap-1 px-2 mr-1 py-1 rounded text-xs font-semibold flex-shrink-0 hover:bg-green-100 transition-colors"
+                    style={{ color: "#16a34a", border: "1px solid #bbf7d0" }}>
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add
+                  </button>
                 </div>
 
-                {/* Inline label input — only for unlabelled entries */}
                 {labelingId === o.id && (
                   <div className="px-3 pb-3 pt-2 space-y-1.5" style={{ background: "#f0fdf4" }}>
                     <p className="text-xs font-semibold" style={{ color: "#15803d" }}>Add label for {o.plantDescription}</p>
