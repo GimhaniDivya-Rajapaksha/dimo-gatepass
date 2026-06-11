@@ -145,12 +145,13 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
 }
 
 /* ─── Location Picker (Promotion / Finance) ─────────────────────────── */
-function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, chassisNo }: {
+function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, error, chassisNo, matnr }: {
   value: string; displayValue?: string;
   onSelect: (o: LookupOption) => void;
   locationType: "PROMOTION" | "FINANCE";
   error?: string;
   chassisNo?: string;
+  matnr?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<LookupOption[]>([]);
@@ -166,11 +167,12 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
   async function load() {
     const params = new URLSearchParams({ field: "location", locationType, limit: "200" });
     if (chassisNo) params.set("chassisNo", chassisNo);
+    if (matnr) params.set("matnr", matnr);
     const res = await fetch(`/api/lookups?${params.toString()}`);
     const data: { options: LookupOption[] } = await res.json();
     setOptions(data.options ?? []);
   }
-  useEffect(() => { void load(); }, [locationType, chassisNo]);
+  useEffect(() => { void load(); }, [locationType, chassisNo, matnr]);
 
   useEffect(() => {
     if (!open) return;
@@ -3659,6 +3661,7 @@ export default function CreateGatePassPage() {
                                           displayValue={v.toLocationStorage}
                                           locationType={v.toLocationType}
                                           chassisNo={v.chassisNo}
+                                          matnr={v.matnr}
                                           error={errors.toLocation && !v.toLocation ? errors.toLocation : undefined}
                                           onSelect={(option) => updateLtBulkVehicle(v.vehicle, {
                                             toLocation: option.value,
@@ -3942,6 +3945,7 @@ export default function CreateGatePassPage() {
                         displayValue={selectedLocationDetail?.storageDescription}
                         locationType={locationType}
                         chassisNo={selectedVehicleDetail?.chassisNo}
+                        matnr={selectedVehicleDetail?.matnr}
                         error={errors.toLocation}
                         onSelect={(o) => {
                           setL("toLocation", o.value);

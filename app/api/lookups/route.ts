@@ -147,19 +147,19 @@ export async function GET(req: NextRequest) {
       const matnr = searchParams.get("matnr") ?? undefined;
 
       if (chassisNo || matnr) {
-        // Per-vehicle query: /plant?filter=VIN returns one row per ext destination for that vehicle.
-        // The unfiltered /plant call returns current-location rows only (no ext_plant/ext_sloc).
-        const vehicleFilter = chassisNo || matnr || "";
-        const allRows = await fetchPlantVehicleRows(vehicleFilter).catch(() => []);
+        // Use the unfiltered ALL-vehicles SAP call — it returns every vehicle with its
+        // ext_plant / ext_sloc destinations included. Filter in-memory by VIN / matnr.
+        // (Previously a per-vehicle ?filter=VIN URL was tried here but that endpoint
+        //  returned wrong VINs or no ext data, causing PROMO/FINANCE to be empty.)
+        const allRows = await fetchPlantVehicleRows().catch(() => []);
 
-        // Defensive in-memory filter in case the SAP filter returns extra rows
+        // Find this vehicle's rows — prefer chassisNo (VIN), fallback to matnr
         let vehicleRows = chassisNo
-          ? allRows.filter(r => !r.chassisNo || r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
+          ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
           : [];
         if (!vehicleRows.length && matnr) {
           vehicleRows = allRows.filter(r => r.materialNo === matnr);
         }
-        if (!vehicleRows.length) vehicleRows = allRows; // use all if filter didn't narrow down
 
         // Build one option per unique ext_plant|ext_sloc destination.
         // Descriptions come directly from ext_p_des / ext_sloc_des fields in the API response.
@@ -189,20 +189,24 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
 
-      const isNonDimo = locationType === "PROMOTION" || locationType === "FINANCE" || locationType === "DEALER";
+      // No vehicle selected — use SAP current-location data for all types.
+      // DEALER gets a DB fallback for slots with no vehicles currently parked.
+      // PROMO/FINANCE: SAP live only (no DB fallback per user instruction).
+      const isDealer = locationType === "DEALER";
       const [apiLocations, dbRows] = await Promise.all([
         fetchPlantLocationOptions().catch(() => []),
-        isNonDimo ? prisma.locationOption.findMany() : Promise.resolve([]),
+        isDealer ? prisma.locationOption.findMany() : Promise.resolve([]),
       ]);
 
       // SAP live — filtered by type + query
       const filteredApi = filterApiLocations(apiLocations, q, locationType);
       const apiKeys = new Set(filteredApi.map((l) => `${l.plantCode}|${l.storageLocation}`));
 
-      // DB fallback for non-DIMO types: adds locations that are in the DB (from prior syncs or manual adds)
-      // but currently have no vehicles in SAP so they're invisible in the live feed.
+      // DB fallback for DEALER only: adds dealer slocs that are in the DB but currently have no
+      // vehicles in SAP so they're invisible in the live feed.
+      // PROMO/FINANCE: DB fallback disabled — only API data used (see above).
       const dbAdditions: typeof filteredApi = [];
-      if (isNonDimo) {
+      if (isDealer) {
         for (const dbloc of dbRows) {
           const key = `${dbloc.plantCode}|${dbloc.storageLocation}`;
           if (apiKeys.has(key)) continue;
@@ -210,15 +214,9 @@ export async function GET(req: NextRequest) {
           const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
           if (!value) continue;
 
-          // Match by explicit locationType stored in DB, or by exact description inference
-          const inferredType = (() => {
-            if (dbloc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
-            const desc = storageDesc.trim().toLowerCase();
-            if (desc === "promo location") return "PROMOTION";
-            if (desc === "finan institute" || desc === "financial instit" || desc === "financial institute") return "FINANCE";
-            return "DIMO";
-          })();
-          if (dbloc.locationType !== locationType && inferredType !== locationType) continue;
+          // Only DEALER entries (D-prefix sloc)
+          if (!dbloc.storageLocation.toUpperCase().startsWith("D")) continue;
+          if (dbloc.locationType && dbloc.locationType !== "DEALER") continue;
 
           if (q && ![value, dbloc.plantCode, dbloc.storageLocation].join(" ").toLowerCase().includes(q.toLowerCase())) continue;
 

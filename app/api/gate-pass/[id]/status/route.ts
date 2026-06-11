@@ -776,7 +776,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Print Gate OUT: initiator printing the gate pass counts as Gate OUT confirmation.
   // Security no longer needs to confirm Gate OUT for LT and CD when initiator prints.
   if (action === "print_gate_out") {
-    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR";
+    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR" || session.user.role === "AREA_SALES_OFFICER";
     if (!canPrintRelease || gatePass.createdById !== session.user.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
@@ -823,21 +823,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
-      const [destSecurity, destInitiators] = await Promise.all([
+      const [destSecurity, destInitiators, destAsos] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
         prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...locationFilter } }),
       ]);
-      const allDestUsers = [...destSecurity, ...destInitiators];
+      const allDestUsers = [...destSecurity, ...destInitiators, ...destAsos];
       if (allDestUsers.length > 0) {
-        const destSOIds = new Set(destSecurity.map((s: { id: string }) => s.id));
+        const destSOIds  = new Set(destSecurity.map((s: { id: string }) => s.id));
+        const destAsoIds = new Set(destAsos.map((a: { id: string }) => a.id));
         await prisma.notification.createMany({
           data: allDestUsers.map((u: { id: string }) => ({
             userId: u.id,
             type: "GATE_PASS_RECEIVED",
-            title: destSOIds.has(u.id) ? "Incoming Vehicle — Confirm Gate IN on Arrival" : "Vehicle Arriving — Confirm Gate IN When It Reaches You",
+            title: destSOIds.has(u.id)
+              ? "Incoming Vehicle — Confirm Gate IN on Arrival"
+              : destAsoIds.has(u.id)
+                ? "Incoming Vehicle — Confirm Arrival at Your Plant"
+                : "Vehicle Arriving — Confirm Gate IN When It Reaches You",
             message: destSOIds.has(u.id)
-              ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — initiator printed and released. Vehicle is en route to ${toLoc ?? "your location"}. Please confirm Gate IN when it arrives.`
-              : `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm when it arrives.`,
+              ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — gate pass printed and released. Vehicle is en route to ${toLoc ?? "your location"}. Please confirm Gate IN when it arrives.`
+              : destAsoIds.has(u.id)
+                ? `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your plant"}. Open ASO Vehicle Arrivals to confirm when it arrives.`
+                : `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${toLoc ?? "your location"}. Check Vehicle Arrivals to confirm when it arrives.`,
             gatePassId: gatePass.id,
           })),
         });
@@ -967,20 +975,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
 
-      // Notify destination ASOs and initiators
+      // Notify destination SO, ASOs and initiators
       if (gatePass.toLocation) {
         const destUsers = await prisma.user.findMany({
           where: {
-            role: { in: ["AREA_SALES_OFFICER", "INITIATOR"] as any[] },
+            role: { in: ["SECURITY_OFFICER", "AREA_SALES_OFFICER", "INITIATOR"] as any[] },
             defaultLocation: ciStartsWithPlant(gatePass.toLocation),
           },
           select: { id: true, role: true },
         });
         for (const u of destUsers) {
           if (!notifyMap.has(u.id)) {
+            const isSO = u.role === "SECURITY_OFFICER";
             notifyMap.set(u.id, {
-              title: "Incoming Vehicle — Confirm Arrival",
-              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${gatePass.toLocation}. Open your dashboard to confirm when it arrives.`,
+              title: isSO
+                ? "Incoming Vehicle — Confirm Gate IN on Arrival"
+                : "Incoming Vehicle — Confirm Arrival",
+              message: isSO
+                ? `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle released and en route to ${gatePass.toLocation}. Please confirm Gate IN when it arrives.`
+                : `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle is heading to ${gatePass.toLocation}. Open your dashboard to confirm when it arrives.`,
             });
           }
         }
