@@ -217,7 +217,7 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
   return `
   <div class="header">
     <div class="header-logo">
-      <img src="${DIMO_LOGO}" alt="DIMO" style="width:105px;height:auto;display:block;">
+      <img src="${process.env.NEXTAUTH_URL ?? "https://dimo-gatepass.vercel.app"}/logo-dark.jpg" alt="DIMO" style="width:105px;height:auto;display:block;">
     </div>
     <div class="header-title">
       <div class="co-name">Diesel &amp; Motor Engineering Plc.</div>
