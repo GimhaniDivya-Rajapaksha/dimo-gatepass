@@ -88,6 +88,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
   }
 
+  // Block old approver email links after reassignment — token must belong to current intendedApprover
+  if (verified.approverId && (gatePass as any).intendedApprover) {
+    const tokenApprover = await prisma.user.findFirst({
+      where: { id: verified.approverId },
+      select: { name: true },
+    });
+    if (tokenApprover && tokenApprover.name.toLowerCase() !== ((gatePass as any).intendedApprover as string).toLowerCase()) {
+      return new NextResponse(errorPage("This approval link is no longer valid. The approver for this gate pass has been changed. Please contact the initiator."), { status: 403, headers: { "Content-Type": "text/html" } });
+    }
+  }
+
   if (action === "approve") {
     const approver = await findTokenApprover(verified.approverId);
     if (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved) {
@@ -180,6 +191,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     || (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved);
   if (!canProcessByEmail) {
     return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
+  }
+
+  // Block old approver email links after reassignment — token must belong to current intendedApprover
+  if (verified.approverId && (gatePass as any).intendedApprover) {
+    const tokenApprover = await prisma.user.findFirst({
+      where: { id: verified.approverId },
+      select: { name: true },
+    });
+    if (tokenApprover && tokenApprover.name.toLowerCase() !== ((gatePass as any).intendedApprover as string).toLowerCase()) {
+      return new NextResponse(errorPage("This approval link is no longer valid. The approver for this gate pass has been changed. Please contact the initiator."), { status: 403, headers: { "Content-Type": "text/html" } });
+    }
   }
 
   const approver = await findTokenApprover(verified.approverId);

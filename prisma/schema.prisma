@@ -132,6 +132,8 @@ model GatePass {
   fromStorageLocation String?
   sapVehicleId        String?
   asoCreated          Boolean  @default(false)
+  gateOutBy           String? // name of user who performed gate out (SO / ASO / Initiator)
+  gateInBy            String? // name of user who confirmed gate in (SO / ASO / Initiator / Recipient)
 
   createdById    String
   createdBy      User           @relation("InitiatedBy", fields: [createdById], references: [id])
@@ -148,14 +150,19 @@ model GatePass {
 }
 
 model ServiceOrder {
-  id          String   @id @default(cuid())
-  gatePassId  String
-  gatePass    GatePass @relation(fields: [gatePassId], references: [id])
-  orderId     String
-  orderStatus String   // "Open" | "Close"
-  payTerm     String   // "Immediate" | "Credit" | etc.
-  isAssigned  Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  gatePassId      String
+  gatePass        GatePass @relation(fields: [gatePassId], references: [id])
+  orderId         String
+  orderStatus     String            // bezei — human-readable status (e.g. "Closed")
+  orderStatusCode String   @default("")  // hstat  (e.g. "H070")
+  billingType     String   @default("")  // fkart  (e.g. "ZSF2", "ZVVO")
+  payTermCode     String   @default("")  // zterm  (e.g. "ZC01")
+  payTerm         String   @default("")  // paymenttermsname (e.g. "Payment Immediate")
+  cancelled       Boolean  @default(false) // fksto
+  isHappyPath     Boolean  @default(false) // hstat=H070 && (fkart=ZSF2||ZVVO) && zterm=ZC01 && !cancelled
+  isAssigned      Boolean  @default(false) // cashier marked as paid
+  createdAt       DateTime @default(now())
 }
 
 model LocationOption {

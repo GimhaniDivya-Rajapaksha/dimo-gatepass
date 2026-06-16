@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
-    fetchPlantVehicleRows().catch(() => []),
+    fetchPlantVehicleRows(chassisNo || vehicleNo || undefined).catch(() => []),
     fetchPlantLocationOptions().catch(() => []),
   ]);
 

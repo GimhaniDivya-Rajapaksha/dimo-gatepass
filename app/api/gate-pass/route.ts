@@ -464,151 +464,22 @@ export async function POST(req: NextRequest) {
     ).catch((e: unknown) => console.error("[email] requestedBy notification failed:", e));
   }
 
-  // CUSTOMER_DELIVERY: auto-route based on SAP payTerm at creation
-  // IMMEDIATE payment terms → Cashier (CASHIER_REVIEW)
-  // CREDIT payment terms   → Approver (PENDING_APPROVAL)
-  // No SAP data / unknown  → Approver (PENDING_APPROVAL, safe default)
+  // CUSTOMER_DELIVERY: route based on SAP isHappyPath (FS §2.4)
+  // Happy path (hstat=H070, fkart=ZSF2|ZVVO, zterm=ZC01, !cancelled) → ALL orders happy → Cashier
+  // Any non-happy order, or no orders → Approver (PENDING_APPROVAL)
+  // SAP fetch error → show error notification to initiator, route to Approver
   if (body.passType === "CUSTOMER_DELIVERY") {
-    const immediateTerms = ["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"];
     const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
     const approverLocation = (createData.fromLocation as string | null) ?? null;
+    const creatorName = session.user.name || "Unknown";
 
-    try {
-      const { fetchSapOrders } = await import("@/lib/sap");
-      const chassisNo = (createData.chassis as string | null) ?? "";
-      const plateNo   = (createData.vehicle as string) ?? "";
-      const sapOrders = await fetchSapOrders(chassisNo, plateNo);
-      const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
-
-      if (active.length > 0) {
-        // Store SAP orders for display
-        await prisma.serviceOrder.createMany({
-          data: active.map((o) => ({
-            gatePassId:  gatePass.id,
-            orderId:     o.orderId,
-            orderStatus: o.orderStatus || o.orderStatusCode || "—",
-            payTerm:     `HSTAT:${o.orderStatusCode}|${o.billingType}|${o.billingDate}`,
-            isAssigned:  o.orderStatusCode === "H070",
-          })),
-        });
-
-        // Route based on payTerm ONLY (H070/invoice status is irrelevant for payment routing)
-        const hasImmediate = active.some((o) =>
-          immediateTerms.includes((o.payTerm || o.payTermCode || "").toLowerCase().trim())
-        );
-        const hasCredit = active.some((o) => {
-          const t = (o.payTerm || o.payTermCode || "").toLowerCase().trim();
-          return t !== "" && !immediateTerms.includes(t);
-        });
-
-        if (hasImmediate && !hasCredit) {
-          // Immediate-only payment → Cashier
-          await prisma.gatePass.update({
-            where: { id: gatePass.id },
-            data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
-          });
-          gatePass.status = "CASHIER_REVIEW";
-          const cashiers = await getCashiersForLocation(approverLocation);
-          if (cashiers.length > 0) {
-            await prisma.notification.createMany({
-              data: cashiers.map((c) => ({
-                userId: c.id,
-                type: "CASHIER_REVIEW_REQUIRED",
-                title: "CD Payment Clearance Required",
-                message: `${gatePassNumber} (${gatePass.vehicle}) — Customer Delivery, immediate payment. Please confirm payment clearance.`,
-                gatePassId: gatePass.id,
-              })),
-            });
-          }
-          return NextResponse.json({ gatePass }, { status: 201 });
-        } else if (hasCredit && !hasImmediate) {
-          // Credit-only orders → same-location Approver
-          await prisma.gatePass.update({
-            where: { id: gatePass.id },
-            data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
-          });
-          gatePass.status = "PENDING_APPROVAL";
-          const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
-          if (approvers.length > 0) {
-            await prisma.notification.createMany({
-              data: approvers.map((a) => ({
-                userId: a.id,
-                type: "GATE_PASS_SUBMITTED",
-                title: "Customer Delivery Approval Required",
-                message: `${gatePassNumber} (${gatePass.vehicle}) — credit terms detected. Please review this request.`,
-                gatePassId: gatePass.id,
-              })),
-            });
-            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
-          }
-          return NextResponse.json({ gatePass }, { status: 201 });
-        } else if (hasImmediate && hasCredit) {
-          // Mixed → cashier + approver in parallel
-          await prisma.gatePass.update({
-            where: { id: gatePass.id },
-            data: {
-              status: "CASHIER_REVIEW",
-              paymentType: "MIXED",
-              hasImmediate: true,
-              hasCredit: true,
-              cashierCleared: false,
-              creditApproved: false,
-            },
-          });
-          gatePass.status = "CASHIER_REVIEW";
-          const [cashiers, approvers] = await Promise.all([
-            getCashiersForLocation(approverLocation),
-            findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null),
-          ]);
-          if (cashiers.length > 0) {
-            await prisma.notification.createMany({
-              data: cashiers.map((c) => ({
-                userId: c.id,
-                type: "CASHIER_REVIEW_REQUIRED",
-                title: "CD Payment Clearance Required",
-                message: `${gatePassNumber} (${gatePass.vehicle}) — immediate-payment orders need cashier review.`,
-                gatePassId: gatePass.id,
-              })),
-            });
-          }
-          if (approvers.length > 0) {
-            await prisma.notification.createMany({
-              data: approvers.map((a) => ({
-                userId: a.id,
-                type: "GATE_PASS_SUBMITTED",
-                title: "Customer Delivery Approval Required",
-                message: `${gatePassNumber} (${gatePass.vehicle}) — credit terms detected. Please review in parallel with cashier.`,
-                gatePassId: gatePass.id,
-              })),
-            });
-            await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
-          }
-          return NextResponse.json({ gatePass }, { status: 201 });
-        }
-      } else {
-        // No SAP orders → approver in same location
-        await prisma.gatePass.update({
-          where: { id: gatePass.id },
-          data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
-        });
-        gatePass.status = "PENDING_APPROVAL";
-        const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
-        if (approvers.length > 0) {
-          await prisma.notification.createMany({
-            data: approvers.map((a) => ({
-              userId: a.id,
-              type: "GATE_PASS_SUBMITTED",
-              title: "Customer Delivery Approval Required",
-              message: `${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`,
-              gatePassId: gatePass.id,
-            })),
-          });
-          await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
-        }
-        return NextResponse.json({ gatePass }, { status: 201 });
-      }
-    } catch (err) {
-      console.error("[CD] SAP fetch error:", err);
+    // Helper: route to Approver (credit path)
+    async function routeToApprover(message: string) {
+      await prisma.gatePass.update({
+        where: { id: gatePass.id },
+        data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
+      });
+      gatePass.status = "PENDING_APPROVAL";
       const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
       if (approvers.length > 0) {
         await prisma.notification.createMany({
@@ -616,12 +487,86 @@ export async function POST(req: NextRequest) {
             userId: a.id,
             type: "GATE_PASS_SUBMITTED",
             title: "Customer Delivery Approval Required",
-            message: `${gatePassNumber} (${gatePass.vehicle}) — SAP order lookup failed. Please review manually.`,
+            message,
             gatePassId: gatePass.id,
           })),
         });
-        await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+        await sendApprovalEmailsToApprovers(approvers, gatePass, creatorName);
       }
+    }
+
+    try {
+      const { fetchSapOrders } = await import("@/lib/sap");
+      const chassisNo = (createData.chassis as string | null) ?? "";
+      const plateNo   = (createData.vehicle as string) ?? "";
+      const sapOrders = await fetchSapOrders(chassisNo, plateNo);
+      // Include all non-cancelled orders with an orderId
+      const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
+
+      if (active.length === 0) {
+        // No SAP orders → route to Approver
+        await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`);
+        return NextResponse.json({ gatePass }, { status: 201 });
+      }
+
+      // Store all orders with proper fields (no more HSTAT-format string)
+      await prisma.serviceOrder.createMany({
+        data: active.map((o) => ({
+          gatePassId:      gatePass.id,
+          orderId:         o.orderId,
+          orderStatus:     o.orderStatus || o.orderStatusCode || "—",
+          orderStatusCode: o.orderStatusCode,
+          billingType:     o.billingType,
+          payTermCode:     o.payTermCode,
+          payTerm:         o.payTerm,
+          cancelled:       o.cancelled,
+          isHappyPath:     o.isHappyPath,
+          isAssigned:      false,
+        })),
+      });
+
+      // Routing: ALL orders must be happy path for Immediate → Cashier
+      // Any non-happy-path order → Credit → Approver (no Mixed path)
+      const allImmediate = active.every((o) => o.isHappyPath);
+
+      if (allImmediate) {
+        // All immediate → Cashier
+        await prisma.gatePass.update({
+          where: { id: gatePass.id },
+          data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
+        });
+        gatePass.status = "CASHIER_REVIEW";
+        const cashiers = await getCashiersForLocation(approverLocation);
+        if (cashiers.length > 0) {
+          await prisma.notification.createMany({
+            data: cashiers.map((c) => ({
+              userId: c.id,
+              type: "CASHIER_REVIEW_REQUIRED",
+              title: "CD Payment Clearance Required",
+              message: `${gatePassNumber} (${gatePass.vehicle}) — Customer Delivery, immediate payment. Please confirm payment clearance.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+        }
+        return NextResponse.json({ gatePass }, { status: 201 });
+      } else {
+        // One or more non-happy-path orders → Credit → Approver
+        await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — credit payment terms detected. Please review and approve.`);
+        return NextResponse.json({ gatePass }, { status: 201 });
+      }
+    } catch (err) {
+      // SAP fetch failed — notify initiator and route to Approver as safe default
+      console.error("[CD] SAP fetch error:", err);
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_SUBMITTED",
+          title: "SAP Order Lookup Failed",
+          message: `Gate pass ${gatePassNumber} was created but SAP order data could not be retrieved. The pass has been sent to an approver for manual review.`,
+          gatePassId: gatePass.id,
+        },
+      });
+      await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — SAP order lookup failed. Please review manually.`);
       return NextResponse.json({ gatePass }, { status: 201 });
     }
   }

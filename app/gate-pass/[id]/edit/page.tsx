@@ -145,6 +145,75 @@ function SearchDropdown({ value, onChange, onSelect, placeholder, fetchUrl }: {
   );
 }
 
+type AdUser = { id: string; name: string; email: string };
+
+/** AD user search dropdown — calls /api/ad-users, shows name + email */
+function AdUserSearchDropdown({ value, onChange, onSelect, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (user: AdUser) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen]       = useState(false);
+  const [options, setOptions] = useState<AdUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref   = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function search(q: string) {
+    if (timer.current) clearTimeout(timer.current);
+    if (!q.trim()) { setOptions([]); return; }
+    setLoading(true);
+    timer.current = setTimeout(() => {
+      fetch(`/api/ad-users?q=${encodeURIComponent(q)}`)
+        .then(r => r.json())
+        .then((d: { users?: AdUser[] }) => setOptions(d.users ?? []))
+        .finally(() => setLoading(false));
+    }, 250);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        type="text" value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); search(e.target.value); }}
+        onFocus={() => { setOpen(true); if (value) search(value); }}
+        placeholder={placeholder ?? "Search by name or email..."}
+        className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+        style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+      />
+      {loading && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg className="w-4 h-4 animate-spin" style={{ color: "var(--text-muted)" }} fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+        </span>
+      )}
+      {open && options.length > 0 && (
+        <div className="absolute z-30 mt-1 w-full rounded-xl border shadow-2xl overflow-hidden"
+          style={{ background: "var(--surface)", borderColor: "var(--border)", maxHeight: 220, overflowY: "auto" }}>
+          {options.map(u => (
+            <button key={u.id} type="button"
+              onMouseDown={() => { onSelect(u); setOpen(false); setOptions([]); }}
+              className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors">
+              <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{u.name}</p>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>{u.email}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────────────────────── */
 export default function EditPendingGatePassPage() {
   const { id } = useParams<{ id: string }>();
@@ -167,7 +236,8 @@ export default function EditPendingGatePassPage() {
   const [departureTime, setDepartureTime] = useState("");
   const [toLocation,    setToLocation]    = useState("");
   const [outReason,     setOutReason]     = useState("");
-  const [requestedBy,   setRequestedBy]   = useState("");
+  const [requestedBy,      setRequestedBy]      = useState("");
+  const [requestedByEmail, setRequestedByEmail] = useState("");
   const [transportMode, setTransportMode] = useState("");
   const [companyName,   setCompanyName]   = useState("");
   const [carrierRegNo,  setCarrierRegNo]  = useState("");
@@ -195,6 +265,7 @@ export default function EditPendingGatePassPage() {
       setToLocation((p.toLocation as string) ?? "");
       setOutReason((p.outReason as string) ?? "");
       setRequestedBy((p.requestedBy as string) ?? "");
+      setRequestedByEmail((p.requestedByEmail as string) ?? "");
       setTransportMode((p.transportMode as string) ?? "");
       setCompanyName((p.companyName as string) ?? "");
       setCarrierRegNo((p.carrierRegNo as string) ?? "");
@@ -233,7 +304,7 @@ export default function EditPendingGatePassPage() {
         body: JSON.stringify({
           action: "initiator_reassign",
           newApprover: approver, reason,
-          departureDate, departureTime, toLocation, outReason, requestedBy,
+          departureDate, departureTime, toLocation, outReason, requestedBy, requestedByEmail,
           transportMode, companyName, carrierRegNo, driverName, driverNIC,
           driverContact, mileage, insurance, garagePlate,
         }),
@@ -337,10 +408,15 @@ export default function EditPendingGatePassPage() {
             />
           </Field>
           <Field label="Requested By">
-            <input type="text" value={requestedBy} onChange={e => setRequestedBy(e.target.value)}
-              placeholder="Name of person who requested..."
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            <AdUserSearchDropdown
+              value={requestedBy}
+              onChange={(v) => { setRequestedBy(v); setRequestedByEmail(""); }}
+              onSelect={(u) => { setRequestedBy(u.name); setRequestedByEmail(u.email); }}
+              placeholder="Search by name or email..."
+            />
+            {requestedByEmail && (
+              <p className="text-xs mt-1 px-1" style={{ color: "var(--text-muted)" }}>{requestedByEmail}</p>
+            )}
           </Field>
         </div>
       </div>

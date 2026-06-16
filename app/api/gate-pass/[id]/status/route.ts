@@ -349,17 +349,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     if (newCdStatus === "APPROVED") {
-      // Notify initiator to print the gate pass — printing bypasses security for CD
+      // Notify initiator to print gate pass (same as LT: initiator print OR Security Gate OUT, first one wins)
       await prisma.notification.create({
         data: {
           userId: gatePass.createdById,
           type: "GATE_PASS_APPROVED",
           title: "Payment Cleared — Print Gate Pass to Release Vehicle",
-          message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by Cashier. Please print the gate pass to complete the delivery. No Security Officer step required.`,
+          message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by Cashier. Please print the gate pass to complete the delivery.`,
           gatePassId: gatePass.id,
         },
       });
-      // Security is NOT notified — for Customer Delivery the initiator prints to bypass Security Gate OUT.
+      // Notify Security Officers at fromLocation — same as LT: whoever acts first (Security Gate OUT or Initiator print) → COMPLETED
+      const securityOfficers = await findSOsAtSamePlant(gatePass.fromLocation as string | null);
+      if (securityOfficers.length > 0) {
+        await prisma.notification.createMany({
+          data: securityOfficers.map((s: { id: string }) => ({
+            userId: s.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Customer Delivery — Payment Cleared — Confirm Gate OUT",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — immediate payment cleared by Cashier. Please confirm Gate OUT.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
     } else {
       // Cashier done but credit approval still pending — notify initiator
       await prisma.notification.create({
@@ -445,6 +457,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       where: { id },
       data: {
         status: "COMPLETED",
+        gateInBy: session.user.name ?? null,
         ...(body.receivedChassis ? { chassis: body.receivedChassis } : {}),
         ...(body.mismatchNote ? { comments: `[MISMATCH] ${body.mismatchNote}` } : {}),
       },
@@ -611,6 +624,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         status: isCdPass ? "COMPLETED" : "GATE_OUT",
         departureDate: actualDepartureDate,
         departureTime: actualDepartureTime,
+        gateOutBy: session.user.name ?? null,
         ...(mismatchNote ? { comments: `[MISMATCH] ${mismatchNote}` } : {}),
       },
     });
@@ -801,6 +815,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         status: isCdPass ? "COMPLETED" : "GATE_OUT",
         departureDate: now.toISOString().split("T")[0],
         departureTime: now.toTimeString().slice(0, 5),
+        gateOutBy: session.user.name ?? null,
       },
     });
 
@@ -932,7 +947,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       const updated = await prisma.gatePass.update({
         where: { id },
-        data: { status: "GATE_OUT", departureDate, departureTime },
+        data: { status: "GATE_OUT", departureDate, departureTime, gateOutBy: session.user.name ?? null },
       });
 
       // SAP write — uses toPlantCode + toStorageLocation
@@ -1256,6 +1271,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       where: { id },
       data: {
         status: "COMPLETED",
+        gateInBy: session.user.name ?? null,
         ...(receivedChassis ? { chassis: receivedChassis } : {}),
         ...(mismatchNote ? { comments: `[MISMATCH] ${mismatchNote}` } : {}),
       },
@@ -1451,28 +1467,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Override already requested" }, { status: 400 });
     }
 
+    const approverId: string | undefined = body.approverId;
+    if (!approverId) return NextResponse.json({ error: "approverId is required" }, { status: 400 });
+
+    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true, role: true } });
+    if (!approverUser || approverUser.role !== "APPROVER") {
+      return NextResponse.json({ error: "Selected user is not an approver" }, { status: 400 });
+    }
+
     await prisma.gatePass.update({
       where: { id },
       data: { cashierOverrideRequested: true } as any,
     });
 
-    // Find this cashier's assigned approver (approverId on the cashier user)
-    const cashierUser = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { approverId: true, name: true },
-    });
+    const cashierName = session.user.name || "";
 
-    if (cashierUser?.approverId) {
-      await prisma.notification.create({
-        data: {
-          userId: cashierUser.approverId,
-          type: "GATE_PASS_SUBMITTED",
-          title: "Payment Override Requested — Action Required",
-          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Cashier ${cashierUser.name ?? ""} has requested a payment override. Please review and approve if the vehicle can proceed to Gate OUT without full payment clearance.`,
-          gatePassId: gatePass.id,
-        },
-      });
-    }
+    await prisma.notification.create({
+      data: {
+        userId: approverId,
+        type: "GATE_PASS_SUBMITTED",
+        title: "Payment Override Requested — Action Required",
+        message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — Cashier ${cashierName} has requested a payment override. Please review and approve if the vehicle can proceed to Gate OUT without full payment clearance.`,
+        gatePassId: gatePass.id,
+      },
+    });
 
     // Also notify the pass creator
     await prisma.notification.create({
@@ -1480,7 +1498,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         userId: gatePass.createdById,
         type: "GATE_PASS_SUBMITTED",
         title: "Payment Override Requested",
-        message: `${gatePass.gatePassNumber} — The cashier has escalated the payment clearance to an approver for override approval. You will be notified when approved.`,
+        message: `${gatePass.gatePassNumber} — The cashier has escalated the payment clearance to ${approverUser.name ?? "an approver"} for override approval. You will be notified when approved.`,
         gatePassId: gatePass.id,
       },
     });

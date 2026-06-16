@@ -37,6 +37,7 @@ type ServiceOrder = {
   orderStatus: string;
   payTerm: string;
   isAssigned: boolean;
+  isHappyPath: boolean;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -142,13 +143,9 @@ function OrderModal({
   const [snapshotUnpaidOrders, setSnapshotUnpaidOrders] = useState<ServiceOrder[]>([]);
   const invoiceRef = useRef<HTMLDivElement>(null);
 
-  // Cashier only handles immediate-payment orders; credit orders go to Approver separately
-  const immediateTerms = ["immediate", "zc01", "payment immediate", "cash", "pay immediately w/o deduction", ""];
-  const immediateOrders = orders.filter((o) => immediateTerms.includes((o.payTerm || "").toLowerCase().trim()));
-  const creditOrders    = orders.filter((o) => {
-    const t = (o.payTerm || "").toLowerCase().trim();
-    return t !== "" && !immediateTerms.includes(t);
-  });
+  // Cashier only handles happy-path (immediate payment) orders; credit orders go to Approver separately
+  const immediateOrders = orders.filter((o) => o.isHappyPath);
+  const creditOrders    = orders.filter((o) => !o.isHappyPath);
 
   const available = immediateOrders.filter((o) => !o.isAssigned);
   const assigned   = immediateOrders.filter((o) => o.isAssigned);

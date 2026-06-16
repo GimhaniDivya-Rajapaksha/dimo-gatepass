@@ -150,7 +150,7 @@ function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
 /**
  * Search vehicles from SAP via Azure APIM proxy.
  *
- * passType = "LOCATION_TRANSFER" → /in  (mmsta eq 'QP30' — PO Created)
+ * passType = "LOCATION_TRANSFER" → /in  (no mmsta filter — all vehicles)
  * passType = "CUSTOMER_DELIVERY" → /out (sdsta eq 'QS60' — Sales Order Completed)
  * passType = "both"              → both endpoints in parallel, deduplicated by VIN
  */
@@ -161,8 +161,9 @@ export async function fetchSapVehicles(
 
   // Always fetch with the base status filter — JS filtering handles the search
   // query. SAP OData substringof() support is inconsistent across endpoints.
+  // No mmsta filter — return all vehicles from /in regardless of primary status
   const fetchIN = () =>
-    apimPost("in", "mmsta eq 'QP30'")
+    apimPost("in", "")
       .then((rows) => rows.map(mapVehicle));
 
   // New FS §2.2: accept QS60 (happy path) + QS50/QS5X/QS40/QS4X (intermediate invoice stages)
@@ -218,11 +219,6 @@ export async function fetchSapOrders(
     return [];
   }
 
-  try {
-    const rows = await apimPost("order", filter);
-    return rows.map(mapOrder).filter((o) => o.orderId);
-  } catch (err) {
-    console.error("[SAP] fetchSapOrders error:", err);
-    return [];
-  }
+  const rows = await apimPost("order", filter);
+  return rows.map(mapOrder).filter((o) => o.orderId);
 }

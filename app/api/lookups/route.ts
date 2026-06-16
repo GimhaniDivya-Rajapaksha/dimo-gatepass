@@ -184,7 +184,29 @@ export async function GET(req: NextRequest) {
         // Filter by locationType FIRST (while storageDescription still has the raw SAP value
         // so inferType can correctly classify "Promo location" → PROMOTION, etc.).
         // Overlaying custom DB labels before this step would break inferType for renamed entries.
-        const filteredOptions = filterApiLocations(options, q, locationType);
+        let filteredOptions = filterApiLocations(options, q, locationType);
+
+        // For PROMOTION/FINANCE: if this vehicle has no matching ext_sloc entries,
+        // fall back to all locations of that type from the already-fetched allRows.
+        if (filteredOptions.length === 0 && (locationType === "PROMOTION" || locationType === "FINANCE")) {
+          const allSeen = new Set<string>();
+          const allOptions: LocationOption[] = [];
+          for (const row of allRows) {
+            if (!row.extPlant || !row.extSloc) continue;
+            const id = `${row.extPlant}|${row.extSloc}`;
+            if (allSeen.has(id)) continue;
+            allSeen.add(id);
+            const plantDesc = row.extPlantDesc || row.extPlant;
+            const slocDesc  = row.extSlocDesc  || row.extSloc;
+            allOptions.push({
+              id, value: `${plantDesc} - ${slocDesc}`, label: `${plantDesc} - ${slocDesc}`,
+              plantCode: row.extPlant, plantDescription: plantDesc,
+              storageLocation: row.extSloc, storageDescription: slocDesc,
+              source: "api",
+            });
+          }
+          filteredOptions = filterApiLocations(allOptions, q, locationType);
+        }
 
         return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
@@ -393,13 +415,28 @@ export async function GET(req: NextRequest) {
       });
 
       const safe = q.trim().toUpperCase();
-      const sorted = Array.from(merged.values()).sort((a, b) => {
+      let sorted = Array.from(merged.values()).sort((a, b) => {
         const aStarts = a.value.toUpperCase().startsWith(safe) || a.chassisNo.toUpperCase().startsWith(safe);
         const bStarts = b.value.toUpperCase().startsWith(safe) || b.chassisNo.toUpperCase().startsWith(safe);
         if (aStarts && !bStarts) return -1;
         if (!aStarts && bStarts) return 1;
         return a.value.localeCompare(b.value);
       });
+
+      // CD only: exclude vehicles that already have an active or completed CD gate pass.
+      // REJECTED and CANCELLED are the only statuses where a new CD is allowed.
+      // LT vehicles are unaffected — they stay visible until their CD is completed.
+      if (rawPassType === "CUSTOMER_DELIVERY") {
+        const usedCdPasses = await prisma.gatePass.findMany({
+          where: { passType: "CUSTOMER_DELIVERY", status: { notIn: ["REJECTED", "CANCELLED"] } },
+          select: { vehicle: true, chassis: true },
+        });
+        const usedPlates  = new Set(usedCdPasses.map(p => (p.vehicle  ?? "").toUpperCase()).filter(Boolean));
+        const usedChassis = new Set(usedCdPasses.map(p => (p.chassis  ?? "").toUpperCase()).filter(Boolean));
+        sorted = sorted.filter(v =>
+          !usedPlates.has(v.value.toUpperCase()) && !usedChassis.has(v.chassisNo.toUpperCase())
+        );
+      }
 
       return NextResponse.json({
         options: sorted.slice(0, take),

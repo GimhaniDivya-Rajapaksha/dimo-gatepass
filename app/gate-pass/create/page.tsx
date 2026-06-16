@@ -43,9 +43,17 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
   onSearch?: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [recentlyTyped, setRecentlyTyped] = useState(false);
+  const blurTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset "searching" indicator as soon as new options arrive
+  useEffect(() => { setRecentlyTyped(false); }, [options]);
 
   function triggerSearch() {
+    setRecentlyTyped(true);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => setRecentlyTyped(false), 5000);
     onSearch?.(value);
     setOpen(true);
   }
@@ -74,7 +82,13 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
         type="text"
         autoComplete="off"
         value={value}
-        onChange={(e) => { onChange(e.target.value); if (onSearch) setOpen(false); else setOpen(true); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+          if (onSearch) setOpen(false); else setOpen(true);
+          setRecentlyTyped(true);
+          if (typingTimer.current) clearTimeout(typingTimer.current);
+          typingTimer.current = setTimeout(() => setRecentlyTyped(false), 700);
+        }}
         onFocus={() => {
           if (blurTimer.current) clearTimeout(blurTimer.current);
           if (!onSearch) { setOpen(true); onFocus?.(); }
@@ -109,13 +123,13 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
       {open && (
         <div className="absolute z-50 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-          {loading ? (
+          {(loading || recentlyTyped) ? (
             <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
-              Loading…
+              Searching…
             </p>
           ) : options && options.length > 0 ? (
             options.map((o) => (
@@ -155,6 +169,7 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
 }) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<LookupOption[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [labelingId, setLabelingId] = useState<string | null>(null);
   const [labelInput, setLabelInput] = useState("");
   const [labelSaving, setLabelSaving] = useState(false);
@@ -165,12 +180,17 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
   const isDefault = (desc: string) => DEFAULT_DESCS.includes(desc.toLowerCase().trim());
 
   async function load() {
-    const params = new URLSearchParams({ field: "location", locationType, limit: "200" });
-    if (chassisNo) params.set("chassisNo", chassisNo);
-    if (matnr) params.set("matnr", matnr);
-    const res = await fetch(`/api/lookups?${params.toString()}`);
-    const data: { options: LookupOption[] } = await res.json();
-    setOptions(data.options ?? []);
+    setIsLoading(true);
+    try {
+      const params = new URLSearchParams({ field: "location", locationType, limit: "200" });
+      if (chassisNo) params.set("chassisNo", chassisNo);
+      if (matnr) params.set("matnr", matnr);
+      const res = await fetch(`/api/lookups?${params.toString()}`);
+      const data: { options: LookupOption[] } = await res.json();
+      setOptions(data.options ?? []);
+    } finally {
+      setIsLoading(false);
+    }
   }
   useEffect(() => { void load(); }, [locationType, chassisNo, matnr]);
 
@@ -236,7 +256,12 @@ function TwoColumnLocationPicker({ value, displayValue, onSelect, locationType, 
 
           {/* All API locations */}
           <div className="max-h-72 overflow-auto">
-            {options.length === 0 ? (
+            {isLoading ? (
+              <p className="text-center text-sm py-4 flex items-center justify-center gap-2" style={{ color: "var(--text-muted)" }}>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                Searching…
+              </p>
+            ) : options.length === 0 ? (
               <p className="text-center text-sm py-4" style={{ color: "var(--text-muted)" }}>No extended locations found for this vehicle</p>
             ) : options.map(o => (
               <div key={o.id} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
@@ -716,6 +741,7 @@ export default function CreateGatePassPage() {
     approver: [], companyName: [], carrierRegNo: [], driverNIC: [], driverName: [],
   });
   const [locationLoading, setLocationLoading] = useState(false);
+  const [vehicleLoading, setVehicleLoading] = useState(false);
   const [draftGateDirection, setDraftGateDirection] = useState<string | null>(null);
 
   const today = currentDateValue(); // "YYYY-MM-DD" for min date constraint
@@ -1139,6 +1165,7 @@ export default function CreateGatePassPage() {
 
   const fetchLookup = async (field: LookupField, q = "", lt_type?: string) => {
     if (field === "location") setLocationLoading(true);
+    if (field === "vehicle") setVehicleLoading(true);
     try {
       // Use higher limit for locations so full lists appear without typing
       const limit = field === "location" ? "300" : "40";
@@ -1158,6 +1185,7 @@ export default function CreateGatePassPage() {
       // silently keep existing options
     } finally {
       if (field === "location") setLocationLoading(false);
+      if (field === "vehicle") setVehicleLoading(false);
     }
   };
 
@@ -3503,6 +3531,7 @@ export default function CreateGatePassPage() {
                           onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
                           placeholder="Search by vehicle no or chassis no"
                           error={errors.vehicle}
+                          loading={vehicleLoading}
                           options={lookupOptions.vehicle}
                           onSelect={(o) => {
                             const detail = {

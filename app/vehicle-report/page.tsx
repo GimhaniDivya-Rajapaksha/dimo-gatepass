@@ -65,8 +65,17 @@ type GatePassFull = {
   rejectionReason: string | null;
   createdAt: string;
   updatedAt: string;
+  approvedAt: string | null;
+  intendedApprover: string | null;
+  previousApprover: string | null;
+  approverChangeReason: string | null;
+  resubmitCount: number;
+  resubmitNote: string | null;
+  asoCreated: boolean;
+  gateOutBy: string | null;
+  gateInBy: string | null;
   createdBy: { name: string; email: string } | null;
-  approvedBy: { name: string } | null;
+  approvedBy: { name: string; email?: string } | null;
   subPasses: SubPassSummary[];
   parentPass: { id: string; gatePassNumber: string; passSubType: string | null; status: string } | null;
 };
@@ -175,6 +184,16 @@ function fmtDateTime(d: string | null, t: string | null) {
   if (!d) return "—";
   const date = fmtDate(d);
   return t ? `${date} ${t}` : date ?? "—";
+}
+function getLocationTag(loc: string | null): { label: string; bg: string; color: string } | null {
+  if (!loc) return null;
+  const parts = loc.split(" - ");
+  if (parts.length < 2) return null;
+  const suffix = parts[parts.length - 1].trim();
+  if (!suffix || suffix.toLowerCase().startsWith("dimo")) return null;
+  if (suffix.toLowerCase().includes("promo"))
+    return { label: "Promo", bg: "#fdf4ff", color: "#7e22ce" };
+  return { label: suffix.toUpperCase(), bg: "#eff6ff", color: "#1d4ed8" };
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -582,7 +601,10 @@ export default function VehicleReportPage() {
                       Current Location
                     </p>
                     {currentLocation ? (
-                      <p className="text-sm font-bold leading-none truncate" style={{ color: "#15803d" }}>{currentLocation}</p>
+                      <>
+                        <p className="text-sm font-bold leading-none truncate" style={{ color: "#15803d" }}>{currentLocation}</p>
+                        {(() => { const t = getLocationTag(currentLocation); return t ? <span className="mt-1 inline-block px-1.5 py-0 rounded text-[9px] font-bold" style={{ background: t.bg, color: t.color }}>{t.label}</span> : null; })()}
+                      </>
                     ) : inferredLocation ? (
                       <>
                         <p className="text-sm font-bold leading-tight truncate" style={{ color: inferredLocation.color }}>{inferredLocation.line1}</p>
@@ -682,7 +704,7 @@ export default function VehicleReportPage() {
                 <table style={{ minWidth: "900px", width: "100%", borderCollapse: "collapse" }} className="text-sm">
                   <thead>
                     <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
-                      {["#", "Gate Pass", "Type", "Status", "Journey (From → To)", "Departure", "Arrival", "Created By", "Approved By", ""].map((h, i) => (
+                      {["Gate Pass", "Type", "Status", "Journey (From → To)", "Departure", "Arrival", "Created By", "Approved By", "Gate Out By", "Gate In By", ""].map((h, i) => (
                         <th key={i}
                           className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap"
                           style={{ color: "var(--text-muted)", position: "sticky", top: 0, background: "var(--surface2)", zIndex: 10 }}>
@@ -698,6 +720,8 @@ export default function VehicleReportPage() {
                       const stc = p.passSubType ? (subTypeCfg[p.passSubType] ?? null) : null;
                       const isExpanded = expandedRows.has(p.id);
                       const hasSubPasses = p.passType === "AFTER_SALES" && p.subPasses.length > 0;
+                      const fromTag = getLocationTag(p.fromLocation);
+                      const toTag = getLocationTag(p.toLocation);
 
                       return (
                         <React.Fragment key={p.id}>
@@ -709,10 +733,7 @@ export default function VehicleReportPage() {
                             onMouseEnter={(e) => !isExpanded && (e.currentTarget.style.background = "var(--surface2)")}
                             onMouseLeave={(e) => !isExpanded && (e.currentTarget.style.background = "transparent")}
                           >
-                            {/* # */}
-                            <td className="px-4 py-3 text-xs font-mono" style={{ color: "var(--text-muted)", width: "40px" }}>
-                              {i + 1}
-                            </td>
+                            {/* # — hidden */}
                             {/* Gate pass number */}
                             <td className="px-4 py-3 whitespace-nowrap">
                               <Link
@@ -757,15 +778,31 @@ export default function VehicleReportPage() {
                             {/* Journey */}
                             <td className="px-4 py-3" style={{ minWidth: "220px" }}>
                               <div className="flex items-center gap-1.5 text-xs">
-                                <span className="font-medium truncate max-w-[90px]" style={{ color: "var(--text)" }} title={p.fromLocation ?? "—"}>
-                                  {p.fromLocation || "—"}
-                                </span>
+                                <div>
+                                  <span className="font-medium truncate block max-w-[90px]" style={{ color: "var(--text)" }} title={p.fromLocation ?? "—"}>
+                                    {p.fromLocation || "—"}
+                                  </span>
+                                  {fromTag && (
+                                    <span className="mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-bold"
+                                      style={{ background: fromTag.bg, color: fromTag.color }}>
+                                      {fromTag.label}
+                                    </span>
+                                  )}
+                                </div>
                                 <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                                 </svg>
-                                <span className="font-semibold truncate max-w-[90px]" style={{ color: "var(--accent)" }} title={p.toLocation ?? "—"}>
-                                  {p.toLocation || "—"}
-                                </span>
+                                <div>
+                                  <span className="font-semibold truncate block max-w-[90px]" style={{ color: "var(--accent)" }} title={p.toLocation ?? "—"}>
+                                    {p.toLocation || "—"}
+                                  </span>
+                                  {toTag && (
+                                    <span className="mt-0.5 inline-block px-1.5 py-0 rounded text-[9px] font-bold"
+                                      style={{ background: toTag.bg, color: toTag.color }}>
+                                      {toTag.label}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             {/* Departure */}
@@ -797,9 +834,39 @@ export default function VehicleReportPage() {
                                   <span className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.approvedBy.name}</span>
                                 </div>
                               ) : p.status === "REJECTED" ? (
-                                <span className="text-xs" style={{ color: "#ef4444" }}>Rejected</span>
+                                <div>
+                                  <span className="text-xs font-semibold" style={{ color: "#ef4444" }}>Rejected</span>
+                                  {p.intendedApprover && (
+                                    <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{p.intendedApprover}</p>
+                                  )}
+                                </div>
                               ) : p.status === "PENDING_APPROVAL" ? (
-                                <span className="text-xs" style={{ color: "#f97316" }}>Pending</span>
+                                <div>
+                                  {p.intendedApprover ? (
+                                    <>
+                                      <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.intendedApprover}</p>
+                                      <span className="text-[10px]" style={{ color: "#f97316" }}>Pending</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs" style={{ color: "#f97316" }}>Pending</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
+                              )}
+                            </td>
+                            {/* Gate Out By */}
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {p.gateOutBy ? (
+                                <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateOutBy}</p>
+                              ) : (
+                                <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
+                              )}
+                            </td>
+                            {/* Gate In By */}
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {p.gateInBy ? (
+                                <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateInBy}</p>
                               ) : (
                                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
                               )}
@@ -864,7 +931,7 @@ export default function VehicleReportPage() {
 
                                       </div>
 
-                                      {/* Timestamps */}
+                                      {/* Timestamps + parent pass link */}
                                       <div className="mt-3 pt-3 flex items-center gap-6 flex-wrap" style={{ borderTop: "1px solid var(--border)" }}>
                                         <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                                           Created: <span style={{ color: "var(--text)" }}>{fmtDate(p.createdAt)}</span>
@@ -884,6 +951,9 @@ export default function VehicleReportPage() {
                                           </span>
                                         )}
                                       </div>
+
+                                      {/* Transaction Timeline */}
+                                      <TransactionTimeline p={p} />
 
                                       {/* Sub-passes */}
                                       {hasSubPasses && (
@@ -1006,6 +1076,247 @@ function DetailField({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+// ── Transaction Timeline ──────────────────────────────────────────────────────
+
+function fmtFull(d: string | null, t?: string | null) {
+  if (!d) return null;
+  try {
+    const date = new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    return t ? `${date} · ${t}` : date;
+  } catch { return d; }
+}
+
+function fmtTs(iso: string | null) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch { return iso; }
+}
+
+type TxEvent = {
+  key: string;
+  icon: "created" | "approved" | "rejected" | "gate_out" | "transit" | "gate_in" | "completed" | "cancelled" | "pending" | "resubmit" | "reassign";
+  label: string;
+  sublabel?: string;
+  who?: string;
+  whoEmail?: string;
+  timestamp?: string | null;
+  highlight?: "green" | "red" | "blue" | "purple" | "amber" | "gray";
+};
+
+function buildTimeline(p: GatePassFull): TxEvent[] {
+  const events: TxEvent[] = [];
+
+  // 1. Created
+  events.push({
+    key: "created",
+    icon: "created",
+    label: "Gate Pass Created",
+    sublabel: p.asoCreated ? "Created by Area Sales Officer" : undefined,
+    who: p.createdBy?.name ?? undefined,
+    whoEmail: p.createdBy?.email ?? undefined,
+    timestamp: fmtTs(p.createdAt),
+    highlight: "blue",
+  });
+
+  // 2. Resubmits (if any)
+  if (p.resubmitCount > 0) {
+    events.push({
+      key: "resubmit",
+      icon: "resubmit",
+      label: `Resubmitted ${p.resubmitCount}×`,
+      sublabel: p.resubmitNote ?? undefined,
+      highlight: "amber",
+    });
+  }
+
+  // 3. Approver reassignment
+  if (p.previousApprover && p.intendedApprover && p.previousApprover !== p.intendedApprover) {
+    events.push({
+      key: "reassign",
+      icon: "reassign",
+      label: "Approver Reassigned",
+      sublabel: `${p.previousApprover} → ${p.intendedApprover}${p.approverChangeReason ? ` · "${p.approverChangeReason}"` : ""}`,
+      highlight: "amber",
+    });
+  }
+
+  // 4. Approval / Rejection
+  if (p.status === "REJECTED") {
+    events.push({
+      key: "rejected",
+      icon: "rejected",
+      label: "Rejected",
+      sublabel: p.rejectionReason ? `Reason: ${p.rejectionReason}` : undefined,
+      who: p.approvedBy?.name ?? undefined,
+      timestamp: p.approvedAt ? fmtTs(p.approvedAt) : undefined,
+      highlight: "red",
+    });
+  } else if (p.approvedBy) {
+    events.push({
+      key: "approved",
+      icon: "approved",
+      label: "Approved",
+      who: p.approvedBy.name,
+      whoEmail: p.approvedBy.email ?? undefined,
+      timestamp: p.approvedAt ? fmtTs(p.approvedAt) : undefined,
+      highlight: "green",
+    });
+  } else if (p.status === "PENDING_APPROVAL") {
+    events.push({
+      key: "pending",
+      icon: "pending",
+      label: "Pending Approval",
+      sublabel: p.intendedApprover ? `Assigned to: ${p.intendedApprover}` : undefined,
+      highlight: "amber",
+    });
+  } else if (p.status === "CANCELLED") {
+    events.push({ key: "cancelled", icon: "cancelled", label: "Cancelled", highlight: "gray" });
+  }
+
+  // 5. Gate OUT
+  if (p.departureDate) {
+    const isLT = p.passType === "LOCATION_TRANSFER";
+    const isCD = p.passType === "CUSTOMER_DELIVERY";
+    events.push({
+      key: "gate_out",
+      icon: "gate_out",
+      label: isCD ? "Gate OUT — Customer Delivery" : isLT ? "Gate OUT — Vehicle Released" : "Gate OUT",
+      sublabel: p.passType === "LOCATION_TRANSFER"
+        ? `${p.fromLocation ?? "Source"} → ${p.toLocation ?? "Destination"}`
+        : p.toLocation ?? undefined,
+      timestamp: fmtFull(p.departureDate, p.departureTime),
+      highlight: "blue",
+    });
+  }
+
+  // 6. In transit (GATE_OUT status but not yet completed)
+  if (p.status === "GATE_OUT" && p.departureDate) {
+    events.push({
+      key: "transit",
+      icon: "transit",
+      label: "In Transit — Awaiting Gate IN",
+      sublabel: p.arrivalDate ? `Est. arrival: ${fmtFull(p.arrivalDate, p.arrivalTime) ?? ""}` : undefined,
+      highlight: "amber",
+    });
+  }
+
+  // 7. Estimated arrival (from form — only show if NOT in transit / already completed)
+  if (p.arrivalDate && p.status !== "GATE_OUT") {
+    events.push({
+      key: "est_arrival",
+      icon: "transit",
+      label: "Estimated Arrival (Scheduled)",
+      timestamp: fmtFull(p.arrivalDate, p.arrivalTime),
+      highlight: "gray",
+    });
+  }
+
+  // 8. Completed / Gate IN
+  if (p.status === "COMPLETED") {
+    const isLT = p.passType === "LOCATION_TRANSFER";
+    const isCD = p.passType === "CUSTOMER_DELIVERY";
+    const subType = p.passSubType;
+    events.push({
+      key: "completed",
+      icon: "completed",
+      label: isCD
+        ? "Delivery Completed — Vehicle Received"
+        : isLT
+          ? "Gate IN Confirmed — Transfer Complete"
+          : subType === "MAIN_OUT"
+            ? "Vehicle Delivered to Customer"
+            : subType === "SUB_IN"
+              ? "Vehicle Entered Sub-Location"
+              : "Transfer Completed",
+      sublabel: p.comments?.replace(/\[\[ASSIGNED_ROLE:[^\]]*\]\]/g, "").replace(/\[\[LT_BATCH[^\]]*\]\]/g, "").trim() || undefined,
+      timestamp: fmtTs(p.updatedAt),
+      highlight: "purple",
+    });
+  }
+
+  return events;
+}
+
+const txIconPaths: Record<TxEvent["icon"], string> = {
+  created:   "M12 6v6m0 0v6m0-6h6m-6 0H6",
+  approved:  "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+  rejected:  "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z",
+  gate_out:  "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
+  transit:   "M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4",
+  gate_in:   "M7 16l-4-4m0 0l4-4m-4 4h18",
+  completed: "M5 13l4 4L19 7",
+  cancelled: "M6 18L18 6M6 6l12 12",
+  pending:   "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+  resubmit:  "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+  reassign:  "M8 7h12m0 0l-4-4m4 4l-4 4M4 17l4 4m0 0l4-4m-4 4V3",
+};
+
+const txHighlightCfg = {
+  green:  { dot: "#22c55e", text: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", icon: "#16a34a" },
+  red:    { dot: "#ef4444", text: "#991b1b", bg: "#fef2f2", border: "#fecaca", icon: "#dc2626" },
+  blue:   { dot: "#3b82f6", text: "#1d4ed8", bg: "#eff6ff", border: "#bfdbfe", icon: "#2563eb" },
+  purple: { dot: "#a855f7", text: "#5b21b6", bg: "#f5f3ff", border: "#ddd6fe", icon: "#7c3aed" },
+  amber:  { dot: "#f59e0b", text: "#92400e", bg: "#fef3c7", border: "#fde68a", icon: "#d97706" },
+  gray:   { dot: "#9ca3af", text: "#6b7280", bg: "#f9fafb", border: "#e5e7eb", icon: "#9ca3af" },
+};
+
+function TransactionTimeline({ p }: { p: GatePassFull }) {
+  const events = buildTimeline(p);
+  return (
+    <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>
+        Transaction History
+      </p>
+      <div className="relative flex flex-col gap-0">
+        {/* vertical line */}
+        <div className="absolute left-[15px] top-4 bottom-4 w-px" style={{ background: "var(--border)" }} />
+
+        {events.map((ev, idx) => {
+          const cfg = txHighlightCfg[ev.highlight ?? "gray"];
+          const iconPath = txIconPaths[ev.icon];
+          const isLast = idx === events.length - 1;
+          return (
+            <div key={ev.key} className="relative flex items-start gap-3 pb-3">
+              {/* dot + icon */}
+              <div className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: cfg.bg, border: `1.5px solid ${cfg.border}` }}>
+                <svg className="w-3.5 h-3.5" style={{ color: cfg.icon }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={iconPath} />
+                </svg>
+              </div>
+
+              {/* content */}
+              <div className={`flex-1 min-w-0 pb-1 ${!isLast ? "border-b" : ""}`} style={{ borderColor: "var(--border)" }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-bold" style={{ color: cfg.text }}>{ev.label}</span>
+                  {ev.timestamp && (
+                    <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{ev.timestamp}</span>
+                  )}
+                </div>
+                {ev.sublabel && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{ev.sublabel}</p>
+                )}
+                {(ev.who || ev.whoEmail) && (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <svg className="w-3 h-3 flex-shrink-0" style={{ color: cfg.icon }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span className="text-[11px] font-semibold" style={{ color: "var(--text)" }}>{ev.who}</span>
+                    {ev.whoEmail && (
+                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>· {ev.whoEmail}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

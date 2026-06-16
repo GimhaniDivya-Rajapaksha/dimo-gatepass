@@ -138,12 +138,17 @@ export async function fetchPlantLocationOptions(vehicleFilter?: string): Promise
   const options: LocationOption[] = [];
 
   for (const row of rows) {
-    if (!row.plantDescription) continue;
-    // Fall back to storageLocation code when SAP leaves LgortDesc blank
-    const storageDesc = row.storageDescription || row.storageLocation;
+    // ext_plant/ext_sloc are the valid transfer destination codes.
+    // Werks/Lgort is the vehicle's current location — dealer D-prefix codes only appear in ext_sloc.
+    const plantCode = row.extPlant;
+    const plantDescription = row.extPlantDesc;
+    const storageLocation = row.extSloc;
+    const storageDescription = row.extSlocDesc || row.extSloc;
 
-    const value = [row.plantDescription, storageDesc].filter(Boolean).join(" - ");
-    const id = [row.plantCode, row.storageLocation, row.plantDescription, storageDesc].join("|");
+    if (!plantCode || !storageLocation || !plantDescription) continue;
+
+    const value = [plantDescription, storageDescription].filter(Boolean).join(" - ");
+    const id = [plantCode, storageLocation, plantDescription, storageDescription].join("|");
     if (!value || seen.has(id)) continue;
 
     seen.add(id);
@@ -151,10 +156,10 @@ export async function fetchPlantLocationOptions(vehicleFilter?: string): Promise
       id,
       value,
       label: value,
-      plantCode: row.plantCode,
-      plantDescription: row.plantDescription,
-      storageLocation: row.storageLocation,
-      storageDescription: storageDesc,
+      plantCode,
+      plantDescription,
+      storageLocation,
+      storageDescription,
       source: "api",
     });
   }
@@ -189,8 +194,9 @@ export function findPlantLocationOption(
 }
 
 export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<PlantVehicleRow[]> {
+  // QAS requires OData-style filter: Vhvin eq 'value'
   const url = vehicleFilter
-    ? `${APIM_BASE}/dimogatepass/plant?filter=${encodeURIComponent(vehicleFilter)}`
+    ? `${APIM_BASE}/dimogatepass/plant?filter=${encodeURIComponent(`Vhvin eq '${vehicleFilter}'`)}`
     : `${APIM_BASE}/dimogatepass/plant`;
   const res = await fetch(url, {
     method: "GET",
@@ -266,7 +272,9 @@ export async function updateVehiclePlantLocation(params: {
     chassisNo?: string | null;
   };
 }) {
-  const rows = params.plantRows ?? await fetchPlantVehicleRows();
+  // Use chassis/fallback as filter so /plant returns only this vehicle (fast, gets correct Vhcle)
+  const filterHint = str(params.sapFallback?.chassisNo) || params.identifiers.map(str).filter(Boolean)[0] || undefined;
+  const rows = params.plantRows ?? await fetchPlantVehicleRows(filterHint);
   let vehicleRow = findPlantVehicleRow(rows, params.identifiers);
 
   if (!vehicleRow) {
