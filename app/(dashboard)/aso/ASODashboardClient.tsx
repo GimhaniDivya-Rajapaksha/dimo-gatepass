@@ -112,6 +112,7 @@ export default function ASODashboardClient({ user }: Props) {
   const [subTypeFilter, setSubTypeFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [actioningId, setActioningId] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ id: string; action: "gate_out" | "gate_in"; label: string } | null>(null);
 
   // ── Stats derived from incoming + myPasses ─────────────────────────────────
   const incomingCount = incoming.length;
@@ -240,8 +241,14 @@ export default function ASODashboardClient({ user }: Props) {
     }
   }, []);
 
-  const handlePassAction = useCallback(async (id: string, action: "gate_out" | "gate_in", label: string) => {
-    if (!confirm(`${label}?`)) return;
+  const handlePassAction = useCallback((id: string, action: "gate_out" | "gate_in", label: string) => {
+    setConfirmModal({ id, action, label });
+  }, []);
+
+  const handleConfirmAction = useCallback(async () => {
+    if (!confirmModal) return;
+    const { id, action } = confirmModal;
+    setConfirmModal(null);
     setActioningId(id);
     try {
       const res = await fetch(`/api/gate-pass/${id}/status`, {
@@ -261,7 +268,7 @@ export default function ASODashboardClient({ user }: Props) {
     } finally {
       setActioningId(null);
     }
-  }, [fetchMyPasses, fetchIncoming]);
+  }, [confirmModal, fetchMyPasses, fetchIncoming]);
 
   // Create a SUB_IN pass for the incoming vehicle — Security B will then confirm Gate IN
   const handleCreateSubIn = useCallback(async (v: IncomingVehicle) => {
@@ -329,6 +336,7 @@ export default function ASODashboardClient({ user }: Props) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
+    <>
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
       className="flex flex-col gap-6">
 
@@ -949,5 +957,92 @@ export default function ASODashboardClient({ user }: Props) {
         )}
       </motion.div>
     </motion.div>
+
+      {/* ── Custom Confirmation Modal ─────────────────────────────────── */}
+      <AnimatePresence>
+        {confirmModal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setConfirmModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="px-6 py-5" style={{
+                background: confirmModal.action === "gate_in"
+                  ? "linear-gradient(135deg,#065f46,#059669)"
+                  : "linear-gradient(135deg,#1e3a8a,#2563eb)"
+              }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    {confirmModal.action === "gate_in" ? (
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">
+                      {confirmModal.action === "gate_in" ? "Confirm Vehicle Arrived" : "Confirm Gate Out"}
+                    </p>
+                    <p className="text-xs text-white/70 mt-0.5">
+                      {confirmModal.action === "gate_in" ? "Mark vehicle as received at your location" : "Release vehicle from your location"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {/* Body */}
+              <div className="px-6 py-5">
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                  {confirmModal.action === "gate_in"
+                    ? "Are you sure the vehicle has physically arrived at your location? This will update the gate pass status."
+                    : "Are you sure you want to confirm gate out? The vehicle will be marked as leaving your location."}
+                </p>
+                <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+                  This action cannot be undone.
+                </p>
+              </div>
+              {/* Actions */}
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmModal(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmAction()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{
+                    background: confirmModal.action === "gate_in"
+                      ? "linear-gradient(135deg,#065f46,#059669)"
+                      : "linear-gradient(135deg,#1e3a8a,#2563eb)"
+                  }}
+                >
+                  {confirmModal.action === "gate_in" ? "Yes, Arrived" : "Yes, Gate Out"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
