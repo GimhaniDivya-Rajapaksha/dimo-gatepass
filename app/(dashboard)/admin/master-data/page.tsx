@@ -4,17 +4,19 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason";
+type Tab = "carrier" | "driver" | "outReason" | "brand";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; contact: string | null; createdAt: string };
 type OutReasonRecord = { id: string; value: string; createdAt: string };
+type BrandRecord = { id: string; name: string; createdAt: string };
 
 type ModalState =
   | { open: false }
   | { open: true; mode: "add" | "edit"; type: "carrier";   data?: CarrierRecord }
   | { open: true; mode: "add" | "edit"; type: "driver";    data?: DriverRecord }
-  | { open: true; mode: "add" | "edit"; type: "outReason"; data?: OutReasonRecord };
+  | { open: true; mode: "add" | "edit"; type: "outReason"; data?: OutReasonRecord }
+  | { open: true; mode: "add" | "edit"; type: "brand";     data?: BrandRecord };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fmtDate(iso: string) {
@@ -31,6 +33,7 @@ export default function MasterDataPage() {
   const [carriers, setCarriers] = useState<CarrierRecord[]>([]);
   const [drivers,  setDrivers]  = useState<DriverRecord[]>([]);
   const [reasons,  setReasons]  = useState<OutReasonRecord[]>([]);
+  const [brands,   setBrands]   = useState<BrandRecord[]>([]);
   const [loading,  setLoading]  = useState(false);
   const [modal,    setModal]    = useState<ModalState>({ open: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export default function MasterDataPage() {
   const [formCarrier,   setFormCarrier]   = useState({ companyName: "", registrationNo: "" });
   const [formDriver,    setFormDriver]    = useState({ name: "", nic: "", contact: "" });
   const [formOutReason, setFormOutReason] = useState({ value: "" });
+  const [formBrand,     setFormBrand]     = useState({ name: "" });
 
   useEffect(() => {
     if (status === "unauthenticated") { router.replace("/login"); return; }
@@ -58,6 +62,7 @@ export default function MasterDataPage() {
       if (t === "carrier")   setCarriers(json.data ?? []);
       if (t === "driver")    setDrivers(json.data ?? []);
       if (t === "outReason") setReasons(json.data ?? []);
+      if (t === "brand")     setBrands(json.data ?? []);
     } finally {
       setLoading(false);
     }
@@ -79,10 +84,11 @@ export default function MasterDataPage() {
     if (t === "carrier")   setFormCarrier({ companyName: "", registrationNo: "" });
     if (t === "driver")    setFormDriver({ name: "", nic: "", contact: "" });
     if (t === "outReason") setFormOutReason({ value: "" });
+    if (t === "brand")     setFormBrand({ name: "" });
     setModal({ open: true, mode: "add", type: t } as ModalState);
   }
 
-  function openEdit(t: Tab, record: CarrierRecord | DriverRecord | OutReasonRecord) {
+  function openEdit(t: Tab, record: CarrierRecord | DriverRecord | OutReasonRecord | BrandRecord) {
     setError(""); setSuccess("");
     if (t === "carrier") {
       const r = record as CarrierRecord;
@@ -92,10 +98,14 @@ export default function MasterDataPage() {
       const r = record as DriverRecord;
       setFormDriver({ name: r.name, nic: r.nic, contact: r.contact ?? "" });
       setModal({ open: true, mode: "edit", type: "driver", data: r });
-    } else {
+    } else if (t === "outReason") {
       const r = record as OutReasonRecord;
       setFormOutReason({ value: r.value });
       setModal({ open: true, mode: "edit", type: "outReason", data: r });
+    } else {
+      const r = record as BrandRecord;
+      setFormBrand({ name: r.name });
+      setModal({ open: true, mode: "edit", type: "brand", data: r });
     }
   }
 
@@ -107,6 +117,7 @@ export default function MasterDataPage() {
       if (modal.type === "carrier")   body = { ...body, ...formCarrier };
       if (modal.type === "driver")    body = { ...body, ...formDriver };
       if (modal.type === "outReason") body = { ...body, ...formOutReason };
+      if (modal.type === "brand")     body = { ...body, ...formBrand };
 
       const isEdit = modal.mode === "edit";
       if (isEdit && modal.data) body.id = modal.data.id;
@@ -147,6 +158,7 @@ export default function MasterDataPage() {
     { id: "carrier",   label: "Carrier Details" },
     { id: "driver",    label: "Driver Details"  },
     { id: "outReason", label: "Out Reasons"     },
+    { id: "brand",     label: "Brands"          },
   ];
 
   return (
@@ -290,6 +302,33 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             )}
+
+            {/* Brands tab */}
+            {tab === "brand" && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
+                    {["Brand Name", "Added On", ""].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: "var(--text-muted)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {brands.length === 0 ? (
+                    <tr><td colSpan={3} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No brands found</td></tr>
+                  ) : brands.map(r => (
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td className="px-4 py-3 font-medium" style={{ color: "var(--text)" }}>{r.name}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <RowActions onEdit={() => openEdit("brand", r)} onDelete={() => setDeleteId(r.id)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>
@@ -302,7 +341,7 @@ export default function MasterDataPage() {
             style={{ background: "var(--surface)" }}>
             <h2 className="text-lg font-bold mb-5" style={{ color: "var(--text)" }}>
               {modal.mode === "add" ? "Add" : "Edit"}{" "}
-              {modal.type === "carrier" ? "Carrier" : modal.type === "driver" ? "Driver" : "Out Reason"}
+              {modal.type === "carrier" ? "Carrier" : modal.type === "driver" ? "Driver" : modal.type === "outReason" ? "Out Reason" : "Brand"}
             </h2>
 
             {error && (
@@ -364,6 +403,19 @@ export default function MasterDataPage() {
                   <input type="text" value={formOutReason.value}
                     onChange={e => setFormOutReason({ value: e.target.value })}
                     placeholder="e.g. Demo / Test Drive"
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                </Field>
+              </div>
+            )}
+
+            {/* Brand form */}
+            {modal.type === "brand" && (
+              <div className="space-y-4">
+                <Field label="Brand Name *">
+                  <input type="text" value={formBrand.name}
+                    onChange={e => setFormBrand({ name: e.target.value })}
+                    placeholder="e.g. Toyota"
                     className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                     style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
                 </Field>

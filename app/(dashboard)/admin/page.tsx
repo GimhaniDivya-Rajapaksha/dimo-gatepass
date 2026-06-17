@@ -98,6 +98,10 @@ function AssignAttributesModal({
   const [locationSearch, setLocationSearch] = useState("");
   const [locationOpen, setLocationOpen] = useState(false);
   const locationRef = useRef<HTMLDivElement>(null);
+  const [brandList, setBrandList] = useState<string[]>([]);
+  const [brandSearch, setBrandSearch] = useState("");
+  const [brandOpen, setBrandOpen] = useState(false);
+  const brandRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -114,9 +118,20 @@ function AssignAttributesModal({
         setLocationOpen(false);
         setLocationSearch("");
       }
+      if (brandRef.current && !brandRef.current.contains(e.target as Node)) {
+        setBrandOpen(false);
+        setBrandSearch("");
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/admin/master-data?type=brand")
+      .then(r => r.json())
+      .then(d => setBrandList((d.data ?? []).map((b: { name: string }) => b.name)))
+      .catch(() => {});
   }, []);
 
   if (fields.length === 0) return null;
@@ -259,18 +274,99 @@ function AssignAttributesModal({
             </div>
           )}
 
-          {fields.includes("brand") && (
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Brand <span className="text-red-500">*</span>
-                {MULTI_BRAND_ROLES.includes(role) && (
-                  <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>
-                )}
-              </label>
-              <BrandSelector value={brand} onChange={v => { setBrand(v); setError(""); }} multi={MULTI_BRAND_ROLES.includes(role)} />
-              {!brand.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
-            </div>
-          )}
+          {fields.includes("brand") && (() => {
+            const isMulti = MULTI_BRAND_ROLES.includes(role);
+            const selected = brand ? brand.split(",").map(s => s.trim()).filter(Boolean) : [];
+            const filtered = brandList.filter(b => b.toLowerCase().includes(brandSearch.toLowerCase()));
+            const toggle = (b: string) => {
+              let next: string[];
+              if (isMulti) {
+                next = selected.includes(b) ? selected.filter(s => s !== b) : [...selected, b];
+              } else {
+                next = selected[0] === b ? [] : [b];
+              }
+              setBrand(next.join(", "));
+              setError("");
+              if (!isMulti) { setBrandOpen(false); setBrandSearch(""); }
+            };
+            return (
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                  Brand <span className="text-red-500">*</span>
+                  {isMulti && <span className="ml-1.5 text-xs font-normal" style={{ color: "var(--text-muted)" }}>(select all that apply)</span>}
+                </label>
+                <div ref={brandRef} className="relative">
+                  <div
+                    className="w-full border rounded-xl px-3 py-2.5 text-sm flex items-center gap-2 cursor-pointer min-h-[42px] flex-wrap"
+                    style={{ background: "var(--surface2)", borderColor: !brand.trim() ? "#f87171" : brandOpen ? "#3b82f6" : "var(--border)", boxShadow: brandOpen ? "0 0 0 2px #bfdbfe" : undefined }}
+                    onClick={() => { setBrandOpen(o => !o); setBrandSearch(""); }}
+                  >
+                    {selected.length === 0 ? (
+                      <span className="flex-1 text-sm" style={{ color: "var(--text-muted)" }}>— Select brand —</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 flex-1">
+                        {selected.map(b => (
+                          <span key={b} className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold"
+                            style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}>
+                            {b}
+                            <button type="button" onClick={e => { e.stopPropagation(); toggle(b); }}
+                              className="ml-0.5 hover:opacity-70">×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <svg className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: "var(--text-muted)", transform: brandOpen ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                  {brandOpen && (
+                    <div className="absolute z-50 w-full mt-1 rounded-xl border shadow-xl overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                      <div className="p-2 border-b" style={{ borderColor: "var(--border)" }}>
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--surface2)" }}>
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          <input autoFocus type="text" value={brandSearch}
+                            onChange={e => setBrandSearch(e.target.value)}
+                            placeholder="Search brands..."
+                            className="flex-1 bg-transparent text-sm outline-none"
+                            style={{ color: "var(--text)" }}
+                            onClick={e => e.stopPropagation()} />
+                          {brandSearch && (
+                            <button type="button" onClick={e => { e.stopPropagation(); setBrandSearch(""); }}
+                              className="w-4 h-4 flex items-center justify-center hover:opacity-70" style={{ color: "var(--text-muted)" }}>
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <ul className="max-h-44 overflow-y-auto py-1">
+                        {filtered.length === 0 ? (
+                          <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No brands found</li>
+                        ) : filtered.map(b => (
+                          <li key={b}
+                            className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
+                            style={{ background: selected.includes(b) ? "#eff6ff" : "transparent", color: selected.includes(b) ? "#1d4ed8" : "var(--text)", fontWeight: selected.includes(b) ? 600 : 400 }}
+                            onMouseDown={e => { e.preventDefault(); toggle(b); }}
+                          >
+                            {selected.includes(b) ? (
+                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : <span className="w-3.5 h-3.5 flex-shrink-0" />}
+                            {b}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                {!brand.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
+              </div>
+            );
+          })()}
 
           {fields.includes("approver") && (
             <div>

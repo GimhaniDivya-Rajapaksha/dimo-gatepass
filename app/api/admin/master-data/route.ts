@@ -50,6 +50,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data });
   }
 
+  if (type === "brand") {
+    let data = await prisma.brandOption.findMany({
+      where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
+      orderBy: { name: "asc" },
+    });
+    // Seed defaults on first use
+    if (!q && data.length === 0) {
+      await prisma.brandOption.createMany({
+        data: [{ name: "Mercedes-Benz" }, { name: "TATA" }, { name: "Jeep" }],
+        skipDuplicates: true,
+      });
+      data = await prisma.brandOption.findMany({ orderBy: { name: "asc" } });
+    }
+    return NextResponse.json({ data });
+  }
+
   return NextResponse.json({ error: "Invalid type" }, { status: 400 });
 }
 
@@ -99,6 +115,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ record });
     } catch {
       return NextResponse.json({ error: "Out reason already exists" }, { status: 409 });
+    }
+  }
+
+  if (type === "brand") {
+    const { name } = body;
+    if (!name?.trim())
+      return NextResponse.json({ error: "Brand name is required" }, { status: 400 });
+    try {
+      const record = await prisma.brandOption.create({ data: { name: name.trim() } });
+      return NextResponse.json({ record });
+    } catch {
+      return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
     }
   }
 
@@ -158,6 +186,18 @@ export async function PUT(req: NextRequest) {
     }
   }
 
+  if (type === "brand") {
+    const { name } = body;
+    if (!name?.trim())
+      return NextResponse.json({ error: "Brand name is required" }, { status: 400 });
+    try {
+      const record = await prisma.brandOption.update({ where: { id }, data: { name: name.trim() } });
+      return NextResponse.json({ record });
+    } catch {
+      return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
+    }
+  }
+
   return NextResponse.json({ error: "Invalid type" }, { status: 400 });
 }
 
@@ -183,6 +223,11 @@ export async function DELETE(req: NextRequest) {
 
   if (type === "outReason") {
     await prisma.outReasonOption.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (type === "brand") {
+    await prisma.brandOption.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   }
 
