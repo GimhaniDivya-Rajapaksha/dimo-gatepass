@@ -130,8 +130,11 @@ function AssignAttributesModal({
   useEffect(() => {
     fetch("/api/admin/master-data?type=brand")
       .then(r => r.json())
-      .then(d => setBrandList((d.data ?? []).map((b: { name: string }) => b.name)))
-      .catch(() => {});
+      .then(d => {
+        const names: string[] = (d.data ?? []).map((b: { name: string }) => b.name);
+        setBrandList(names.length > 0 ? names : BRANDS);
+      })
+      .catch(() => setBrandList(BRANDS));
   }, []);
 
   if (fields.length === 0) return null;

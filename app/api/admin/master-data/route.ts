@@ -51,19 +51,24 @@ export async function GET(req: NextRequest) {
   }
 
   if (type === "brand") {
-    let data = await prisma.brandOption.findMany({
-      where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
-      orderBy: { name: "asc" },
-    });
-    // Seed defaults on first use
-    if (!q && data.length === 0) {
-      await prisma.brandOption.createMany({
-        data: [{ name: "Mercedes-Benz" }, { name: "TATA" }, { name: "Jeep" }],
-        skipDuplicates: true,
+    try {
+      let data = await prisma.brandOption.findMany({
+        where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
+        orderBy: { name: "asc" },
       });
-      data = await prisma.brandOption.findMany({ orderBy: { name: "asc" } });
+      // Seed defaults on first use
+      if (!q && data.length === 0) {
+        await prisma.brandOption.createMany({
+          data: [{ name: "Mercedes-Benz" }, { name: "TATA" }, { name: "Jeep" }],
+          skipDuplicates: true,
+        });
+        data = await prisma.brandOption.findMany({ orderBy: { name: "asc" } });
+      }
+      return NextResponse.json({ data });
+    } catch {
+      // Table may not exist yet — return defaults so the UI is still usable
+      return NextResponse.json({ data: [] });
     }
-    return NextResponse.json({ data });
   }
 
   return NextResponse.json({ error: "Invalid type" }, { status: 400 });
