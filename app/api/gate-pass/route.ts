@@ -473,11 +473,23 @@ export async function POST(req: NextRequest) {
     const approverLocation = (createData.fromLocation as string | null) ?? null;
     const creatorName = session.user.name || "Unknown";
 
-    // Helper: route to Approver (credit path)
-    async function routeToApprover(message: string) {
+    // Helper: route to Approver with correct payment type labels derived from actual zterm values
+    async function routeToApprover(
+      message: string,
+      opts: { hasImmediate?: boolean; hasCredit?: boolean; paymentType?: string } = {}
+    ) {
+      const ptImmediate = opts.hasImmediate ?? false;
+      const ptCredit    = opts.hasCredit    ?? true;
+      const ptType      = opts.paymentType  ?? "CREDIT";
       await prisma.gatePass.update({
         where: { id: gatePass.id },
-        data: { status: "PENDING_APPROVAL", paymentType: "CREDIT", hasCredit: true, creditApproved: false },
+        data: {
+          status: "PENDING_APPROVAL",
+          paymentType: ptType,
+          hasImmediate: ptImmediate,
+          hasCredit: ptCredit,
+          creditApproved: false,
+        },
       });
       gatePass.status = "PENDING_APPROVAL";
       const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
@@ -504,7 +516,7 @@ export async function POST(req: NextRequest) {
       const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
 
       if (active.length === 0) {
-        // No SAP orders → route to Approver
+        // No SAP orders → route to Approver (no zterm data, default CREDIT)
         await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`);
         return NextResponse.json({ gatePass }, { status: 201 });
       }
@@ -526,11 +538,18 @@ export async function POST(req: NextRequest) {
       });
 
       // Routing: ALL orders must be happy path for Immediate → Cashier
-      // Any non-happy-path order → Credit → Approver (no Mixed path)
+      // Any non-happy-path order → Approver (no Mixed path)
       const allImmediate = active.every((o) => o.isHappyPath);
 
+      // Payment type label is based on zterm alone (ZC01 = Immediate), independent of routing
+      const ztermHasImmediate = active.some((o) => o.payTermCode === "ZC01");
+      const ztermHasCredit    = active.some((o) => o.payTermCode !== "ZC01");
+      const ztermPaymentType  = ztermHasImmediate && ztermHasCredit ? "MIXED"
+                              : ztermHasImmediate ? "IMMEDIATE"
+                              : "CREDIT";
+
       if (allImmediate) {
-        // All immediate → Cashier
+        // All happy path → Cashier
         await prisma.gatePass.update({
           where: { id: gatePass.id },
           data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
@@ -550,8 +569,16 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ gatePass }, { status: 201 });
       } else {
-        // One or more non-happy-path orders → Credit → Approver
-        await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — credit payment terms detected. Please review and approve.`);
+        // One or more non-happy-path orders → Approver
+        // Label reflects actual zterm (ZC01 = Immediate, other = Credit)
+        const approverMsg = ztermHasImmediate && !ztermHasCredit
+          ? `${gatePassNumber} (${gatePass.vehicle}) — immediate payment order not yet fully invoiced (billing pending). Please review and approve.`
+          : `${gatePassNumber} (${gatePass.vehicle}) — credit payment terms detected. Please review and approve.`;
+        await routeToApprover(approverMsg, {
+          hasImmediate: ztermHasImmediate,
+          hasCredit:    ztermHasCredit,
+          paymentType:  ztermPaymentType,
+        });
         return NextResponse.json({ gatePass }, { status: 201 });
       }
     } catch (err) {
