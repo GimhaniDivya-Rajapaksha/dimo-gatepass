@@ -689,14 +689,31 @@ export default function CreateGatePassPage() {
     internalNo?: string;
   } | null>(null);
   const [activePassWarning, setActivePassWarning] = useState<{ gatePassNumber: string; status: string; id: string } | null>(null);
+  const [cdDeliveredWarning, setCdDeliveredWarning] = useState<{ gatePassNumber: string; id: string } | null>(null);
 
   async function checkActivePass(chassis: string) {
     setActivePassWarning(null);
+    setCdDeliveredWarning(null);
     if (!chassis) return;
     try {
       const res = await fetch(`/api/gate-pass/by-vehicle?chassisNo=${encodeURIComponent(chassis)}`);
       if (!res.ok) return;
       const data = await res.json();
+
+      // Hard block: CD vehicle already delivered (COMPLETED CD pass exists)
+      const delivered = (data.passes ?? []).find(
+        (p: { passType?: string; status: string; gatePassNumber: string; id: string }) =>
+          p.passType === "CUSTOMER_DELIVERY" && p.status === "COMPLETED"
+      );
+      if (delivered) {
+        setCdDeliveredWarning({ gatePassNumber: delivered.gatePassNumber, id: delivered.id });
+        setErrors(prev => ({
+          ...prev,
+          form: `This vehicle has already been delivered (${delivered.gatePassNumber}). Customer Delivery can only be done once per vehicle.`,
+        }));
+        return;
+      }
+
       const activeStatuses = ["PENDING_APPROVAL", "APPROVED", "GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "CASHIER_REVIEW", "DRAFT"];
       const active = (data.passes ?? []).find(
         (p: { chassis?: string; status: string; gatePassNumber: string; id: string }) =>
@@ -1732,6 +1749,10 @@ export default function CreateGatePassPage() {
       return t !== "" && !immediateTerms.includes(t);
     });
     const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
+
+    if (cdDeliveredWarning && passType === "CUSTOMER_DELIVERY") {
+      e.form = `This vehicle has already been delivered (${cdDeliveredWarning.gatePassNumber}). Customer Delivery can only be done once per vehicle.`;
+    }
 
     if (activePassWarning && !(isSr && srMode === "out")) {
       e.form = `This vehicle already has an open gate pass (${activePassWarning.gatePassNumber}). A new gate pass cannot be created until the existing one is closed.`;
@@ -4138,7 +4159,7 @@ export default function CreateGatePassPage() {
                               value={cd.vehicle}
                               onChange={(v) => {
                                 setC("vehicle", v);
-                                if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); }
+                                if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); }
                               }}
                               onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
                               onSelect={(o) => {
@@ -4173,7 +4194,7 @@ export default function CreateGatePassPage() {
                             {cd.vehicle && (
                               <button
                                 type="button"
-                                onClick={() => { setC("vehicle", ""); setSelectedCdVehicleDetail(null); void fetchLookup("vehicle", ""); }}
+                                onClick={() => { setC("vehicle", ""); setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); void fetchLookup("vehicle", ""); }}
                                 className="absolute right-9 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
                                 style={{ color: "var(--text-muted)" }}
                                 title="Clear vehicle"
@@ -4187,7 +4208,20 @@ export default function CreateGatePassPage() {
                         </div>
                         {selectedCdVehicleDetail && (
                           <div className="mt-3 rounded-xl border px-4 py-3"
-                            style={{ background: "var(--surface2)", borderColor: activePassWarning ? "#f87171" : "var(--border)" }}>
+                            style={{ background: "var(--surface2)", borderColor: (cdDeliveredWarning || activePassWarning) ? "#f87171" : "var(--border)" }}>
+                            {cdDeliveredWarning && (
+                              <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
+                                style={{ background: "#fef2f2", border: "1px solid #fca5a5" }}>
+                                <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                <p className="text-xs font-semibold flex-1" style={{ color: "#7f1d1d" }}>
+                                  Vehicle already delivered via <strong>{cdDeliveredWarning.gatePassNumber}</strong>. Customer Delivery can only be done once per vehicle.
+                                </p>
+                                <a href={`/gate-pass/${cdDeliveredWarning.id}`} target="_blank" rel="noreferrer"
+                                  className="text-xs font-bold underline flex-shrink-0" style={{ color: "#dc2626" }}>View</a>
+                              </div>
+                            )}
                             {activePassWarning && (
                               <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl"
                                 style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
