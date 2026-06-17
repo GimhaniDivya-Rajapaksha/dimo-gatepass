@@ -80,22 +80,22 @@ export async function GET(req: NextRequest) {
     const chassisUp = (gp.chassis || "").toUpperCase();
     const vehicleUp = (gp.vehicle || "").toUpperCase();
 
-    // Match SAP row by chassis (Vhvin) or vehicle number (Vhcex / Vhcle)
+    // Match SAP row by chassis (chassisNo) or vehicle number (externalNo / internalNo)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sapRow = sapRows.find((r: any) => {
-      const vhvin = (r.Vhvin || r.vhvin || "").toUpperCase();
-      const vhcex = (r.Vhcex || r.vhcex || "").toUpperCase();
-      const vhcle = (r.Vhcle || r.vhcle || "").toUpperCase();
+      const vhvin = (r.chassisNo  || "").toUpperCase();
+      const vhcex = (r.externalNo || "").toUpperCase();
+      const vhcle = (r.internalNo || "").toUpperCase();
       return (
         (chassisUp && (vhvin === chassisUp || vhcex === chassisUp || vhcle === chassisUp)) ||
         (vehicleUp && (vhcex === vehicleUp || vhcle === vehicleUp))
       );
     });
 
-    const sapPlantCode     = sapRow ? (sapRow.Werks     || sapRow.werks     || "") : null;
-    const sapStorageLoc    = sapRow ? (sapRow.Lgort     || sapRow.lgort     || "") : null;
-    const sapPlantDesc     = sapRow ? (sapRow.name1     || sapRow.Name1     || "") : null;
-    const sapStorageDesc   = sapRow ? (sapRow.LgortDesc || sapRow.lgortDesc || "") : null;
+    const sapPlantCode     = sapRow ? (sapRow.plantCode        || "") : null;
+    const sapStorageLoc    = sapRow ? (sapRow.storageLocation  || "") : null;
+    const sapPlantDesc     = sapRow ? (sapRow.plantDescription || "") : null;
+    const sapStorageDesc   = sapRow ? (sapRow.storageDescription || "") : null;
     const sapLocation      = sapRow ? `${sapPlantDesc} - ${sapStorageDesc}` : null;
 
     // Compare using plant + storage codes (most reliable)
