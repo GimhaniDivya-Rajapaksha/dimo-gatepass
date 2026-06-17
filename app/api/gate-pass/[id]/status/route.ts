@@ -1287,54 +1287,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    // SAP: confirm vehicle arrived at destination for Location Transfer passes.
-    // This is a safety-net write — security_gate_out already writes to SAP, but if that failed
-    // (e.g. legacy pass without stored codes and destination not in live SAP feed at that time),
-    // this ensures SAP is updated when the vehicle physically arrives.
-    if (gatePass.passType === "LOCATION_TRANSFER") {
-      const toLoc = gatePass.toLocation as string | null;
-      if (toLoc) {
-        try {
-          let targetLocation: PlantLocationTarget | null = null;
-
-          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
-            targetLocation = {
-              plantCode: gatePass.toPlantCode,
-              plantDescription: gatePass.toLocation ?? "",
-              storageLocation: gatePass.toStorageLocation,
-              storageDescription: "",
-            };
-          } else {
-            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
-            targetLocation = findPlantLocationOption(plantOptions, toLoc);
-            if (!targetLocation) {
-              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
-              targetLocation = findPlantLocationOption(
-                dbLocations.map((l) => ({
-                  plantCode: l.plantCode,
-                  plantDescription: l.plantDescription,
-                  storageLocation: l.storageLocation,
-                  storageDescription: l.storageDescription,
-                })),
-                toLoc
-              );
-            }
-          }
-
-          if (targetLocation) {
-            await updateVehiclePlantLocation({
-              identifiers: [gatePass.vehicle, gatePass.chassis],
-              destination: targetLocation,
-              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
-            });
-          } else {
-            console.warn("[gate_in] no matching SAP plant location for:", toLoc);
-          }
-        } catch (error) {
-          console.error("[gate_in] SAP location update failed:", error);
-        }
-      }
-    }
+    // SAP location is already updated at Gate OUT (print_gate_out or security_gate_out).
+    // gate_in is application-only — marks the pass COMPLETED in our system; no SAP write here.
 
     // SUB_OUT COMPLETED (ASO confirmed vehicle arrived at sub-location) → notify Initiator
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "SUB_OUT") {

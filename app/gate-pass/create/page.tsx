@@ -742,6 +742,9 @@ export default function CreateGatePassPage() {
     toLocation?: string;
     toLocationPlant?: string;
     toLocationStorage?: string;
+    // Each bulk vehicle can have a different destination — SAP codes stored per vehicle, not shared
+    toPlantCode?: string;
+    toStorageLocation?: string;
   }>>([]);
   const [ltBulkLocationOptions, setLtBulkLocationOptions] = useState<Record<string, LookupOption[]>>({});
   const [ltBulkLocationLoading, setLtBulkLocationLoading] = useState<Record<string, boolean>>({});
@@ -1771,6 +1774,7 @@ export default function CreateGatePassPage() {
         if (!lt.outReason) e.outReason = "Reason for going out is required";
       }
       if (!ltBulkMode && !lt.vehicle) e.vehicle = "Vehicle is required";
+      if (!ltBulkMode && !isDraftMode && !lt.fromLocation) e.fromLocation = "SAP could not detect this vehicle's current location. Gate pass cannot be created.";
       if (!lt.approver) e.approver = "Approver is required";
       // In draft mode the date/time is auto-filled from the security officer's creation time — skip validation
       if (!isDraftMode) {
@@ -2102,6 +2106,9 @@ export default function CreateGatePassPage() {
     try {
       if (isLtLike && ltBulkMode) {
         const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // Bulk LT: each vehicle can go to a different destination location.
+        // Initiating and approving flow remain as bulk (all pass creation + notifications batched).
+        // SAP writes happen per gate pass individually at print/security gate out — same as single LT.
         const batchPayloads = ltBulkVehicles.map((vehicle, index) => ({
           ...(payload as Record<string, unknown>),
           vehicle: vehicle.vehicle,
@@ -2109,7 +2116,9 @@ export default function CreateGatePassPage() {
           make: vehicle.make || null,
           vehicleColor: vehicle.colour || null,
           toLocation: vehicle.toLocation || null,
-          fromLocation: vehicle.currentLocation || lt.fromLocation || null,
+          toPlantCode: vehicle.toPlantCode || null,
+          toStorageLocation: vehicle.toStorageLocation || null,
+          fromLocation: vehicle.currentLocation || null,
           comments: `[[LT_BATCH:${batchId}]][[LT_BATCH_INDEX:${index + 1}]][[LT_BATCH_TOTAL:${ltBulkVehicles.length}]]`,
         }));
 
@@ -3586,6 +3595,7 @@ export default function CreateGatePassPage() {
                             setL("toLocation", "");
                             setSelectedLocationDetail(null);
                             if (!ltBulkMode) void checkActivePass(o.chassisNo ?? "");
+                            setErrors((p) => { const n = { ...p }; delete n.fromLocation; return n; });
                             void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
                               if (result) {
                                 const loc = result.location;
@@ -3599,6 +3609,8 @@ export default function CreateGatePassPage() {
                                     setSelectedFromLocationDetail({ plantCode: result.plantCode, storageLocation: result.storageLocation });
                                   }
                                 }
+                              } else {
+                                setErrors((p) => ({ ...p, fromLocation: "SAP could not detect this vehicle's current location. Gate pass cannot be created." }));
                               }
                             });
                           }}
@@ -3717,6 +3729,8 @@ export default function CreateGatePassPage() {
                                             toLocation: option.value,
                                             toLocationPlant: option.plantDescription ?? "",
                                             toLocationStorage: option.storageDescription ?? "",
+                                            toPlantCode: option.plantCode ?? "",
+                                            toStorageLocation: option.storageLocation ?? "",
                                           })}
                                         />
                                       </div>
@@ -3729,7 +3743,7 @@ export default function CreateGatePassPage() {
                                         void loadLtBulkVehicleLocations(v.vehicle, v.matnr, value, v.toLocationType);
                                       }}
                                       onFocus={() => void loadLtBulkVehicleLocations(v.vehicle, v.matnr, v.toLocation ?? "", v.toLocationType)}
-                                      onSelect={(option) => updateLtBulkVehicle(v.vehicle, { toLocation: option.value })}
+                                      onSelect={(option) => updateLtBulkVehicle(v.vehicle, { toLocation: option.value, toPlantCode: option.plantCode ?? "", toStorageLocation: option.storageLocation ?? "" })}
                                       placeholder={`Search ${v.toLocationType.toLowerCase()} destination`}
                                       error={errors.toLocation && !v.toLocation ? errors.toLocation : undefined}
                                       loading={ltBulkLocationLoading[v.vehicle]}
@@ -3786,11 +3800,16 @@ export default function CreateGatePassPage() {
                           </svg>
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Current Location</p>
-                            <p className="text-sm font-semibold" style={{ color: selectedVehicleDetail.currentLocation ? "#2563eb" : "var(--text-muted)" }}>
+                            <p className="text-sm font-semibold" style={{ color: selectedVehicleDetail.currentLocation ? "#2563eb" : errors.fromLocation ? "#dc2626" : "var(--text-muted)" }}>
                               {selectedVehicleDetail.currentLocation ?? (
-                                <span className="italic font-normal">Detecting…</span>
+                                errors.fromLocation
+                                  ? <span className="font-normal">Not found in SAP</span>
+                                  : <span className="italic font-normal">Detecting…</span>
                               )}
                             </p>
+                            {errors.fromLocation && (
+                              <p className="text-xs mt-0.5" style={{ color: "#dc2626" }}>{errors.fromLocation}</p>
+                            )}
                           </div>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">

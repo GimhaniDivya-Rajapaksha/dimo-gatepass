@@ -426,7 +426,7 @@ export async function POST(req: NextRequest) {
     passSubType: body.passSubType || null,
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
-    fromLocation: body.fromLocation || (session.user as { defaultLocation?: string | null }).defaultLocation || null,
+    fromLocation: body.fromLocation || null,
     fromPlantCode: body.fromPlantCode || null,
     fromStorageLocation: body.fromStorageLocation || null,
     sapVehicleId: body.sapVehicleId || null,
