@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -95,6 +95,9 @@ function AssignAttributesModal({
   const [approverId, setApproverId] = useState(user.approverId ?? "");
   const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
   const [locations, setLocations] = useState<string[]>([]);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationOpen, setLocationOpen] = useState(false);
+  const locationRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -103,6 +106,17 @@ function AssignAttributesModal({
       .then(r => r.json())
       .then(d => setLocations(d.locations ?? []))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (locationRef.current && !locationRef.current.contains(e.target as Node)) {
+        setLocationOpen(false);
+        setLocationSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   if (fields.length === 0) return null;
@@ -178,14 +192,69 @@ function AssignAttributesModal({
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Location <span className="text-red-500">*</span>
               </label>
-              <select
-                value={location} onChange={e => { setLocation(e.target.value); setError(""); }}
-                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                style={{ background: "var(--surface2)", borderColor: !location.trim() ? "#f87171" : "var(--border)", color: "var(--text)" }}
-              >
-                <option value="">— Select location —</option>
-                {locations.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
+              <div ref={locationRef} className="relative">
+                <div
+                  className="w-full border rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 cursor-pointer"
+                  style={{ background: "var(--surface2)", borderColor: !location.trim() ? "#f87171" : locationOpen ? "#3b82f6" : "var(--border)", color: "var(--text)", boxShadow: locationOpen ? "0 0 0 2px #bfdbfe" : undefined }}
+                  onClick={() => { setLocationOpen(o => !o); setLocationSearch(""); }}
+                >
+                  <span className="flex-1 truncate" style={{ color: location ? "var(--text)" : "var(--text-muted)" }}>
+                    {location || "— Select location —"}
+                  </span>
+                  <svg className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: "var(--text-muted)", transform: locationOpen ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {locationOpen && (
+                  <div className="absolute z-50 w-full mt-1 rounded-xl border shadow-xl overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                    <div className="p-2 border-b" style={{ borderColor: "var(--border)" }}>
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--surface2)" }}>
+                        <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={locationSearch}
+                          onChange={e => setLocationSearch(e.target.value)}
+                          placeholder="Search locations..."
+                          className="flex-1 bg-transparent text-sm outline-none"
+                          style={{ color: "var(--text)" }}
+                          onClick={e => e.stopPropagation()}
+                        />
+                        {locationSearch && (
+                          <button type="button" onClick={e => { e.stopPropagation(); setLocationSearch(""); }}
+                            className="w-4 h-4 flex items-center justify-center rounded-full hover:opacity-70" style={{ color: "var(--text-muted)" }}>
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <ul className="max-h-52 overflow-y-auto py-1">
+                      {locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
+                        <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No locations found</li>
+                      ) : (
+                        locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => (
+                          <li key={l}
+                            className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
+                            style={{ background: l === location ? "#eff6ff" : "transparent", color: l === location ? "#1d4ed8" : "var(--text)", fontWeight: l === location ? 600 : 400 }}
+                            onMouseDown={e => { e.preventDefault(); setLocation(l); setError(""); setLocationOpen(false); setLocationSearch(""); }}
+                          >
+                            {l === location && (
+                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                            <span className={l === location ? "" : "ml-5"}>{l}</span>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
               {!location.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
             </div>
           )}
