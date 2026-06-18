@@ -480,6 +480,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
   const [arrivingVehicles, setArrivingVehicles] = useState<GatePass[]>([]);
   const [arrivingLoading, setArrivingLoading] = useState(false);
   const [confirmingArrivedId, setConfirmingArrivedId] = useState<string | null>(null);
+  const [arrivalConfirmId, setArrivalConfirmId] = useState<string | null>(null);
   const [newArrivalToast, setNewArrivalToast] = useState<string | null>(null);
   const [hasNewArrivals, setHasNewArrivals] = useState(false);
   const prevArrivingCount = useRef(0);
@@ -771,8 +772,14 @@ export default function InitiatorDashboardClient({ user }: Props) {
     setTimeout(() => setPrintingId(null), 500);
   }, [router]);
 
-  const handleConfirmArrived = useCallback(async (id: string) => {
-    if (!confirm("Confirm vehicle has arrived?")) return;
+  const handleConfirmArrived = useCallback((id: string) => {
+    setArrivalConfirmId(id);
+  }, []);
+
+  const handleConfirmArrivedExecute = useCallback(async () => {
+    if (!arrivalConfirmId) return;
+    const id = arrivalConfirmId;
+    setArrivalConfirmId(null);
     setConfirmingArrivedId(id);
     try {
       const res = await fetch(`/api/gate-pass/${id}/status`, {
@@ -790,7 +797,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
     } finally {
       setConfirmingArrivedId(null);
     }
-  }, [fetchArrivingVehicles, fetchPasses]);
+  }, [arrivalConfirmId, fetchArrivingVehicles, fetchPasses]);
 
   const statCards = [
     {
@@ -1592,6 +1599,67 @@ export default function InitiatorDashboardClient({ user }: Props) {
           </div>
         )}
       </div>
+
+      {/* ── Arrival Confirm Modal ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {arrivalConfirmId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setArrivalConfirmId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-6 py-5" style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">Confirm Vehicle Arrived</p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.7)" }}>Mark vehicle as received at destination</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                  Has the vehicle physically arrived at its destination? This will update the gate pass status to completed.
+                </p>
+                <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>This action cannot be undone.</p>
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setArrivalConfirmId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmArrivedExecute()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}
+                >
+                  Yes, Arrived
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Sub IN Quick Modal (ASO) */}
       <AnimatePresence>

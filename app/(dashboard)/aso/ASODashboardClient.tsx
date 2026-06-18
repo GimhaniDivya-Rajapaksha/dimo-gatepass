@@ -113,6 +113,7 @@ export default function ASODashboardClient({ user }: Props) {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ id: string; action: "gate_out" | "gate_in"; label: string } | null>(null);
+  const [subInConfirmVehicle, setSubInConfirmVehicle] = useState<IncomingVehicle | null>(null);
 
   // ── Stats derived from incoming + myPasses ─────────────────────────────────
   const incomingCount = incoming.length;
@@ -271,8 +272,14 @@ export default function ASODashboardClient({ user }: Props) {
   }, [confirmModal, fetchMyPasses, fetchIncoming]);
 
   // Create a SUB_IN pass for the incoming vehicle — Security B will then confirm Gate IN
-  const handleCreateSubIn = useCallback(async (v: IncomingVehicle) => {
-    if (!confirm("Create Sub IN pass for this vehicle? Security Officer will confirm Gate IN when the vehicle arrives.")) return;
+  const handleCreateSubIn = useCallback((v: IncomingVehicle) => {
+    setSubInConfirmVehicle(v);
+  }, []);
+
+  const handleCreateSubInConfirmed = useCallback(async () => {
+    if (!subInConfirmVehicle) return;
+    const v = subInConfirmVehicle;
+    setSubInConfirmVehicle(null);
     setActioningId(v.id);
     try {
       const res = await fetch("/api/gate-pass", {
@@ -304,7 +311,7 @@ export default function ASODashboardClient({ user }: Props) {
     } finally {
       setActioningId(null);
     }
-  }, [fetchIncoming, fetchMyPasses]);
+  }, [subInConfirmVehicle, fetchIncoming, fetchMyPasses]);
 
   useEffect(() => { void fetchIncoming(); }, [fetchIncoming]);
   useEffect(() => { void fetchMyPasses(); }, [fetchMyPasses]);
@@ -421,12 +428,30 @@ export default function ASODashboardClient({ user }: Props) {
             ),
             sub: "awaiting approver",
           },
-        ].map((s, i) => (
+        ].map((s, i) => {
+          const isIncoming = s.label === "Vehicles Incoming" || s.label === "In Transit";
+          const isPending = s.label === "Pending Approval";
+          const isMyTotal = s.label === "My Total Passes";
+          const active = isPending ? statusFilter === "PENDING_APPROVAL" : isMyTotal ? statusFilter === "ALL" : false;
+          const handleClick = isIncoming
+            ? () => document.getElementById("aso-incoming-section")?.scrollIntoView({ behavior: "smooth" })
+            : isPending
+            ? () => { setStatusFilter(prev => prev === "PENDING_APPROVAL" ? "ALL" : "PENDING_APPROVAL"); document.getElementById("aso-passes-section")?.scrollIntoView({ behavior: "smooth" }); }
+            : isMyTotal
+            ? () => { setStatusFilter("ALL"); document.getElementById("aso-passes-section")?.scrollIntoView({ behavior: "smooth" }); }
+            : undefined;
+          return (
           <motion.div key={s.label}
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06, type: "spring", stiffness: 200, damping: 22 }}
+            onClick={handleClick}
             className="relative rounded-2xl overflow-hidden border p-5"
-            style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--card-shadow)" }}>
+            style={{
+              background: "var(--surface)",
+              border: active ? `2px solid ${s.accent}` : "1px solid var(--border)",
+              boxShadow: active ? `0 0 0 3px ${s.accent}18, var(--card-shadow)` : "var(--card-shadow)",
+              cursor: handleClick ? "pointer" : "default",
+            }}>
             {/* Top stripe */}
             <div className="absolute top-0 left-0 right-0 h-0.5 pointer-events-none"
               style={{ background: `linear-gradient(90deg,${s.accent},${s.accent}22)` }} />
@@ -439,13 +464,16 @@ export default function ASODashboardClient({ user }: Props) {
               </div>
             </div>
             <p className="text-5xl font-black mb-1" style={{ color: "var(--text)" }}>{s.value}</p>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{s.sub}</p>
+            <p className="text-xs" style={{ color: active ? s.accent : "var(--text-muted)" }}>
+              {active ? "✓ Active filter" : handleClick ? "Click to filter →" : s.sub}
+            </p>
           </motion.div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ── Vehicles Incoming ────────────────────────────────────────────────── */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+      <motion.div id="aso-incoming-section" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.25, type: "spring", stiffness: 160, damping: 22 }}
         className="rounded-2xl border overflow-hidden"
         style={{ background: "var(--surface)", borderColor: "#3b82f644", boxShadow: "var(--card-shadow)" }}>
@@ -750,7 +778,7 @@ export default function ASODashboardClient({ user }: Props) {
       )}
 
       {/* ── My Sub-Passes ────────────────────────────────────────────────────── */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+      <motion.div id="aso-passes-section" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.32, type: "spring", stiffness: 160, damping: 22 }}
         className="rounded-2xl border overflow-hidden"
         style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--card-shadow)" }}>
@@ -957,6 +985,66 @@ export default function ASODashboardClient({ user }: Props) {
         )}
       </motion.div>
     </motion.div>
+
+      {/* ── Sub IN Confirm Modal ──────────────────────────────────────── */}
+      <AnimatePresence>
+        {subInConfirmVehicle && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setSubInConfirmVehicle(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-6 py-5" style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">Create Sub IN Pass</p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.7)" }}>Security Officer will confirm Gate IN on arrival</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                  Create a Sub IN pass for <strong>{subInConfirmVehicle.vehicle}</strong>? The Security Officer will confirm Gate IN when the vehicle physically arrives.
+                </p>
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSubInConfirmVehicle(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateSubInConfirmed()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#1e3a8a,#2563eb)" }}
+                >
+                  Yes, Create
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Custom Confirmation Modal ─────────────────────────────────── */}
       <AnimatePresence>

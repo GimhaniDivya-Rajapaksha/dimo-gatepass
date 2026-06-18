@@ -40,19 +40,22 @@ function AnimatedNumber({ value }: { value: number }) {
   return <span className="tabular-nums">{display}</span>;
 }
 
-function StatCard({ label, value, accentColor, icon, loading }: {
+function StatCard({ label, value, accentColor, icon, loading, onClick, active }: {
   label: string; value: number; accentColor: string; icon: React.ReactNode; loading: boolean;
+  onClick?: () => void; active?: boolean;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -4, transition: { duration: 0.18 } }}
+      onClick={onClick}
       className="relative rounded-2xl overflow-hidden"
       style={{
         background: "var(--surface)",
-        border: "1px solid var(--border)",
-        boxShadow: "var(--card-shadow)",
+        border: active ? `2px solid ${accentColor}` : "1px solid var(--border)",
+        boxShadow: active ? `0 0 0 3px ${accentColor}18, var(--card-shadow)` : "var(--card-shadow)",
+        cursor: onClick ? "pointer" : "default",
       }}
     >
       {/* Corner glow */}
@@ -100,8 +103,15 @@ function StatCard({ label, value, accentColor, icon, loading }: {
         <div className="border-t pt-3 min-h-[20px]" style={{ borderColor: "var(--border)" }}>
           {loading ? (
             <div className="skeleton h-3 w-16 rounded" />
+          ) : active ? (
+            <span className="text-xs font-semibold flex items-center gap-1" style={{ color: accentColor }}>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              Active filter
+            </span>
           ) : (
-            <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Total records</span>
+            <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Click to filter →</span>
           )}
         </div>
       </div>
@@ -114,6 +124,7 @@ export default function ApproverDashboardClient({ user }: Props) {
   const [statsLoading, setStatsLoading] = useState(true);
   const [queue, setQueue] = useState<GatePass[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("PENDING_APPROVAL");
 
   useEffect(() => {
     fetch("/api/gate-pass/stats")
@@ -125,7 +136,7 @@ export default function ApproverDashboardClient({ user }: Props) {
   const fetchQueue = useCallback(async () => {
     setQueueLoading(true);
     try {
-      const res = await fetch("/api/gate-pass?status=PENDING_APPROVAL&limit=8");
+      const res = await fetch(`/api/gate-pass?status=${statusFilter}&limit=8`);
       if (res.ok) {
         const d = await res.json();
         setQueue(d.passes || []);
@@ -133,28 +144,35 @@ export default function ApproverDashboardClient({ user }: Props) {
     } finally {
       setQueueLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
   const statCards = [
     {
-      label: "Pending Approval", value: stats.pending, accentColor: "#f59e0b",
+      label: "Pending Approval", value: stats.pending, accentColor: "#f59e0b", filterStatus: "PENDING_APPROVAL",
       icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
     },
     {
-      label: "Approved", value: stats.approved, accentColor: "#10b981",
+      label: "Approved", value: stats.approved, accentColor: "#10b981", filterStatus: "APPROVED",
       icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
     },
     {
-      label: "Rejected", value: stats.rejected, accentColor: "#ef4444",
+      label: "Rejected", value: stats.rejected, accentColor: "#ef4444", filterStatus: "REJECTED",
       icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
     },
     {
-      label: "Completed", value: stats.completed, accentColor: "#8b5cf6",
+      label: "Completed", value: stats.completed, accentColor: "#8b5cf6", filterStatus: "COMPLETED",
       icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
     },
   ];
+
+  const QUEUE_TITLES: Record<string, string> = {
+    PENDING_APPROVAL: "Pending Approvals Queue",
+    APPROVED: "Approved Passes",
+    REJECTED: "Rejected Passes",
+    COMPLETED: "Completed Passes",
+  };
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
@@ -210,6 +228,8 @@ export default function ApproverDashboardClient({ user }: Props) {
               accentColor={s.accentColor}
               icon={s.icon}
               loading={statsLoading}
+              onClick={() => setStatusFilter(s.filterStatus)}
+              active={statusFilter === s.filterStatus}
             />
           </motion.div>
         ))}
@@ -224,7 +244,7 @@ export default function ApproverDashboardClient({ user }: Props) {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--lime)" }} />
-              <h2 className="font-bold text-sm title-font" style={{ color: "var(--text)" }}>Pending Approvals Queue</h2>
+              <h2 className="font-bold text-sm title-font" style={{ color: "var(--text)" }}>{QUEUE_TITLES[statusFilter] ?? "Gate Passes"}</h2>
             </div>
             {!queueLoading && queue.length > 0 && (
               <span
@@ -236,7 +256,7 @@ export default function ApproverDashboardClient({ user }: Props) {
             )}
           </div>
           <Link
-            href="/gate-pass/approve"
+            href={statusFilter === "PENDING_APPROVAL" ? "/gate-pass/approve" : `/gate-pass?status=${statusFilter}`}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
             style={{ color: "var(--accent)", background: "var(--surface2)" }}
           >
@@ -317,14 +337,23 @@ export default function ApproverDashboardClient({ user }: Props) {
                     </td>
                     <td className="px-5 py-3.5">
                       <Link
-                        href={`/gate-pass/${gp.id}`}
+                        href={statusFilter === "PENDING_APPROVAL" ? `/gate-pass/${gp.id}` : `/gate-pass/${gp.id}`}
                         className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:opacity-80"
-                        style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}
+                        style={statusFilter === "PENDING_APPROVAL"
+                          ? { background: "rgba(245,158,11,0.12)", color: "#f59e0b" }
+                          : { background: "var(--surface2)", color: "var(--accent)" }}
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Review
+                        {statusFilter === "PENDING_APPROVAL" ? (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        )}
+                        {statusFilter === "PENDING_APPROVAL" ? "Review" : "View"}
                       </Link>
                     </td>
                   </motion.tr>

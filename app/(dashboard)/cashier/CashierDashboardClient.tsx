@@ -61,26 +61,31 @@ export default function CashierDashboardClient({ user }: Props) {
 
       {/* Stat card */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-          className="rounded-2xl p-5 border"
-          style={{ background: "var(--surface)", borderColor: "#f59e0b66", boxShadow: "var(--card-shadow)" }}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Pending Order Review</p>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "#fef3c718", color: "#f59e0b" }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+        <Link href="/gate-pass/cashier-review">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            whileHover={{ y: -4, transition: { duration: 0.18 } }}
+            className="rounded-2xl p-5 border cursor-pointer"
+            style={{ background: "var(--surface)", borderColor: "#f59e0b66", boxShadow: "var(--card-shadow)" }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Pending Order Review</p>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "#fef3c718", color: "#f59e0b" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
             </div>
-          </div>
-          {loading ? (
-            <div className="skeleton h-10 w-14 rounded-xl" />
-          ) : (
-            <p className="text-5xl font-black" style={{ color: "var(--text)" }}>{total}</p>
-          )}
-          <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>Gate passes awaiting cashier order check</p>
-        </motion.div>
+            {loading ? (
+              <div className="skeleton h-10 w-14 rounded-xl" />
+            ) : (
+              <p className="text-5xl font-black" style={{ color: "var(--text)" }}>{total}</p>
+            )}
+            <p className="text-xs mt-2 flex items-center gap-1" style={{ color: "#f59e0b" }}>
+              Click to review →
+            </p>
+          </motion.div>
+        </Link>
 
         <motion.div
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}

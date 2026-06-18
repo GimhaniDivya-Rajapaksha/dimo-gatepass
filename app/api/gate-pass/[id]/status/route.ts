@@ -1388,9 +1388,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ gatePass: updated });
   }
 
-  // INITIATOR: cancel their own PENDING_APPROVAL pass
+  // INITIATOR / AREA_SALES_OFFICER: cancel their own PENDING_APPROVAL pass
   if (action === "cancel") {
-    if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN") {
+    if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN" && session.user.role !== "AREA_SALES_OFFICER") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.createdById !== session.user.id && session.user.role !== "ADMIN") {

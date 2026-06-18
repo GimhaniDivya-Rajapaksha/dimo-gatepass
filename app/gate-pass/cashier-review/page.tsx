@@ -229,7 +229,13 @@ function OrderModal({
 
 
   async function handleDeleteOrder(id: string) {
-    if (!window.confirm("Remove this order from the payment review list?")) return;
+    setDeleteOrderConfirmId(id);
+  }
+
+  async function handleDeleteOrderConfirmed() {
+    if (!deleteOrderConfirmId) return;
+    const id = deleteOrderConfirmId;
+    setDeleteOrderConfirmId(null);
     await fetch(`/api/service-orders?id=${id}`, { method: "DELETE" });
     await fetchOrders();
   }
@@ -1319,6 +1325,8 @@ export default function CashierReviewPage() {
   const [clearedSearch, setClearedSearch] = useState("");
   const [expandedOrders, setExpandedOrders] = useState<Record<string, { orders: ServiceOrder[]; loading: boolean }>>({});
   const [overrideLoadingId, setOverrideLoadingId] = useState<string | null>(null);
+  const [deleteOrderConfirmId, setDeleteOrderConfirmId] = useState<string | null>(null);
+  const [overrideConfirmPassId, setOverrideConfirmPassId] = useState<string | null>(null);
 
   // All hooks must be declared before any conditional returns
   const fetchPasses = useCallback(async () => {
@@ -1411,8 +1419,14 @@ export default function CashierReviewPage() {
     finally { setEscalating(false); }
   }
 
-  async function handleRequestOverride(passId: string) {
-    if (!confirm("Request payment override from your assigned approver? They will be notified to approve Gate OUT without full payment clearance.")) return;
+  function handleRequestOverride(passId: string) {
+    setOverrideConfirmPassId(passId);
+  }
+
+  async function handleRequestOverrideConfirmed() {
+    if (!overrideConfirmPassId) return;
+    const passId = overrideConfirmPassId;
+    setOverrideConfirmPassId(null);
     setOverrideLoadingId(passId);
     try {
       const res = await fetch(`/api/gate-pass/${passId}/status`, {
@@ -1905,6 +1919,126 @@ export default function CashierReviewPage() {
             pass={quickInvoicePass}
             onClose={() => setQuickInvoicePass(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Order Confirm Modal ──────────────────────────────── */}
+      <AnimatePresence>
+        {deleteOrderConfirmId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setDeleteOrderConfirmId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-6 py-5" style={{ background: "linear-gradient(135deg,#7f1d1d,#dc2626)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">Remove Order</p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.7)" }}>Remove from payment review list</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                  Are you sure you want to remove this order from the payment review list? This cannot be undone.
+                </p>
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteOrderConfirmId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+                >
+                  Keep Order
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteOrderConfirmed()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#7f1d1d,#dc2626)" }}
+                >
+                  Yes, Remove
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Override Request Confirm Modal ──────────────────────────── */}
+      <AnimatePresence>
+        {overrideConfirmPassId && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => setOverrideConfirmPassId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-sm mx-4 rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="px-6 py-5" style={{ background: "linear-gradient(135deg,#78350f,#d97706)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-white">Request Payment Override</p>
+                    <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.7)" }}>Approver will be notified</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5">
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+                  Request your assigned approver to approve Gate OUT without full payment clearance. They will be notified immediately.
+                </p>
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setOverrideConfirmPassId(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRequestOverrideConfirmed()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#78350f,#d97706)" }}
+                >
+                  Yes, Request Override
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

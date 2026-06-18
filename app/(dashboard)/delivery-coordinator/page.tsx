@@ -156,17 +156,24 @@ function KPICardSkeleton({ accent }: { accent: string }) {
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
 
-function KPICard({ label, value, sub, accent, icon, pulse, delay = 0 }: {
+function KPICard({ label, value, sub, accent, icon, pulse, delay = 0, onClick, active }: {
   label: string; value: number; sub?: string;
   accent: string; icon: React.ReactNode; pulse?: boolean; delay?: number;
+  onClick?: () => void; active?: boolean;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 24, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ delay, type: "spring", stiffness: 160, damping: 20 }}
+      onClick={onClick}
       className="relative rounded-2xl border overflow-hidden p-5 flex flex-col gap-2"
-      style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--card-shadow)" }}
+      style={{
+        background: "var(--surface)",
+        border: active ? `2px solid ${accent}` : "1px solid var(--border)",
+        boxShadow: active ? `0 0 0 3px ${accent}18, var(--card-shadow)` : "var(--card-shadow)",
+        cursor: onClick ? "pointer" : "default",
+      }}
     >
       <motion.div
         className="absolute top-0 left-0 right-0 h-1"
@@ -193,7 +200,9 @@ function KPICard({ label, value, sub, accent, icon, pulse, delay = 0 }: {
           <span className="mb-1 w-2 h-2 rounded-full animate-pulse" style={{ background: accent }} />
         )}
       </div>
-      {sub && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{sub}</p>}
+      <p className="text-xs" style={{ color: active ? accent : "var(--text-muted)" }}>
+        {active ? "✓ Active filter" : onClick ? "Click to filter →" : sub ?? ""}
+      </p>
     </motion.div>
   );
 }
@@ -326,15 +335,23 @@ export default function DeliveryCoordinatorDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard label="Total Today" value={stats.totalToday} sub="gate passes created" accent="#0d9488" delay={0}
           icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
+          onClick={() => setActiveStatusFilter(null)}
+          active={!activeStatusFilter}
         />
         <KPICard label="Pending Approval" value={stats.pendingApproval} sub="awaiting review" accent="#f97316" pulse delay={0.07}
           icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          onClick={() => setActiveStatusFilter(prev => prev === "PENDING_APPROVAL" ? null : "PENDING_APPROVAL")}
+          active={activeStatusFilter === "PENDING_APPROVAL"}
         />
         <KPICard label="Gate Out" value={stats.gateOut} sub="vehicles in transit" accent="#3b82f6" pulse delay={0.14}
           icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>}
+          onClick={() => setActiveStatusFilter(prev => prev === "GATE_OUT" ? null : "GATE_OUT")}
+          active={activeStatusFilter === "GATE_OUT"}
         />
         <KPICard label="Completed Today" value={stats.completedToday} sub="successfully closed" accent="#8b5cf6" delay={0.21}
           icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          onClick={() => setActiveStatusFilter(prev => prev === "COMPLETED" ? null : "COMPLETED")}
+          active={activeStatusFilter === "COMPLETED"}
         />
         <KPICard label="Arriving Here" value={stats.inTransitToLocation} sub="vehicles en route" accent="#22c55e" pulse delay={0.28}
           icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" /></svg>}

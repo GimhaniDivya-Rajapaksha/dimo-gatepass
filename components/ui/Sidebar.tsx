@@ -43,6 +43,11 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const [draftCount, setDraftCount] = useState(0);
   const [overrideCount, setOverrideCount] = useState(0);
   const [pendingCompletionCount, setPendingCompletionCount] = useState(0);
+  const [myPassesCount, setMyPassesCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [rejectedCount, setRejectedCount] = useState(0);
+  const [arrivalsCount, setArrivalsCount] = useState(0);
+  const [completedCount, setCompletedCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
 
@@ -84,6 +89,54 @@ export default function Sidebar({ user, role }: SidebarProps) {
     };
     fetchPendingCompletion();
     const id = setInterval(fetchPendingCompletion, 60_000);
+    return () => clearInterval(id);
+  }, [role]);
+
+  useEffect(() => {
+    const rolesWithCounts = ["INITIATOR", "AREA_SALES_OFFICER", "APPROVER", "DELIVERY_COORDINATOR", "SERVICE_ADVISOR", "CASHIER"];
+    if (!role || !rolesWithCounts.includes(role)) return;
+    const fetchCounts = () => {
+      fetch("/api/sidebar-counts")
+        .then(r => r.json())
+        .then(d => {
+          setMyPassesCount(d.myPasses ?? 0);
+          setPendingCount(d.pending ?? 0);
+          setRejectedCount(d.rejected ?? 0);
+          setCompletedCount(d.completed ?? 0);
+        })
+        .catch(() => {});
+    };
+    fetchCounts();
+    const id = setInterval(fetchCounts, 60_000);
+    return () => clearInterval(id);
+  }, [role]);
+
+  // Vehicle Arrivals count — fetched client-side so browser session cookies are carried automatically.
+  // Server-side internal fetch fails auth (Next.js App Router cookies() context is not forwarded).
+  // Replicates the exact same API calls the receive page makes so the count always matches.
+  useEffect(() => {
+    if (role !== "INITIATOR" && role !== "SERVICE_ADVISOR") return;
+    const fetchArrivals = async () => {
+      // Get user location for toLocationCode filtering (matches receive page client-side filter)
+      const meRes = await fetch("/api/me").catch(() => null);
+      const meData = meRes?.ok ? await meRes.json() : {};
+      const userLocation: string | null = meData.user?.defaultLocation ?? null;
+      const myCode = userLocation ? userLocation.split(" - ").slice(1).join(" - ").trim() : null;
+
+      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "1", locationView: "true" });
+      const asParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "1", locationView: "true" });
+      if (myCode) {
+        ltParams.set("toLocationCode", myCode);
+        asParams.set("toLocationCode", myCode);
+      }
+      const ltRes = await fetch(`/api/gate-pass?${ltParams}`).catch(() => null);
+      const ltData = ltRes?.ok ? await ltRes.json() : { total: 0 };
+      const asRes = await fetch(`/api/gate-pass?${asParams}`).catch(() => null);
+      const asData = asRes?.ok ? await asRes.json() : { total: 0 };
+      setArrivalsCount((ltData.total ?? 0) + (asData.total ?? 0));
+    };
+    void fetchArrivals();
+    const id = setInterval(() => void fetchArrivals(), 60_000);
     return () => clearInterval(id);
   }, [role]);
 
@@ -181,24 +234,54 @@ export default function Sidebar({ user, role }: SidebarProps) {
                 </span>
                 <span className="relative z-10 truncate flex-1">{item.label}</span>
                 {item.showDraftBadge && draftCount > 0 && (
-                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
-                    style={{ background: "#f59e0b", color: "#1c1400" }}>
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
                     {draftCount}
                   </span>
                 )}
                 {item.showOverrideBadge && overrideCount > 0 && (
-                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
-                    style={{ background: "#ef4444", color: "#fff" }}>
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#ef4444", textShadow: "0 0 8px rgba(239,68,68,0.55)" }}>
                     {overrideCount}
                   </span>
                 )}
                 {item.showPendingCompletionBadge && pendingCompletionCount > 0 && (
-                  <span className="relative z-10 ml-auto min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center"
-                    style={{ background: "#f59e0b", color: "#1c1400" }}>
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
                     {pendingCompletionCount}
                   </span>
                 )}
-                {isActive && !item.showDraftBadge && !item.showOverrideBadge && !item.showPendingCompletionBadge && (
+                {item.showMyPassesBadge && myPassesCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
+                    {myPassesCount > 99 ? "99+" : myPassesCount}
+                  </span>
+                )}
+                {item.showPendingBadge && pendingCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
+                    {pendingCount > 99 ? "99+" : pendingCount}
+                  </span>
+                )}
+                {item.showRejectedBadge && rejectedCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#ef4444", textShadow: "0 0 8px rgba(239,68,68,0.55)" }}>
+                    {rejectedCount > 99 ? "99+" : rejectedCount}
+                  </span>
+                )}
+                {item.showArrivalsBadge && arrivalsCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
+                    {arrivalsCount > 99 ? "99+" : arrivalsCount}
+                  </span>
+                )}
+                {item.showCompletedBadge && completedCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#f59e0b", textShadow: "0 0 8px rgba(245,158,11,0.55)" }}>
+                    {completedCount > 99 ? "99+" : completedCount}
+                  </span>
+                )}
+                {isActive && !item.showDraftBadge && !item.showOverrideBadge && !item.showPendingCompletionBadge && !item.showMyPassesBadge && !item.showPendingBadge && !item.showRejectedBadge && !item.showArrivalsBadge && !item.showCompletedBadge && (
                   <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>

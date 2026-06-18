@@ -5,6 +5,11 @@ export type NavItem = {
   showDraftBadge?: boolean;               // shows live DRAFT count badge in sidebar
   showOverrideBadge?: boolean;            // shows live payment-override count badge in sidebar (APPROVER only)
   showPendingCompletionBadge?: boolean;   // shows live DRAFT count badge in sidebar (SECURITY_OFFICER)
+  showMyPassesBadge?: boolean;            // shows total gate passes count for logged-in user
+  showPendingBadge?: boolean;             // shows PENDING_APPROVAL count
+  showRejectedBadge?: boolean;            // shows REJECTED count
+  showArrivalsBadge?: boolean;            // shows GATE_OUT vehicles arriving at user's location
+  showCompletedBadge?: boolean;           // shows COMPLETED count
 };
 
 const DashboardIcon = () => (
@@ -100,10 +105,10 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   ],
   AREA_SALES_OFFICER: [
     { label: "Dashboard", href: "/aso", icon: <DashboardIcon /> },
-    { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon />, showMyPassesBadge: true },
     { label: "Create Sub-Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
-    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
-    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon />, showPendingBadge: true },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
   CASHIER: [
@@ -111,24 +116,24 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
-    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
     { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
   INITIATOR: [
     { label: "Dashboard", href: "/initiator", icon: <DashboardIcon /> },
-    { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "My Gate Passes", href: "/gate-pass", icon: <ListIcon />, showMyPassesBadge: true },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
-    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
-    { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon /> },
-    { label: "Vehicle Arrivals", href: "/gate-pass/receive", icon: <ArrivalsIcon /> },
-    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon />, showPendingBadge: true },
+    { label: "Rejected", href: "/gate-pass/rejected", icon: <XCircleIcon />, showRejectedBadge: true },
+    { label: "Vehicle Arrivals", href: "/gate-pass/receive", icon: <ArrivalsIcon />, showArrivalsBadge: true },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
   APPROVER: [
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
-    { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon /> },
+    { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon />, showPendingBadge: true },
     {
       label: "Payment Overrides",
       href: "/gate-pass?status=CASHIER_REVIEW&cashierOverride=true",
@@ -140,7 +145,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
       showOverrideBadge: true,
     },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
-    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
     { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
   ],
@@ -159,6 +164,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Create Pass", href: "/gate-pass/create", icon: <BoxIcon /> },
     { label: "Pending Forms", href: "/gate-pass?status=DRAFT", icon: <PendingFormsIcon />, showDraftBadge: true },
+    { label: "Vehicle Arrivals", href: "/gate-pass/receive", icon: <ArrivalsIcon />, showArrivalsBadge: true },
   ],
   DELIVERY_COORDINATOR: [
     { label: "Dashboard", href: "/delivery-coordinator", icon: <DashboardIcon /> },
@@ -168,13 +174,13 @@ export const navItemsByRole: Record<string, NavItem[]> = {
       </svg>
     )},
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
-    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon /> },
+    { label: "Pending", href: "/gate-pass?status=PENDING_APPROVAL", icon: <ClockIcon />, showPendingBadge: true },
     { label: "Gate Out", href: "/gate-pass?status=GATE_OUT", icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
       </svg>
     )},
-    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
   ],
 };

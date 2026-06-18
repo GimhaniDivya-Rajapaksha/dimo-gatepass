@@ -453,17 +453,6 @@ export default function VehicleReportPage() {
                   </svg>
                   Export CSV
                 </button>
-                <button
-                  onClick={() => window.print()}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
-                  style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                  </svg>
-                  Print
-                </button>
               </div>
             )}
           </div>
@@ -858,15 +847,34 @@ export default function VehicleReportPage() {
                             {/* Gate Out By */}
                             <td className="px-4 py-3 whitespace-nowrap">
                               {p.gateOutBy ? (
-                                <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateOutBy}</p>
+                                <>
+                                  <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateOutBy}</p>
+                                  {p.departureDate && (
+                                    <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                                      {fmtDateTime(p.departureDate, p.departureTime)}
+                                    </p>
+                                  )}
+                                </>
                               ) : (
                                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
                               )}
                             </td>
                             {/* Gate In By */}
                             <td className="px-4 py-3 whitespace-nowrap">
-                              {p.gateInBy ? (
-                                <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateInBy}</p>
+                              {p.passType === "CUSTOMER_DELIVERY" && p.status === "COMPLETED" ? (
+                                <>
+                                  <p className="text-xs font-semibold" style={{ color: "#15803d" }}>Customer Delivered</p>
+                                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                                    {fmtTs(p.updatedAt)}
+                                  </p>
+                                </>
+                              ) : p.gateInBy ? (
+                                <>
+                                  <p className="text-xs font-medium" style={{ color: "var(--text)" }}>{p.gateInBy}</p>
+                                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                                    {fmtTs(p.updatedAt)}
+                                  </p>
+                                </>
                               ) : (
                                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
                               )}

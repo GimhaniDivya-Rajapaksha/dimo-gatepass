@@ -176,8 +176,8 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .action-body{background:#f4f6fb;padding:16px 18px 18px}
 .action-desc{font-size:13px;font-weight:300;color:#555;line-height:1.6;margin-bottom:16px}
 .btn-row{display:flex;gap:11px;flex-wrap:wrap}
-.btn-ok{display:inline-flex;align-items:center;gap:7px;padding:12px 26px;background:#8DC63F;color:#000;border:none;border-radius:3px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none;box-shadow:0 2px 8px rgba(141,198,63,0.35)}
-.btn-no{display:inline-flex;align-items:center;gap:7px;padding:12px 26px;background:#fff;color:#000;border:1.5px solid #aaa;border-radius:3px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
+.btn-ok{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)}
+.btn-no{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
 .expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:14px;font-size:11.5px;color:#92400e}
 .status-box{border:1px solid rgba(141,198,63,0.35);background:linear-gradient(180deg,#f6fbe9 0%,#edf7dd 100%);border-radius:4px;padding:16px 16px 14px;margin-bottom:22px}
@@ -217,7 +217,7 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
   return `
   <div class="header">
     <div class="header-logo">
-      <img src="${process.env.NEXTAUTH_URL ?? "https://dimo-gatepass.vercel.app"}/logo-dark.jpg" alt="DIMO" style="width:105px;height:auto;display:block;">
+      <img src="${DIMO_LOGO}" alt="DIMO" style="width:105px;height:auto;display:block;">
     </div>
     <div class="header-title">
       <div class="co-name">Diesel &amp; Motor Engineering Plc.</div>
@@ -375,8 +375,14 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
       <div class="btn-row">
-        <a href="${approveUrl}" class="btn-ok">&#10003; Approve Gate Pass</a>
-        <a href="${rejectUrl}" class="btn-no">&#10005; Reject Gate Pass</a>
+        <a href="${approveUrl}" class="btn-ok">
+          <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Approve Gate Pass
+        </a>
+        <a href="${rejectUrl}" class="btn-no">
+          <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+          Reject Gate Pass
+        </a>
       </div>
       <div class="expiry-note">
         &#x26A0; These links expire in <strong>48 hours</strong>. After expiry, please log in to the system to take action.
