@@ -1,4 +1,6 @@
 ﻿import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
 const GRAPH_MAIL_FROM = "digital.service01@dimolanka.com";
@@ -41,11 +43,35 @@ async function getGraphAccessToken(config: NonNullable<ReturnType<typeof getGrap
   return data.access_token as string;
 }
 
+function getLogoBase64(): string | null {
+  try {
+    const logoPath = path.join(process.cwd(), "public", "logo-dark.jpg");
+    return fs.readFileSync(logoPath).toString("base64");
+  } catch {
+    return null;
+  }
+}
+
 async function sendGraphMail(to: string, subject: string, html: string) {
   const config = getGraphConfig();
   if (!config) return;
 
   const token = await getGraphAccessToken(config);
+
+  const logoBase64 = getLogoBase64();
+  const attachments = logoBase64
+    ? [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: "logo.jpg",
+          contentType: "image/jpeg",
+          contentBytes: logoBase64,
+          isInline: true,
+          contentId: "logo@dimo",
+        },
+      ]
+    : [];
+
   const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.sender)}/sendMail`, {
     method: "POST",
     headers: {
@@ -57,6 +83,7 @@ async function sendGraphMail(to: string, subject: string, html: string) {
         subject,
         body: { contentType: "HTML", content: html },
         toRecipients: [{ emailAddress: { address: to } }],
+        attachments,
       },
       saveToSentItems: true,
     }),
@@ -213,11 +240,10 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
-  const logoUrl = `${(process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "")}/logo-dark.jpg`;
   return `
   <div class="header">
     <div class="header-logo">
-      <img src="${logoUrl}" alt="DIMO" style="width:105px;height:auto;display:block;">
+      <img src="cid:logo@dimo" alt="DIMO" style="width:105px;height:auto;display:block;">
     </div>
     <div class="header-title">
       <div class="co-name">Diesel &amp; Motor Engineering Plc.</div>
