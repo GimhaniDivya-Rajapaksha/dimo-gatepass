@@ -305,34 +305,42 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
   ${pass.departureDate ? `
   <div class="sec">
     ${secLabel("Departure Schedule")}
-    <div class="sched-grid">
-      <div class="sched-cell">
-        <div class="sched-icon">
-          <svg viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="#1E4FA0" stroke-width="1.3"/>
-            <path d="M5 1.5V4M11 1.5V4M2 6.5h12" stroke="#1E4FA0" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <div>
-          <div class="sched-lbl">Estimated Departure</div>
-          <div class="sched-date">${pass.departureDate}</div>
-          ${pass.departureTime ? `<div class="sched-time">${pass.departureTime}</div>` : ""}
-        </div>
-      </div>
-      <div class="sched-cell">
-        <div class="sched-icon">
-          <svg viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="6" stroke="#1E4FA0" stroke-width="1.3"/>
-            <path d="M8 4.5V8l2.5 2.5" stroke="#1E4FA0" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div>
-          <div class="sched-lbl">Vehicle</div>
-          <div class="sched-date">${pass.vehicle}</div>
-          ${pass.chassis ? `<div class="sched-time">${pass.chassis}</div>` : ""}
-        </div>
-      </div>
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d0d8e8;border-radius:4px;border-collapse:collapse;overflow:hidden">
+      <tr>
+        <td width="50%" style="background:#fff;padding:13px 15px;border-right:1px solid #d0d8e8;vertical-align:middle">
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td width="47" style="vertical-align:middle;padding-right:13px">
+                <table cellpadding="0" cellspacing="0"><tr>
+                  <td width="34" height="34" align="center" valign="middle" style="width:34px;height:34px;background:#dbeafe;border-radius:17px;text-align:center;vertical-align:middle;font-size:18px;line-height:34px">&#128197;</td>
+                </tr></table>
+              </td>
+              <td style="vertical-align:middle">
+                <div style="font-size:8.5px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:4px">Estimated Departure</div>
+                <div style="font-size:13px;font-weight:700;color:#111">${pass.departureDate}</div>
+                ${pass.departureTime ? `<div style="font-size:12.5px;font-weight:500;color:#1E4FA0;margin-top:2px;letter-spacing:0.04em">${pass.departureTime}</div>` : ""}
+              </td>
+            </tr>
+          </table>
+        </td>
+        <td width="50%" style="background:#fff;padding:13px 15px;vertical-align:middle">
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td width="47" style="vertical-align:middle;padding-right:13px">
+                <table cellpadding="0" cellspacing="0"><tr>
+                  <td width="34" height="34" align="center" valign="middle" style="width:34px;height:34px;background:#dbeafe;border-radius:17px;text-align:center;vertical-align:middle;font-size:18px;line-height:34px">&#128663;</td>
+                </tr></table>
+              </td>
+              <td style="vertical-align:middle">
+                <div style="font-size:8.5px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:4px">Vehicle</div>
+                <div style="font-size:13px;font-weight:700;color:#111">${pass.vehicle}</div>
+                ${pass.chassis ? `<div style="font-size:12.5px;font-weight:500;color:#1E4FA0;margin-top:2px;letter-spacing:0.04em">${pass.chassis}</div>` : ""}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </div>` : ""}
   <div class="sec">
     ${secLabel("Vehicle Details")}
