@@ -225,8 +225,8 @@ function GatePassListPageInner() {
         const d = await res.json();
         const collapsed = collapseJourneyPasses(d.passes || []);
         setPasses(collapsed);
-        setTotal(collapsed.length);
-        setTotalPages(1);
+        setTotal(d.total ?? collapsed.length);
+        setTotalPages(Math.ceil((d.total ?? collapsed.length) / 15));
 
         const items = collapsed.map((pass) => ({
           key: pass.id,
