@@ -213,7 +213,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
-  const logoUrl = `${process.env.NEXTAUTH_URL ?? ""}/logo-dark.jpg`;
+  const logoUrl = `${(process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "")}/logo-dark.jpg`;
   return `
   <div class="header">
     <div class="header-logo">
@@ -374,16 +374,28 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
       <div class="action-desc">
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
-      <div class="btn-row">
-        <a href="${approveUrl}" class="btn-ok">
-          <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Approve Gate Pass
-        </a>
-        <a href="${rejectUrl}" class="btn-no">
-          <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
-          Reject Gate Pass
-        </a>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr>
+          <td align="center" style="padding:0">
+            <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
+              <tr>
+                <td style="padding:0 16px 0 0">
+                  <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Approve Gate Pass
+                  </a>
+                </td>
+                <td style="padding:0 0 0 16px">
+                  <a href="${rejectUrl}" class="btn-no" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+                    Reject Gate Pass
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <div class="expiry-note">
         &#x26A0; These links expire in <strong>48 hours</strong>. After expiry, please log in to the system to take action.
       </div>
