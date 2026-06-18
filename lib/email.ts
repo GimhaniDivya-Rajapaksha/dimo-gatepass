@@ -3,7 +3,6 @@
 const GRAPH_SCOPE = "https://graph.microsoft.com/.default";
 const GRAPH_MAIL_FROM = "digital.service01@dimolanka.com";
 
-const DIMO_LOGO = `${process.env.NEXTAUTH_URL ?? ""}/logo-dark.jpg`;
 
 function getGraphConfig() {
   const tenantId = process.env.GRAPH_TENANT_ID || process.env.AZURE_AD_TENANT_ID;
@@ -214,10 +213,11 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
+  const logoUrl = `${process.env.NEXTAUTH_URL ?? ""}/logo-dark.jpg`;
   return `
   <div class="header">
     <div class="header-logo">
-      <img src="${DIMO_LOGO}" alt="DIMO" style="width:105px;height:auto;display:block;">
+      <img src="${logoUrl}" alt="DIMO" style="width:105px;height:auto;display:block;">
     </div>
     <div class="header-title">
       <div class="co-name">Diesel &amp; Motor Engineering Plc.</div>
