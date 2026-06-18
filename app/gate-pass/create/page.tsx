@@ -745,6 +745,7 @@ export default function CreateGatePassPage() {
     // Each bulk vehicle can have a different destination — SAP codes stored per vehicle, not shared
     toPlantCode?: string;
     toStorageLocation?: string;
+    activePassWarning?: { gatePassNumber: string; id: string; status: string } | null;
   }>>([]);
   const [ltBulkLocationOptions, setLtBulkLocationOptions] = useState<Record<string, LookupOption[]>>({});
   const [ltBulkLocationLoading, setLtBulkLocationLoading] = useState<Record<string, boolean>>({});
@@ -3578,6 +3579,16 @@ export default function CreateGatePassPage() {
                                 ? prev
                                 : [...prev, detail]);
                               setL("vehicle", "");
+                              if (detail.chassisNo) {
+                                void fetch(`/api/gate-pass/by-vehicle?chassisNo=${encodeURIComponent(detail.chassisNo)}`)
+                                  .then((r) => r.json())
+                                  .then((data) => {
+                                    const activeStatuses = ["PENDING_APPROVAL", "APPROVED", "GATE_OUT", "INITIATOR_OUT", "INITIATOR_IN", "CASHIER_REVIEW", "DRAFT"];
+                                    const active = (data.passes ?? []).find((p: { status: string; gatePassNumber: string; id: string }) => activeStatuses.includes(p.status));
+                                    if (active) updateLtBulkVehicle(detail.vehicle, { activePassWarning: { gatePassNumber: active.gatePassNumber, id: active.id, status: active.status } });
+                                  })
+                                  .catch(() => undefined);
+                              }
                               if (ltBulkVehicles.length === 0) {
                                 setSelectedVehicleDetail({
                                   chassisNo: detail.chassisNo,
@@ -3665,6 +3676,17 @@ export default function CreateGatePassPage() {
                                     <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
                                       {[v.chassisNo, v.currentLocation].filter(Boolean).join(" - ") || "Detecting location..."}
                                     </p>
+                                    {v.activePassWarning && (
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        <p className="text-xs font-semibold" style={{ color: "#dc2626" }}>
+                                          Open gate pass: <a href={`/gate-pass/${v.activePassWarning.id}`} target="_blank" rel="noreferrer" className="underline">{v.activePassWarning.gatePassNumber}</a>
+                                          <span className="font-normal ml-1 opacity-75">({v.activePassWarning.status.replace(/_/g, " ").toLowerCase()})</span>
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
                                   <button
                                     type="button"
