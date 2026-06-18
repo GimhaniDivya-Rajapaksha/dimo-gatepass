@@ -131,6 +131,7 @@ function OrderModal({
   const [confirmProceed, setConfirmProceed] = useState(false);
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
+  const [deleteOrderConfirmId, setDeleteOrderConfirmId] = useState<string | null>(null);
 
   // Selected checkboxes on the left (available) side
   const [selectedLeft, setSelectedLeft] = useState<Set<string>>(new Set());
