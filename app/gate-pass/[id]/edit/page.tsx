@@ -229,6 +229,7 @@ export default function EditPendingGatePassPage() {
   const [approverOptions, setApproverOptions]   = useState<LookupOption[]>([]);
   const [locationOptions, setLocationOptions]   = useState<LookupOption[]>([]);
   const [outReasonOptions, setOutReasonOptions] = useState<LookupOption[]>([]);
+  const [locationType, setLocationType] = useState<"DEALER" | "DIMO" | "PROMOTION" | "FINANCE" | "">("");
 
   /* form fields */
   const [approver,      setApprover]      = useState("");
@@ -292,6 +293,17 @@ export default function EditPendingGatePassPage() {
       setOutReasonOptions(ors);
     }).finally(() => setPageLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!locationType) return;
+    fetch(`/api/lookups?field=location&locationType=${locationType}&limit=500`)
+      .then(r => r.json())
+      .then(data => {
+        const locs = ((data as { options?: LookupOption[] }).options ?? []);
+        setLocationOptions(locs.map(o => ({ ...o, label: o.label || o.value })));
+        setToLocation("");
+      });
+  }, [locationType]);
 
   async function handleSubmit() {
     if (!approver.trim()) { setError("Approver is required"); return; }
@@ -391,14 +403,36 @@ export default function EditPendingGatePassPage() {
               <TimePicker value={departureTime} onChange={setDepartureTime} />
             </Field>
           </div>
-          <Field label="To Location">
-            <PreloadedDropdown
-              value={toLocation}
-              onChange={setToLocation}
-              options={locationOptions}
-              placeholder="Select location..."
-            />
-          </Field>
+          <div>
+            <label className="block text-sm font-medium mb-2" style={{ color: "var(--text)" }}>Location Type</label>
+            <div className="flex flex-wrap gap-4 mb-3">
+              {([
+                { value: "DEALER",    label: "Dealer" },
+                { value: "DIMO",      label: "DIMO" },
+                { value: "PROMOTION", label: "Promotion" },
+                { value: "FINANCE",   label: "Finance Institution" },
+              ] as { value: "DEALER" | "DIMO" | "PROMOTION" | "FINANCE"; label: string }[]).map(({ value: v, label: lbl }) => (
+                <label key={v} className="flex items-center gap-2 cursor-pointer">
+                  <div
+                    onClick={() => setLocationType(v)}
+                    className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                    style={{ borderColor: locationType === v ? "#2563eb" : "var(--border)" }}
+                  >
+                    {locationType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                  </div>
+                  <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{lbl}</span>
+                </label>
+              ))}
+            </div>
+            <Field label="To Location">
+              <PreloadedDropdown
+                value={toLocation}
+                onChange={setToLocation}
+                options={locationOptions}
+                placeholder={locationType ? `Select ${locationType.toLowerCase()} location...` : "Select location type first, then pick location..."}
+              />
+            </Field>
+          </div>
           <Field label="Out Reason">
             <PreloadedDropdown
               value={outReason}
