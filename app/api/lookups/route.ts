@@ -304,10 +304,19 @@ export async function GET(req: NextRequest) {
       }>();
 
       // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel
-      const [sapResult, plantResult] = await Promise.allSettled([
+      let [sapResult, plantResult] = await Promise.allSettled([
         fetchSapVehicles(q, passType),
         fetchPlantVehicleRows(),
       ]);
+
+      // Retry once if Azure APIM cold start returned nothing for a real search query
+      if (q.trim() && (sapResult.status === "rejected" || (sapResult.status === "fulfilled" && sapResult.value.length === 0))) {
+        await new Promise<void>((r) => setTimeout(r, 1000));
+        [sapResult, plantResult] = await Promise.allSettled([
+          fetchSapVehicles(q, passType),
+          fetchPlantVehicleRows(),
+        ]);
+      }
 
       // Build Matnr lookup from /plant to cross-reference SAP /in/out entries
       const plantMatnrByInternalNo = new Map<string, string>();
