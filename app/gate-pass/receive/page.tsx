@@ -87,38 +87,43 @@ export default function ReceivePage() {
     try {
       // locationView=true bypasses the INITIATOR "own passes only" filter so destination
       // initiators can see incoming passes they did not create.
-      // No location filter in API — fetch all and match client-side using the plant code
-      // (the part after " - ", e.g. "DIMO 800") which is stable even when descriptions have typos.
+      // Use server-side toLocationCode (CONTAINS) — same approach as security gate page —
+      // so SAP description typos ("Mercedeze" vs "Mercedes") never break the match.
+      const myCode  = myLocation ? myLocation.split(" - ").slice(1).join(" - ").trim() : null;
+      const myPlant = myLocation ? myLocation.split(" - ")[0].trim() : null;
+      const toLocQ  = myCode  ? `&toLocationCode=${encodeURIComponent(myCode)}`
+                    : myPlant ? `&toLocationPlant=${encodeURIComponent(myPlant)}`
+                    : "";
+
       const ltParams      = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT",  limit: "100", locationView: "true" });
       const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT",  limit: "50",  locationView: "true" });
       const ltCompParams  = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20",  locationView: "true" });
       const asCompParams  = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20",  locationView: "true" });
 
       // Sequential fetches — connection pool limit is 1 on Supabase free tier
-      const ltRes         = await fetch(`/api/gate-pass?${ltParams}`);
+      const ltRes         = await fetch(`/api/gate-pass?${ltParams}${toLocQ}`);
       const ltData        = ltRes.ok ? await ltRes.json() : { passes: [] };
-      const asGateOutRes  = await fetch(`/api/gate-pass?${asGateOutParams}`);
+      const asGateOutRes  = await fetch(`/api/gate-pass?${asGateOutParams}${toLocQ}`);
       const asGateOutData = asGateOutRes.ok ? await asGateOutRes.json() : { passes: [] };
-      const ltCompRes     = await fetch(`/api/gate-pass?${ltCompParams}`);
+      const ltCompRes     = await fetch(`/api/gate-pass?${ltCompParams}${toLocQ}`);
       const ltCompData    = ltCompRes.ok ? await ltCompRes.json() : { passes: [] };
-      const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}`);
+      const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}${toLocQ}`);
       const asCompData    = asCompRes.ok ? await asCompRes.json() : { passes: [] };
 
-      // Robust location match: handles description typos ("Mercedes" vs "Mercedeze") by
-      // comparing the plant code (after " - ") and falling back to case-insensitive prefix.
-      const myCode  = myLocation ? myLocation.split(" - ").slice(1).join(" - ").trim().toLowerCase() : null;
-      const myPlant = myLocation ? myLocation.split(" - ")[0].trim().toLowerCase() : null;
+      // Keep client-side match as secondary check (handles edge cases where myLocation is null)
+      const myCodeLower = myCode?.toLowerCase() ?? null;
+      const myPlantLower = myPlant?.toLowerCase() ?? null;
       const locationMatch = (p: GatePass) => {
         if (!myLocation) return true;
         const toLoc = (p.toLocation ?? "").toLowerCase().trim();
         if (!toLoc) return true;
         // Primary: match on plant code (e.g. "DIMO 800") — immune to description typos
-        if (myCode) {
+        if (myCodeLower) {
           const passCode = toLoc.split(" - ").slice(1).join(" - ").trim();
-          if (passCode === myCode) return true;
+          if (passCode === myCodeLower) return true;
         }
         // Fallback: plant description prefix
-        if (myPlant && toLoc.startsWith(myPlant)) return true;
+        if (myPlantLower && toLoc.startsWith(myPlantLower)) return true;
         return false;
       };
 
