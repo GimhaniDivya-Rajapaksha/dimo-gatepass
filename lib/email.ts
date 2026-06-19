@@ -574,8 +574,8 @@ export async function sendRejectionNotificationEmail(
   initiatorName: string,
   pass: GatePassEmailData & { rejectionReason?: string | null; approverName: string }
 ): Promise<void> {
-  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const viewUrl = `${baseUrl}/gate-pass/${pass.gatePassNumber}`;
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${pass.passId ?? pass.gatePassNumber}`;
 
   const passTypeLabel =
     pass.passType === "LOCATION_TRANSFER" ? "Location Transfer" :

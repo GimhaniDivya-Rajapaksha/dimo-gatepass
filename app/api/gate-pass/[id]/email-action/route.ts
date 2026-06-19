@@ -233,6 +233,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         gatePass.createdBy.name,
         {
           gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
           passType: gatePass.passType,
           passSubType: gatePass.passSubType,
           vehicle: gatePass.vehicle ?? "",
