@@ -452,6 +452,7 @@ export async function POST(req: NextRequest) {
       createData.requestedBy as string,
       {
         gatePassNumber: gatePass.gatePassNumber,
+        passId: gatePass.id,
         passType: gatePass.passType,
         vehicle: gatePass.vehicle,
         chassis: gatePass.chassis,
@@ -460,6 +461,7 @@ export async function POST(req: NextRequest) {
         departureDate: gatePass.departureDate,
         departureTime: gatePass.departureTime,
         createdByName: session.user.name || "Unknown",
+        onBehalf: (createData.requestedByEmail as string) !== session.user.email,
       }
     ).catch((e: unknown) => console.error("[email] requestedBy notification failed:", e));
   }

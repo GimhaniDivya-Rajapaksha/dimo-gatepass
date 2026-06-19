@@ -128,6 +128,7 @@ export function verifyApprovalToken(token: string): { passId: string; action: st
 
 type GatePassEmailData = {
   gatePassNumber: string;
+  passId?: string | null;
   passType: string;
   passSubType?: string | null;
   vehicle: string;
@@ -138,6 +139,7 @@ type GatePassEmailData = {
   departureTime?: string | null;
   createdByName: string;
   approver?: string | null;
+  onBehalf?: boolean;
 };
 
 function baseStyles(): string {
@@ -456,8 +458,8 @@ export async function sendRequestedByNotificationEmail(
   requestedByName: string,
   pass: GatePassEmailData
 ): Promise<void> {
-  const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-  const viewUrl = `${baseUrl}/gate-pass/${pass.gatePassNumber}`;
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${pass.passId ?? pass.gatePassNumber}`;
 
   const passTypeLabel =
     pass.passType === "LOCATION_TRANSFER" ? "Location Transfer" :
@@ -551,9 +553,9 @@ ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Informat
       <tr><td>Timestamp</td><td>${now}</td></tr>
     </table>
   </div>
-  <div style="text-align:center;">
+  ${!pass.onBehalf ? `<div style="text-align:center;">
     <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
-  </div>
+  </div>` : ""}
 </div>
 ${emailFooter(pass.gatePassNumber)}
 </div></div>
