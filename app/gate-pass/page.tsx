@@ -170,6 +170,7 @@ function GatePassListPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [passes, setPasses] = useState<GatePass[]>([]);
+  const [inputValue, setInputValue] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "ALL");
   const [passTypeFilter, setPassTypeFilter] = useState<"ALL" | "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES">("ALL");
@@ -272,6 +273,10 @@ function GatePassListPageInner() {
     } catch (e) { setReassignError(String(e)); }
     finally { setReassignSubmitting(false); }
   }
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(inputValue), 350);
+    return () => clearTimeout(t);
+  }, [inputValue]);
   useEffect(() => { setPage(1); }, [search, statusFilter, passTypeFilter]);
   useEffect(() => { setStatusFilter(searchParams.get("status") ?? "ALL"); setPage(1); }, [searchParams]);
 
@@ -426,7 +431,7 @@ function GatePassListPageInner() {
         {/* Search + filter bar */}
         <div className="flex items-center gap-3 p-4 border-b flex-wrap" style={{ borderColor: "var(--border)" }}>
           <div className="relative flex-1 min-w-0">
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} suppressHydrationWarning
+            <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} suppressHydrationWarning
               placeholder="Search by chassis, GP number..."
               className="w-full border rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
