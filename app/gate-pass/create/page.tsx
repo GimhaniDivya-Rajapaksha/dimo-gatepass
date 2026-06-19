@@ -1238,6 +1238,12 @@ export default function CreateGatePassPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, locationType]);
 
+  // Pre-warm Azure APIM so first vehicle search responds instantly
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/lookups?field=vehicle&q=a&passType=LOCATION_TRANSFER").catch(() => {});
+  }, [status]);
+
   useEffect(() => {
     if (status !== "authenticated" || !locationType) return;
     void fetchLookup("location", "", locationType);
