@@ -1415,6 +1415,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       });
     }
 
+    // Send approval request email to approvers (same as initial submission)
+    if (targetApprovers.length > 0) {
+      const { sendApprovalRequestEmail } = await import("@/lib/email");
+      const emailPassData = {
+        gatePassNumber: updated.gatePassNumber,
+        passType: updated.passType,
+        passSubType: updated.passSubType,
+        vehicle: updated.vehicle ?? "",
+        chassis: updated.chassis,
+        toLocation: updated.toLocation,
+        fromLocation: updated.fromLocation,
+        departureDate: updated.departureDate,
+        departureTime: updated.departureTime,
+        createdByName: session.user.name || "Initiator",
+      };
+      for (const approverUser of targetApprovers) {
+        sendApprovalRequestEmail(approverUser.email, approverUser.name, id, emailPassData, approverUser.id)
+          .catch((e: unknown) => console.error("[email] resubmit approval email failed:", e));
+      }
+    }
+
     return NextResponse.json({ gatePass: updated });
   }
 
