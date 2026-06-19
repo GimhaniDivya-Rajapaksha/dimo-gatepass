@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyApprovalToken } from "@/lib/email";
+import { verifyApprovalToken, sendApprovalNotificationEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 
 async function findTokenApprover(approverId?: string | null) {
@@ -57,6 +57,36 @@ async function notifySecurityAfterApproval(gatePass: {
       gatePassId: gatePass.id,
     })),
   });
+}
+
+function fireApprovalEmails(gatePass: {
+  id: string; gatePassNumber: string; passType: string;
+  vehicle: string | null; chassis: string | null;
+  toLocation: string | null; fromLocation: string | null;
+  createdBy: { name: string; email: string } | null;
+  [key: string]: unknown;
+}, approverName: string) {
+  const emailData = {
+    gatePassNumber: gatePass.gatePassNumber,
+    passId: gatePass.id,
+    passType: gatePass.passType,
+    vehicle: gatePass.vehicle ?? "",
+    chassis: gatePass.chassis,
+    createdByName: gatePass.createdBy?.name ?? "",
+    toLocation: gatePass.toLocation,
+    fromLocation: gatePass.fromLocation,
+    approverName,
+  };
+  if (gatePass.createdBy?.email) {
+    sendApprovalNotificationEmail(gatePass.createdBy.email, gatePass.createdBy.name ?? "", emailData)
+      .catch((e: unknown) => console.error("[email] approval notification failed:", e));
+  }
+  const rbEmail = gatePass.requestedByEmail as string | null;
+  const rbName = gatePass.requestedBy as string | null;
+  if (rbEmail && rbEmail !== gatePass.createdBy?.email) {
+    sendApprovalNotificationEmail(rbEmail, rbName ?? "Requested By", emailData)
+      .catch((e: unknown) => console.error("[email] approval notification (requestedBy) failed:", e));
+  }
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -124,6 +154,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       });
       if (gatePass.cashierCleared || !gatePass.hasImmediate) {
         await notifySecurityAfterApproval(gatePass);
+        fireApprovalEmails(gatePass, approver?.name ?? "Approver");
       }
     } else {
       await prisma.gatePass.update({
@@ -140,6 +171,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         },
       });
       await notifySecurityAfterApproval(gatePass);
+      fireApprovalEmails(gatePass, approver?.name ?? "Approver");
     }
     return new NextResponse(successPage(gatePass.gatePassNumber), { headers: { "Content-Type": "text/html" } });
   }

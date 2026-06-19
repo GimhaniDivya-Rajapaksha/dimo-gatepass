@@ -264,6 +264,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    // Send approval notification email to creator and requestedBy
+    if (action === "approve" && newStatus === "APPROVED") {
+      const { sendApprovalNotificationEmail } = await import("@/lib/email");
+      const creator = await prisma.user.findUnique({
+        where: { id: gatePass.createdById },
+        select: { email: true, name: true },
+      });
+      const emailData = {
+        gatePassNumber: gatePass.gatePassNumber,
+        passId: gatePass.id,
+        passType: gatePass.passType,
+        vehicle: gatePass.vehicle ?? "",
+        chassis: gatePass.chassis,
+        createdByName: creator?.name ?? "",
+        toLocation: gatePass.toLocation,
+        fromLocation: gatePass.fromLocation,
+        approverName: session.user.name ?? "Approver",
+      };
+      if (creator?.email) {
+        sendApprovalNotificationEmail(creator.email, creator.name ?? "Initiator", emailData)
+          .catch((e: unknown) => console.error("[email] approval notification failed:", e));
+      }
+      const rbEmail = gatePass.requestedByEmail as string | null;
+      const rbName = gatePass.requestedBy as string | null;
+      if (rbEmail && rbEmail !== creator?.email) {
+        sendApprovalNotificationEmail(rbEmail, rbName ?? "Requested By", emailData)
+          .catch((e: unknown) => console.error("[email] approval notification (requestedBy) failed:", e));
+      }
+    }
+
     // For security-initiated passes: also notify admins & the initiator who completed the form
     if (isSecurityInitiated && action === "approve") {
       const [admins, initiators] = await Promise.all([

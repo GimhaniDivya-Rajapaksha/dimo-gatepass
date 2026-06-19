@@ -657,3 +657,90 @@ ${emailFooter(pass.gatePassNumber)}
     html
   );
 }
+
+export async function sendApprovalNotificationEmail(
+  recipientEmail: string,
+  recipientName: string,
+  pass: GatePassEmailData & { approverName: string }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${pass.passId ?? pass.gatePassNumber}`;
+
+  const passTypeLabel =
+    pass.passType === "LOCATION_TRANSFER" ? "Location Transfer" :
+    pass.passType === "CUSTOMER_DELIVERY" ? "Customer Delivery" :
+    pass.passType === "AFTER_SALES"       ? "Service / Repair" :
+    pass.passType;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gate Pass Approved &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
+<div class="notice-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  This gate pass has been approved by ${pass.approverName}.
+  <span>The vehicle is cleared for movement.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${recipientName}</strong>,<br>
+    Gate pass <strong>${pass.gatePassNumber}</strong> for vehicle <strong>${pass.vehicle}</strong> has been <strong>approved</strong> by ${pass.approverName}.
+  </div>
+  <div class="status-box">
+    <div class="status-top">
+      <div class="status-icon">&#10003;</div>
+      <div class="status-title">Gate Pass Approved</div>
+    </div>
+    <div class="status-desc">
+      Approved by <strong>${pass.approverName}</strong> on ${now}.
+    </div>
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Pass Type</div><div class="ic-val"><span class="chip">${passTypeLabel}</span></div></div>
+      <div class="ic"><div class="ic-lbl">Created By</div><div class="ic-val">${pass.createdByName}</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Approved By</div><div class="ic-val">${pass.approverName}</div></div>
+    </div>
+  </div>
+  <div class="audit-wrap">
+    <div class="audit-head">Activity Trail</div>
+    <table class="audit-table">
+      <tr><td>Status</td><td style="color:#4a8c1c;font-weight:700">Approved</td></tr>
+      <tr><td>Approved By</td><td>${pass.approverName}</td></tr>
+      <tr><td>Timestamp</td><td>${now}</td></tr>
+    </table>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    recipientEmail,
+    `Gate Pass ${pass.gatePassNumber} has been approved`,
+    html
+  );
+}
