@@ -243,23 +243,23 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
   return `
-  <table width="100%" cellpadding="0" cellspacing="0" class="header" style="background:#1E4FA0;border-collapse:collapse">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse;table-layout:fixed">
     <tr>
-      <td class="header-logo" width="145" style="padding:18px 20px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center">
+      <td width="145" style="padding:18px 20px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:145px">
         <img src="cid:logo@dimo" alt="DIMO" style="width:105px;height:auto;display:block;margin:0 auto">
       </td>
-      <td class="header-title" style="padding:18px 22px;vertical-align:middle">
-        <div class="co-name" style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
-        <div class="doc-title" style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.15;margin-bottom:4px">${title}</div>
-        <div class="doc-sub" style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em">${subtitle}</div>
+      <td style="padding:18px 22px;vertical-align:middle">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
+        <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.15;margin-bottom:4px">${title}</div>
+        <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em">${subtitle}</div>
       </td>
-      <td class="header-gp" width="140" style="padding:18px 20px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
-        <div class="gp-lbl" style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
-        <div class="gp-num" style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+      <td width="140" style="padding:18px 20px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:140px">
+        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
       </td>
     </tr>
   </table>
-  <div class="green-bar" style="height:4px;background:#8DC63F"></div>`;
+  <div style="height:4px;background:#8DC63F"></div>`;
 }
 
 function emailFooter(gpNumber: string): string {
