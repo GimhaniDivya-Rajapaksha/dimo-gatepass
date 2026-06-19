@@ -758,3 +758,89 @@ ${emailFooter(pass.gatePassNumber)}
     html
   );
 }
+
+export async function sendAsoTransferOutEmail(
+  asoEmail: string,
+  asoName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    passType: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    toLocation?: string | null;
+    createdByName: string;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle Transferred Out &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer Notification", pass.gatePassNumber)}
+<div class="alert-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+  </svg>
+  A vehicle has been transferred out of your location by an Initiator.
+  <span>Please review the transfer details below.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${asoName}</strong>,<br>
+    A vehicle from your location has been transferred by an Initiator. Please review the gate pass details below.
+  </div>
+  <div class="status-box">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#f59e0b;text-align:center;line-height:34px;color:#fff;font-size:18px;font-weight:800">&#8594;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#b45309">Vehicle Released — Gate Out Confirmed</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">
+      Released on ${now} by <strong>${pass.createdByName}</strong> (Initiator).
+    </div>
+  </div>
+  <div class="sec">
+    ${secLabel("Transfer Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Transferred By</div><div class="ic-val">${pass.createdByName}</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    asoEmail,
+    `Vehicle Transferred Out of Your Location — ${pass.gatePassNumber}`,
+    html
+  );
+}

@@ -711,6 +711,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         });
       }
 
+      // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)
+      if (!gatePass.asoCreated && gatePass.fromLocation) {
+        const fromAsoFilter = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+        const fromAsos = await prisma.user.findMany({
+          where: { role: "AREA_SALES_OFFICER" as any, ...fromAsoFilter },
+          select: { id: true, email: true, name: true },
+        });
+        if (fromAsos.length > 0) {
+          await prisma.notification.createMany({
+            data: fromAsos.map((aso: { id: string }) => ({
+              userId: aso.id,
+              type: "GATE_PASS_APPROVED",
+              title: "Vehicle Transferred Out of Your Location",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle transferred from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "another location"} by Initiator ${session.user.name ?? ""}.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+          const { sendAsoTransferOutEmail } = await import("@/lib/email");
+          for (const aso of fromAsos) {
+            sendAsoTransferOutEmail(aso.email, aso.name ?? "ASO", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              passType: gatePass.passType,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation,
+              toLocation: gatePass.toLocation,
+              createdByName: session.user.name ?? "Initiator",
+            }).catch((e: unknown) => console.error("[email] ASO transfer-out notification failed:", e));
+          }
+        }
+      }
+
       // SAP: update vehicle location to destination now that source Security confirmed Gate OUT
       if (toLoc) {
         try {
@@ -894,6 +926,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             gatePassId: gatePass.id,
           })),
         });
+      }
+
+      // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)
+      if (!gatePass.asoCreated && gatePass.fromLocation) {
+        const fromAsoFilterPrint = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+        const fromAsosPrint = await prisma.user.findMany({
+          where: { role: "AREA_SALES_OFFICER" as any, ...fromAsoFilterPrint },
+          select: { id: true, email: true, name: true },
+        });
+        if (fromAsosPrint.length > 0) {
+          await prisma.notification.createMany({
+            data: fromAsosPrint.map((aso: { id: string }) => ({
+              userId: aso.id,
+              type: "GATE_PASS_APPROVED",
+              title: "Vehicle Transferred Out of Your Location",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle transferred from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "another location"} by Initiator ${session.user.name ?? ""}.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+          const { sendAsoTransferOutEmail } = await import("@/lib/email");
+          for (const aso of fromAsosPrint) {
+            sendAsoTransferOutEmail(aso.email, aso.name ?? "ASO", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              passType: gatePass.passType,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation,
+              toLocation: gatePass.toLocation,
+              createdByName: session.user.name ?? "Initiator",
+            }).catch((e: unknown) => console.error("[email] ASO transfer-out notification failed:", e));
+          }
+        }
       }
 
       // SAP: update vehicle location to destination now that initiator printed (bypasses source Security Gate OUT)
