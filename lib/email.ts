@@ -243,21 +243,23 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
   return `
-  <div class="header">
-    <div class="header-logo">
-      <img src="cid:logo@dimo" alt="DIMO" style="width:105px;height:auto;display:block;">
-    </div>
-    <div class="header-title">
-      <div class="co-name">Diesel &amp; Motor Engineering Plc.</div>
-      <div class="doc-title">${title}</div>
-      <div class="doc-sub">${subtitle}</div>
-    </div>
-    <div class="header-gp">
-      <div class="gp-lbl">Gate Pass No.</div>
-      <div class="gp-num">${gpNumber}</div>
-    </div>
-  </div>
-  <div class="green-bar"></div>`;
+  <table width="100%" cellpadding="0" cellspacing="0" class="header" style="background:#1E4FA0;border-collapse:collapse">
+    <tr>
+      <td class="header-logo" width="145" style="padding:18px 20px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center">
+        <img src="cid:logo@dimo" alt="DIMO" style="width:105px;height:auto;display:block;margin:0 auto">
+      </td>
+      <td class="header-title" style="padding:18px 22px;vertical-align:middle">
+        <div class="co-name" style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
+        <div class="doc-title" style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.15;margin-bottom:4px">${title}</div>
+        <div class="doc-sub" style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em">${subtitle}</div>
+      </td>
+      <td class="header-gp" width="140" style="padding:18px 20px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
+        <div class="gp-lbl" style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
+        <div class="gp-num" style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+      </td>
+    </tr>
+  </table>
+  <div class="green-bar" style="height:4px;background:#8DC63F"></div>`;
 }
 
 function emailFooter(gpNumber: string): string {
@@ -497,10 +499,14 @@ ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Informat
     A gate pass has been created and you have been listed as the <strong>Requested By</strong> person by <strong>${pass.createdByName}</strong>. The pass has been submitted for approval.
   </div>
   <div class="status-box">
-    <div class="status-top">
-      <div class="status-icon">&#10003;</div>
-      <div class="status-title">Gate Pass Submitted</div>
-    </div>
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#8DC63F;text-align:center;line-height:34px;color:#000;font-size:18px;font-weight:800">&#10003;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#6ea02f">Gate Pass Submitted</div>
+      </td>
+    </tr></table>
     <div class="status-desc">
       Gate pass <strong>${pass.gatePassNumber}</strong> for vehicle <strong>${pass.vehicle}</strong> has been created and is pending approval.
     </div>
@@ -613,10 +619,14 @@ ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", 
     Your gate pass <strong>${pass.gatePassNumber}</strong> for vehicle <strong>${pass.vehicle}</strong> has been <strong>rejected</strong> by ${pass.approverName}. The vehicle remains at its current location.
   </div>
   <div class="reject-box">
-    <div class="reject-top">
-      <div class="reject-icon">&#10005;</div>
-      <div class="reject-title">Gate Pass Rejected</div>
-    </div>
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#dc2626;text-align:center;line-height:34px;color:#fff;font-size:16px;font-weight:800">&#10005;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="reject-title" style="font-size:17px;font-weight:800;color:#991b1b">Gate Pass Rejected</div>
+      </td>
+    </tr></table>
     <div class="status-desc">
       Rejected by <strong>${pass.approverName}</strong> on ${now}.
     </div>
@@ -702,10 +712,14 @@ ${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", 
     Gate pass <strong>${pass.gatePassNumber}</strong> for vehicle <strong>${pass.vehicle}</strong> has been <strong>approved</strong> by ${pass.approverName}.
   </div>
   <div class="status-box">
-    <div class="status-top">
-      <div class="status-icon">&#10003;</div>
-      <div class="status-title">Gate Pass Approved</div>
-    </div>
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#8DC63F;text-align:center;line-height:34px;color:#000;font-size:18px;font-weight:800">&#10003;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#6ea02f">Gate Pass Approved</div>
+      </td>
+    </tr></table>
     <div class="status-desc">
       Approved by <strong>${pass.approverName}</strong> on ${now}.
     </div>
