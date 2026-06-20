@@ -888,7 +888,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Security no longer needs to confirm Gate OUT for LT and CD when initiator prints.
   if (action === "print_gate_out") {
     const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR" || session.user.role === "AREA_SALES_OFFICER";
-    if (!canPrintRelease || gatePass.createdById !== session.user.id) {
+    if (!canPrintRelease) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    const isCreator = gatePass.createdById === session.user.id;
+    const asoDefaultLoc = (session.user as { defaultLocation?: string | null }).defaultLocation;
+    const isFromLocationAso =
+      session.user.role === "AREA_SALES_OFFICER" &&
+      !!asoDefaultLoc &&
+      !!gatePass.fromLocation &&
+      plantPrefix(asoDefaultLoc) === plantPrefix(gatePass.fromLocation as string);
+    if (!isCreator && !isFromLocationAso) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (!["APPROVED", "GATE_OUT", "COMPLETED"].includes(gatePass.status)) {

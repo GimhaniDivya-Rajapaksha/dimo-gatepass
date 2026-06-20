@@ -146,6 +146,8 @@ export async function GET(req: NextRequest) {
         // status: "COMPLETED" inside the OR clause is safe: Prisma ANDs it with any outer
         // status filter, so it cannot bleed into PENDING_APPROVAL or GATE_OUT lists.
         orClauses.push({ passType: "LOCATION_TRANSFER", toLocation: plantLocation, status: "COMPLETED" });
+        // LT passes being transferred OUT of ASO's plant — show when APPROVED so ASO can perform Gate Out
+        orClauses.push({ passType: "LOCATION_TRANSFER", fromLocation: plantLocation, status: "APPROVED" });
       }
       where.AND = [{ OR: orClauses }];
     }
