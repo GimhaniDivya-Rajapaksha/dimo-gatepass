@@ -43,20 +43,8 @@ export async function GET() {
         { parentPass: { createdById: userId } },
       ],
     };
-  } else if (role === "APPROVER") {
-    // Match only passes assigned to this approver or unassigned (intendedApprover null)
-    // — same filter used by the queue table and sidebar-counts so all counts agree
-    const approverName = (session.user as { name?: string | null }).name ?? "";
-    if (approverName) {
-      scopeWhere = {
-        OR: [
-          { intendedApprover: { equals: approverName, mode: "insensitive" } },
-          { intendedApprover: null },
-        ],
-      };
-    }
   }
-  // CASHIER, SECURITY_OFFICER, ADMIN → all passes
+  // APPROVER, CASHIER, SECURITY_OFFICER, ADMIN → all passes for Approved/Rejected/Completed
 
   try {
     const all = await prisma.gatePass.findMany({
@@ -92,13 +80,44 @@ export async function GET() {
       counts[status] = (counts[status] ?? 0) + 1;
     }
 
-    const pending       = counts["PENDING_APPROVAL"] ?? 0;
+    let pending       = counts["PENDING_APPROVAL"] ?? 0;
     const cashierReview = counts["CASHIER_REVIEW"]   ?? 0;
     const approved      = counts["APPROVED"]         ?? 0;
     const rejected      = counts["REJECTED"]         ?? 0;
     const gateOut       = counts["GATE_OUT"]         ?? 0;
     const completed     = counts["COMPLETED"]        ?? 0;
     const cancelled     = counts["CANCELLED"]        ?? 0;
+
+    // For APPROVER: the Pending card must match what the queue table shows —
+    // only passes assigned to this approver (or unassigned), including
+    // CASHIER_REVIEW passes with credit that need special approval.
+    // Approved/Rejected/Completed remain system-wide to match what the queue
+    // table shows when those cards are clicked.
+    if (role === "APPROVER") {
+      const approverName = (session.user as { name?: string | null }).name ?? "";
+      const approverWhere = approverName
+        ? { OR: [
+            { intendedApprover: { equals: approverName, mode: "insensitive" as const } },
+            { intendedApprover: null },
+          ]}
+        : {};
+      pending = await prisma.gatePass.count({
+        where: {
+          AND: [
+            approverWhere,
+            { OR: [
+              { status: "PENDING_APPROVAL" },
+              { AND: [
+                { status: "CASHIER_REVIEW" },
+                { hasCredit: true },
+                { creditApproved: false },
+                { creditRejected: false },
+              ]},
+            ]},
+          ],
+        } as any,
+      });
+    }
 
     return NextResponse.json({
       pending, cashierReview, approved, rejected, gateOut, completed, cancelled,
