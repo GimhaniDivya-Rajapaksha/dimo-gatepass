@@ -146,8 +146,8 @@ export async function GET(req: NextRequest) {
         // status: "COMPLETED" inside the OR clause is safe: Prisma ANDs it with any outer
         // status filter, so it cannot bleed into PENDING_APPROVAL or GATE_OUT lists.
         orClauses.push({ passType: "LOCATION_TRANSFER", toLocation: plantLocation, status: "COMPLETED" });
-        // LT passes being transferred OUT of ASO's plant — show when APPROVED so ASO can perform Gate Out
-        orClauses.push({ passType: "LOCATION_TRANSFER", fromLocation: plantLocation, status: "APPROVED" });
+        // LT passes transferred OUT of ASO's plant — show in all statuses (PENDING_APPROVAL, APPROVED, GATE_OUT, COMPLETED)
+        orClauses.push({ passType: "LOCATION_TRANSFER", fromLocation: plantLocation });
       }
       where.AND = [{ OR: orClauses }];
     }
@@ -791,6 +791,28 @@ export async function POST(req: NextRequest) {
   }
 
   await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+
+  // LT: notify ASOs at fromLocation when pass is created by a non-ASO
+  if (body.passType === "LOCATION_TRANSFER" && !gatePass.asoCreated && gatePass.fromLocation) {
+    const fromAsoFilter = ciStartsWithPlant(gatePass.fromLocation as string);
+    if (fromAsoFilter) {
+      const fromAsos = await prisma.user.findMany({
+        where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilter },
+        select: { id: true },
+      });
+      if (fromAsos.length > 0) {
+        await prisma.notification.createMany({
+          data: fromAsos.map((aso: { id: string }) => ({
+            userId: aso.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "Vehicle Transfer Request from Your Location",
+            message: `${gatePassNumber} — ${session.user.name ?? "A user"} submitted a transfer request for ${gatePass.vehicle ?? "a vehicle"} from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "another location"}.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+  }
 
   return NextResponse.json({ gatePass }, { status: 201 });
   } catch (err) {
