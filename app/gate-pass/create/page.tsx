@@ -667,6 +667,7 @@ export default function CreateGatePassPage() {
   const [ltBulkMode, setLtBulkMode] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>("CARRIER");
   const [submitted, setSubmitted] = useState(false);
+  const [submittedRouting, setSubmittedRouting] = useState<"cashier" | "approver" | null>(null);
   const [loading, setLoading] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -833,7 +834,7 @@ export default function CreateGatePassPage() {
   const [dimoLocations, setDimoLocations] = useState<LookupOption[]>([]);
   const [mainOutApprover, setMainOutApprover] = useState("");
   // SAP pre-fetch for MAIN_OUT — determines if approver selection is needed
-  type SapPreviewOrder = { orderId: string; orderStatus: string; payTerm: string; orderStatusCode?: string; billingType?: string; billingDate?: string };
+  type SapPreviewOrder = { orderId: string; orderStatus: string; payTerm: string; orderStatusCode?: string; billingType?: string; billingDate?: string; isHappyPath?: boolean };
   const [sapPreviewOrders, setSapPreviewOrders] = useState<SapPreviewOrder[]>([]);
   const [sapPreviewLoading, setSapPreviewLoading] = useState(false);
   // SAP invoice check for Customer Delivery
@@ -1758,7 +1759,8 @@ export default function CreateGatePassPage() {
       const t = (o.payTerm || "").toLowerCase().trim();
       return t !== "" && !immediateTerms.includes(t);
     });
-    const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || cdHasCredit || activeCdOrders.length === 0;
+    const cdAllHappyPath = cdSapLoaded && activeCdOrders.length > 0 && activeCdOrders.every(o => o.isHappyPath === true);
+    const customerDeliveryNeedsApprover = !selectedCdVehicleDetail || !cdSapLoaded || !cdAllHappyPath;
 
     if (cdDeliveredWarning && passType === "CUSTOMER_DELIVERY") {
       e.form = `This vehicle has already been delivered (${cdDeliveredWarning.gatePassNumber}). Customer Delivery can only be done once per vehicle.`;
@@ -2144,9 +2146,14 @@ export default function CreateGatePassPage() {
           body: JSON.stringify(payload),
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+        if (payload.passType === "CUSTOMER_DELIVERY") {
+          const d = await res.json().catch(() => ({}));
+          const status = d.gatePass?.status;
+          setSubmittedRouting(status === "CASHIER_REVIEW" ? "cashier" : "approver");
+        }
       }
       setSubmitted(true);
-      setTimeout(() => router.push("/gate-pass"), 2500);
+      setTimeout(() => router.push("/gate-pass"), 3000);
     } catch (err) {
       setLoading(false);
       setErrors({ form: String(err) });
@@ -2154,6 +2161,11 @@ export default function CreateGatePassPage() {
   };
 
   if (submitted) {
+    const routingLine = submittedRouting === "cashier"
+      ? "Routed to Cashier for order review."
+      : submittedRouting === "approver"
+      ? "Routed to Approver for review."
+      : null;
     return (
       <div className="flex items-center justify-center h-[70vh]">
         <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -2167,6 +2179,9 @@ export default function CreateGatePassPage() {
             </svg>
           </motion.div>
           <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--text)" }}>Gate Pass Created!</h2>
+          {routingLine && (
+            <p className="text-sm font-semibold mb-1" style={{ color: "#2563eb" }}>{routingLine}</p>
+          )}
           <p style={{ color: "var(--text-muted)" }}>Redirecting to Gate Pass List...</p>
         </motion.div>
       </div>
@@ -4416,11 +4431,10 @@ export default function CreateGatePassPage() {
                     </div>
                   )}
 
-                  {/* Approver — Customer Delivery */}
-                  {(cdSapLoading || !selectedCdVehicleDetail || !cdSapLoaded || cdSapOrders.length === 0 || cdSapOrders.some((o) => {
-                    const t = (o.payTerm || "").toLowerCase().trim();
-                    return t !== "" && !["immediate", "zc01", "0001", "payment immediate", "cash", "pay immediately w/o deduction"].includes(t);
-                  })) && (
+                  {/* Approver — Customer Delivery: shown when NOT all active orders satisfy Happy Path */}
+                  {(cdSapLoading || !selectedCdVehicleDetail || !cdSapLoaded ||
+                    cdSapOrders.filter(o => o.orderId).length === 0 ||
+                    !cdSapOrders.filter(o => o.orderId).every(o => o.isHappyPath === true)) && (
                     <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
                       <SectionTitle>Approver</SectionTitle>
                       <Field label="Approver" required error={errors.approver}>
