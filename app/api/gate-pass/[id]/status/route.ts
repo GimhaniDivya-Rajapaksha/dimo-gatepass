@@ -625,6 +625,41 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // LT: notify ASOs at fromLocation (source) that Security confirmed vehicle arrived at destination
+    if (isLT && gatePass.fromLocation) {
+      const fromAsoFilterSec = ciStartsWithPlant(gatePass.fromLocation as string);
+      if (fromAsoFilterSec) {
+        const fromAsosSec = await prisma.user.findMany({
+          where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilterSec },
+          select: { id: true, email: true, name: true },
+        });
+        if (fromAsosSec.length > 0) {
+          const secName = session.user.name ?? "Security Officer";
+          await prisma.notification.createMany({
+            data: fromAsosSec.map((aso: { id: string }) => ({
+              userId: aso.id,
+              type: "GATE_PASS_RECEIVED",
+              title: "Vehicle Arrived at Destination",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle ?? ""}) — Security Officer ${secName} at ${gatePass.toLocation ?? "destination"} confirmed Gate IN. Vehicle transferred from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "destination"}.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+          const { sendAsoArrivalEmail } = await import("@/lib/email");
+          for (const aso of fromAsosSec) {
+            sendAsoArrivalEmail(aso.email, aso.name ?? "ASO", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation as string,
+              toLocation: gatePass.toLocation as string | null,
+              confirmedByName: secName,
+              confirmedByRole: "Security Officer",
+            }).catch((e: unknown) => console.error("[email] ASO arrival notification (security_gate_in) failed:", e));
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
       gatePass: updated,
       liveLocationUpdate,
@@ -1395,6 +1430,44 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           gatePassId: gatePass.id,
         },
       });
+    }
+
+    // LT: notify ASOs at fromLocation (source) that vehicle has arrived at destination
+    if (gatePass.passType === "LOCATION_TRANSFER" && gatePass.fromLocation) {
+      const fromAsoFilter = ciStartsWithPlant(gatePass.fromLocation as string);
+      if (fromAsoFilter) {
+        const fromAsos = await prisma.user.findMany({
+          where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilter },
+          select: { id: true, email: true, name: true },
+        });
+        if (fromAsos.length > 0) {
+          const confirmedByRole = session.user.role === "SECURITY_OFFICER" ? "Security Officer"
+            : session.user.role === "AREA_SALES_OFFICER" ? "Area Sales Officer"
+            : "Initiator";
+          const confirmedByName = session.user.name ?? confirmedByRole;
+          await prisma.notification.createMany({
+            data: fromAsos.map((aso: { id: string }) => ({
+              userId: aso.id,
+              type: "GATE_PASS_RECEIVED",
+              title: "Vehicle Arrived at Destination",
+              message: `${gatePass.gatePassNumber} (${gatePass.vehicle ?? ""}) — ${confirmedByName} (${confirmedByRole}) at ${gatePass.toLocation ?? "destination"} confirmed Gate IN. Vehicle transferred from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "destination"}.`,
+              gatePassId: gatePass.id,
+            })),
+          });
+          const { sendAsoArrivalEmail } = await import("@/lib/email");
+          for (const aso of fromAsos) {
+            sendAsoArrivalEmail(aso.email, aso.name ?? "ASO", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation as string,
+              toLocation: gatePass.toLocation as string | null,
+              confirmedByName,
+              confirmedByRole,
+            }).catch((e: unknown) => console.error("[email] ASO arrival notification (gate_in) failed:", e));
+          }
+        }
+      }
     }
 
     return NextResponse.json({ gatePass: updated });

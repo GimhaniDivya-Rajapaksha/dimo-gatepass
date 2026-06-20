@@ -844,3 +844,89 @@ ${emailFooter(pass.gatePassNumber)}
     html
   );
 }
+
+export async function sendAsoArrivalEmail(
+  asoEmail: string,
+  asoName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    toLocation?: string | null;
+    confirmedByName: string;
+    confirmedByRole: string;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle Arrived at Destination &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arrival Notification", pass.gatePassNumber)}
+<div class="alert-bar" style="background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+    <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  The vehicle you transferred out has arrived safely at its destination.
+  <span>Transfer complete.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${asoName}</strong>,<br>
+    The vehicle transferred from your location has arrived at the destination and Gate IN has been confirmed.
+  </div>
+  <div class="status-box" style="border-color:#6ee7b7;background:#f0fdf4">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#10b981;text-align:center;line-height:34px;color:#fff;font-size:18px;font-weight:800">&#10003;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#065f46">Vehicle Arrived — Gate IN Confirmed</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">
+      Confirmed on ${now} by <strong>${pass.confirmedByName}</strong> (${pass.confirmedByRole}).
+    </div>
+  </div>
+  <div class="sec">
+    ${secLabel("Transfer Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Confirmed By</div><div class="ic-val">${pass.confirmedByName} (${pass.confirmedByRole})</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">Arrived At</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    asoEmail,
+    `Vehicle Arrived at Destination — ${pass.gatePassNumber}`,
+    html
+  );
+}
