@@ -1567,10 +1567,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Notify only the (possibly new) intended approver + admins
     const newIntendedApprover = (typeof approver === "string" ? approver.trim() : null) || gatePass.intendedApprover;
-    const [targetApprovers, admins] = await Promise.all([
-      findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make),
-      prisma.user.findMany({ where: { role: "ADMIN" } }),
-    ]);
+    const admins = await prisma.user.findMany({ where: { role: "ADMIN" } });
+    // CD: use same simple name-match lookup as initial submission (avoids brand-filter miss)
+    // LT and all other pass types: unchanged — still use findApproversForLocationBrand
+    let targetApprovers;
+    if (gatePass.passType === "CUSTOMER_DELIVERY") {
+      targetApprovers = newIntendedApprover
+        ? await prisma.user.findMany({ where: { role: "APPROVER", name: { equals: newIntendedApprover, mode: "insensitive" } } })
+        : await prisma.user.findMany({ where: { role: "APPROVER" } });
+      if (newIntendedApprover && targetApprovers.length === 0) {
+        targetApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+      }
+    } else {
+      targetApprovers = await findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make);
+    }
     const resubmitRecipients = [...targetApprovers, ...admins];
     if (resubmitRecipients.length > 0) {
       await prisma.notification.createMany({
