@@ -132,10 +132,12 @@ export default function OrdersReportPage() {
     return true;
   });
 
-  const totalCredit    = filtered.reduce((s, r) => s + r.creditCount, 0);
-  const totalImmediate = filtered.reduce((s, r) => s + r.immediateCount, 0);
-  const withCredit     = filtered.filter(r => r.creditCount > 0).length;
-  const withImmediate  = filtered.filter(r => r.immediateCount > 0).length;
+  // Exclude cancelled/rejected passes from order counts — those are no longer actionable
+  const activeForCounts = filtered.filter(r => r.status !== "CANCELLED" && r.status !== "REJECTED");
+  const totalCredit    = activeForCounts.reduce((s, r) => s + r.creditCount, 0);
+  const totalImmediate = activeForCounts.reduce((s, r) => s + r.immediateCount, 0);
+  const withCredit     = activeForCounts.filter(r => r.creditCount > 0).length;
+  const withImmediate  = activeForCounts.filter(r => r.immediateCount > 0).length;
 
   return (
     <>
@@ -373,7 +375,7 @@ export default function OrdersReportPage() {
 
                       {/* Cashier Cleared */}
                       <td className="px-3 py-3 text-center whitespace-nowrap">
-                        {row.immediateCount === 0 ? (
+                        {row.immediateCount === 0 || ["PENDING_APPROVAL", "REJECTED", "CANCELLED"].includes(row.status) ? (
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>N/A</span>
                         ) : row.cashierCleared ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#dcfce7", color: "#15803d" }}>
