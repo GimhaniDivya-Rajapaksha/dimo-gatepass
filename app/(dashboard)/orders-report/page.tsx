@@ -106,6 +106,11 @@ function OrdersPanel({ type, orders }: { type: "credit" | "immediate"; orders: O
   );
 }
 
+type Summary = {
+  totalVehicles: number; withCredit: number; withImmediate: number;
+  totalCreditOrders: number; totalImmediateOrders: number;
+};
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function OrdersReportPage() {
   const [rows, setRows] = useState<VehicleRow[]>([]);
@@ -113,17 +118,30 @@ export default function OrdersReportPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | "credit" | "immediate" | "both">("all");
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<Summary>({ totalVehicles: 0, withCredit: 0, withImmediate: 0, totalCreditOrders: 0, totalImmediateOrders: 0 });
+
+  // Reset to page 0 when search or status filter changes
+  useEffect(() => { setPage(0); }, [statusFilter, search]);
 
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams();
     if (statusFilter) params.set("status", statusFilter);
     if (search.trim()) params.set("search", search.trim());
+    params.set("page", String(page));
+    params.set("limit", "50");
     fetch(`/api/orders-report?${params}`)
-      .then(r => r.ok ? r.json() : { report: [] })
-      .then(d => { setRows(d.report ?? []); setLoading(false); })
+      .then(r => r.ok ? r.json() : { report: [], total: 0, summary: null })
+      .then(d => {
+        setRows(d.report ?? []);
+        setTotal(d.total ?? 0);
+        if (d.summary) setSummary(d.summary);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
-  }, [statusFilter, search]);
+  }, [statusFilter, search, page]);
 
   const filtered = rows.filter(r => {
     if (typeFilter === "credit")    return r.creditCount > 0;
@@ -132,12 +150,14 @@ export default function OrdersReportPage() {
     return true;
   });
 
-  // Exclude cancelled/rejected passes from order counts — those are no longer actionable
-  const activeForCounts = filtered.filter(r => r.status !== "CANCELLED" && r.status !== "REJECTED");
-  const totalCredit    = activeForCounts.reduce((s, r) => s + r.creditCount, 0);
-  const totalImmediate = activeForCounts.reduce((s, r) => s + r.immediateCount, 0);
-  const withCredit     = activeForCounts.filter(r => r.creditCount > 0).length;
-  const withImmediate  = activeForCounts.filter(r => r.immediateCount > 0).length;
+  // Cards use server-side summary so counts reflect ALL matching records, not just current page
+  const totalCredit    = summary.totalCreditOrders;
+  const totalImmediate = summary.totalImmediateOrders;
+  const withCredit     = summary.withCredit;
+  const withImmediate  = summary.withImmediate;
+
+  const LIMIT = 50;
+  const totalPages = Math.ceil(total / LIMIT);
 
   return (
     <>
@@ -158,23 +178,30 @@ export default function OrdersReportPage() {
           </p>
         </div>
 
-        {/* Summary cards */}
+        {/* Summary cards — click to filter table */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           {[
-            { label: "Total Vehicles",        value: filtered.length,              bg: "linear-gradient(135deg,#1e3a8a,#2563eb)", icon: "M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10zm0 0l2.5-2.5M13 8h4l3 3v5h-7V8z" },
-            { label: "With Credit Orders",     value: withCredit,                   bg: "linear-gradient(135deg,#1e40af,#3b82f6)", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
-            { label: "With Immediate Orders",  value: withImmediate,                bg: "linear-gradient(135deg,#065f46,#059669)", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 10v1m0-11c-1.11 0-2.08.402-2.599 1" },
-            { label: "Total Orders",           value: totalCredit + totalImmediate, bg: "linear-gradient(135deg,#6d28d9,#8b5cf6)", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
-          ].map(({ label, value, bg, icon }) => (
-            <div key={label} className="rounded-2xl p-4 text-white overflow-hidden relative" style={{ background: bg }}>
+            { label: "Total Vehicles",        value: summary.totalVehicles,        filter: "all" as const,       bg: "linear-gradient(135deg,#1e3a8a,#2563eb)", icon: "M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10l2 2h10zm0 0l2.5-2.5M13 8h4l3 3v5h-7V8z" },
+            { label: "With Credit Orders",     value: withCredit,                   filter: "credit" as const,    bg: "linear-gradient(135deg,#1e40af,#3b82f6)", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
+            { label: "With Immediate Orders",  value: withImmediate,                filter: "immediate" as const, bg: "linear-gradient(135deg,#065f46,#059669)", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 10v1m0-11c-1.11 0-2.08.402-2.599 1" },
+            { label: "Total Orders",           value: totalCredit + totalImmediate, filter: "all" as const,       bg: "linear-gradient(135deg,#6d28d9,#8b5cf6)", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
+          ].map(({ label, value, bg, icon, filter }) => {
+            const isActive = typeFilter === filter && (filter !== "all" || label === "Total Vehicles" ? typeFilter === filter : false);
+            return (
+            <div key={label} role="button" tabIndex={0} onClick={() => setTypeFilter(filter)}
+              onKeyDown={e => e.key === "Enter" && setTypeFilter(filter)}
+              className="rounded-2xl p-4 text-white overflow-hidden relative cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]"
+              style={{ background: bg, boxShadow: typeFilter === filter && !(filter === "all" && label === "Total Orders" && typeFilter !== "all") ? "0 0 0 3px rgba(255,255,255,0.55), 0 8px 24px rgba(0,0,0,0.18)" : "0 4px 12px rgba(0,0,0,0.10)" }}>
               <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-10 bg-white" />
               <svg className="w-5 h-5 mb-2 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
               </svg>
               <p className="text-2xl font-black leading-none">{loading ? "—" : value}</p>
               <p className="text-[11px] mt-1 opacity-80 font-medium">{label}</p>
+              {isActive && <span className="absolute top-2 right-2 text-[9px] font-bold bg-white/20 px-1.5 py-0.5 rounded-full">Active</span>}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Breakdown bar */}
@@ -373,20 +400,22 @@ export default function OrdersReportPage() {
                       {/* Immediate Orders */}
                       <td className="px-3 py-3"><OrdersPanel type="immediate" orders={row.immediateOrders} /></td>
 
-                      {/* Cashier Cleared */}
+                      {/* Cashier Cleared — Pending only when actively in CASHIER_REVIEW queue (happy-path CD/AS MAIN_OUT) */}
                       <td className="px-3 py-3 text-center whitespace-nowrap">
-                        {row.immediateCount === 0 || ["PENDING_APPROVAL", "REJECTED", "CANCELLED"].includes(row.status) ? (
+                        {row.immediateCount === 0 ? (
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>N/A</span>
+                        ) : row.status === "CASHIER_REVIEW" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
+                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            Pending
+                          </span>
                         ) : row.cashierCleared ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#dcfce7", color: "#15803d" }}>
                             <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                             Cleared
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#fef3c7", color: "#b45309" }}>
-                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            Pending
-                          </span>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>N/A</span>
                         )}
                       </td>
 
@@ -418,6 +447,36 @@ export default function OrdersReportPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && total > LIMIT && (
+          <div className="flex items-center justify-between mt-4 px-1">
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Showing {page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, total)} of {total} records
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage(p => p - 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-80"
+                style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                Previous
+              </button>
+              <span className="text-xs font-semibold px-2" style={{ color: "var(--text-muted)" }}>
+                Page {page + 1} of {totalPages}
+              </span>
+              <button
+                disabled={page + 1 >= totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-80"
+                style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+              >
+                Next Page
+              </button>
             </div>
           </div>
         )}

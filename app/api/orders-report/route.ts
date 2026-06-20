@@ -24,6 +24,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const statusFilter  = searchParams.get("status") || "";
   const searchFilter  = searchParams.get("search") || "";
+  const page  = Math.max(0, parseInt(searchParams.get("page")  ?? "0",  10));
+  const limit = Math.min(100, Math.max(10, parseInt(searchParams.get("limit") ?? "50", 10)));
 
   // Fetch AFTER_SALES MAIN_OUT and CUSTOMER_DELIVERY gate passes that have service orders
   const where: Record<string, unknown> = {
@@ -43,6 +45,37 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  // Lightweight query over ALL matching records — used for accurate summary card counts
+  const allForSummary = await (prisma.gatePass as any).findMany({
+    where,
+    select: {
+      id: true,
+      status: true,
+      serviceOrders: { select: { payTerm: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const total = allForSummary.length;
+
+  // Summary counts exclude CANCELLED and REJECTED (not actionable)
+  const activeSummaryRows = allForSummary
+    .filter((p: any) => p.status !== "CANCELLED" && p.status !== "REJECTED")
+    .map((p: any) => {
+      const creditCount    = (p.serviceOrders as any[]).filter((o) => classifyPayTerm(o.payTerm) === "credit").length;
+      const immediateCount = (p.serviceOrders as any[]).filter((o) => classifyPayTerm(o.payTerm) === "immediate").length;
+      return { creditCount, immediateCount };
+    });
+
+  const summary = {
+    totalVehicles:        total,
+    withCredit:           activeSummaryRows.filter((r: any) => r.creditCount > 0).length,
+    withImmediate:        activeSummaryRows.filter((r: any) => r.immediateCount > 0).length,
+    totalCreditOrders:    activeSummaryRows.reduce((s: number, r: any) => s + r.creditCount, 0),
+    totalImmediateOrders: activeSummaryRows.reduce((s: number, r: any) => s + r.immediateCount, 0),
+  };
+
+  // Paginated full records for the table
   const passes = await (prisma.gatePass as any).findMany({
     where,
     include: {
@@ -51,7 +84,8 @@ export async function GET(req: NextRequest) {
       approvedBy: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: "desc" },
-    take: 200,
+    skip: page * limit,
+    take: limit,
   });
 
   // Shape the response
@@ -97,5 +131,5 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json({ report });
+  return NextResponse.json({ report, total, page, limit, summary });
 }
