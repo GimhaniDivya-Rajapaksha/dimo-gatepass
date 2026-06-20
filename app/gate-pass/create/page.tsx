@@ -4212,14 +4212,20 @@ export default function CreateGatePassPage() {
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
                                 const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
-                                setSelectedCdVehicleDetail(detail);
+                                const sapLocation = o.sapCurrentLocation || "";
+                                if (sapLocation) {
+                                  setSelectedCdVehicleDetail({ ...detail, currentLocation: sapLocation });
+                                  setC("fromLocation", sapLocation);
+                                } else {
+                                  setSelectedCdVehicleDetail(detail);
+                                  void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                                    if (result) {
+                                      setSelectedCdVehicleDetail((prev) => prev ? { ...prev, currentLocation: result.location } : prev);
+                                      setC("fromLocation", result.location);
+                                    }
+                                  });
+                                }
                                 void checkActivePass(o.chassisNo ?? "");
-                                void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
-                                  if (result) {
-                                    setSelectedCdVehicleDetail((prev) => prev ? { ...prev, currentLocation: result.location } : prev);
-                                    setC("fromLocation", result.location);
-                                  }
-                                });
                               }}
                               placeholder="Search by vehicle no or chassis no"
                               error={errors.vehicle}

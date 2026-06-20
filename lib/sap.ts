@@ -68,6 +68,8 @@ export type SapVehicle = {
   primaryStatus:   string;  // mmsta
   secondaryStatus: string;  // sdsta
   statusDesc:      string;  // statut
+  plantName:       string;  // Plant description — name1
+  storageName:     string;  // Storage description — lgobe
 };
 
 function mapVehicle(row: Record<string, unknown>): SapVehicle {
@@ -82,6 +84,8 @@ function mapVehicle(row: Record<string, unknown>): SapVehicle {
     primaryStatus:   str(row["mmsta"]),
     secondaryStatus: str(row["sdsta"]),
     statusDesc:      str(row["statut"]),
+    plantName:       str(row["name1"]),
+    storageName:     str(row["lgobe"]),
   };
 }
 

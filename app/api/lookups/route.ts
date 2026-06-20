@@ -301,6 +301,7 @@ export async function GET(req: NextRequest) {
         colour: string;
         matnr: string;
         internalNo: string;
+        sapCurrentLocation: string;
       }>();
 
       // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel
@@ -348,6 +349,7 @@ export async function GET(req: NextRequest) {
             colour: v.colour ?? "",
             matnr,
             internalNo: v.internalNo ?? "",
+            sapCurrentLocation: [v.plantName, v.storageName].filter(Boolean).join(" - "),
           });
         });
       } else {
@@ -385,6 +387,7 @@ export async function GET(req: NextRequest) {
             colour: "",
             matnr: row.materialNo ?? "",
             internalNo: row.internalNo ?? "",
+            sapCurrentLocation: "",
           });
         });
       }
@@ -420,6 +423,7 @@ export async function GET(req: NextRequest) {
           label: row.chassisNo ? `${row.vehicleNo} / ${row.chassisNo}` : row.vehicleNo,
           matnr: "",
           internalNo: "",
+          sapCurrentLocation: "",
         });
       });
 
