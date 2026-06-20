@@ -294,6 +294,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // CD: send rejection email to Initiator when rejected via UI
+    if (action === "reject" && gatePass.passType === "CUSTOMER_DELIVERY") {
+      const { sendRejectionNotificationEmail } = await import("@/lib/email");
+      const cdCreator = await prisma.user.findUnique({
+        where: { id: gatePass.createdById },
+        select: { email: true, name: true },
+      });
+      if (cdCreator?.email) {
+        sendRejectionNotificationEmail(cdCreator.email, cdCreator.name ?? "Initiator", {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          passType: gatePass.passType,
+          passSubType: gatePass.passSubType,
+          vehicle: gatePass.vehicle ?? "",
+          chassis: gatePass.chassis,
+          createdByName: cdCreator.name ?? "Initiator",
+          rejectionReason: rejectionReason || "No reason provided",
+          approverName: session.user.name ?? "Approver",
+        }).catch((e: unknown) => console.error("[email] CD rejection notification failed:", e));
+      }
+    }
+
     // For security-initiated passes: also notify admins & the initiator who completed the form
     if (isSecurityInitiated && action === "approve") {
       const [admins, initiators] = await Promise.all([

@@ -496,10 +496,15 @@ export async function POST(req: NextRequest) {
         },
       });
       gatePass.status = "PENDING_APPROVAL";
-      const approvers = await findApproversForLocationBrand(approverLocation, selectedApproverName, createData.make as string | null);
-      if (approvers.length > 0) {
+      let cdApprovers = selectedApproverName
+        ? await prisma.user.findMany({ where: { role: "APPROVER", name: { equals: selectedApproverName, mode: "insensitive" } } })
+        : await prisma.user.findMany({ where: { role: "APPROVER" } });
+      if (selectedApproverName && cdApprovers.length === 0) {
+        cdApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+      }
+      if (cdApprovers.length > 0) {
         await prisma.notification.createMany({
-          data: approvers.map((a) => ({
+          data: cdApprovers.map((a) => ({
             userId: a.id,
             type: "GATE_PASS_SUBMITTED",
             title: "Customer Delivery Approval Required",
@@ -507,7 +512,19 @@ export async function POST(req: NextRequest) {
             gatePassId: gatePass.id,
           })),
         });
-        await sendApprovalEmailsToApprovers(approvers, gatePass, creatorName);
+        await sendApprovalEmailsToApprovers(cdApprovers, gatePass, creatorName);
+      }
+      const cdAdmins = await prisma.user.findMany({ where: { role: "ADMIN" } });
+      if (cdAdmins.length > 0) {
+        await prisma.notification.createMany({
+          data: cdAdmins.map((a) => ({
+            userId: a.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "New Customer Delivery Submitted",
+            message: `${creatorName} submitted ${gatePass.gatePassNumber} for approval.`,
+            gatePassId: gatePass.id,
+          })),
+        });
       }
     }
 
