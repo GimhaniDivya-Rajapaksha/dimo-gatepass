@@ -43,6 +43,18 @@ export async function GET() {
         { parentPass: { createdById: userId } },
       ],
     };
+  } else if (role === "APPROVER") {
+    // Match only passes assigned to this approver or unassigned (intendedApprover null)
+    // — same filter used by the queue table and sidebar-counts so all counts agree
+    const approverName = (session.user as { name?: string | null }).name ?? "";
+    if (approverName) {
+      scopeWhere = {
+        OR: [
+          { intendedApprover: { equals: approverName, mode: "insensitive" } },
+          { intendedApprover: null },
+        ],
+      };
+    }
   }
   // CASHIER, SECURITY_OFFICER, ADMIN → all passes
 
