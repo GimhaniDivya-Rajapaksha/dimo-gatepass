@@ -110,6 +110,12 @@ export default function ApproverListPage() {
   useEffect(() => { fetchPasses(); void fetchCounts(); }, [fetchPasses, fetchCounts]);
   useEffect(() => { setPage(1); }, [activeType, search]);
 
+  // Silent background refresh every 30 s so newly submitted passes appear without manual reload
+  useEffect(() => {
+    const poll = setInterval(() => void fetchPasses(), 30_000);
+    return () => clearInterval(poll);
+  }, [fetchPasses]);
+
   const approverRows = useMemo<ApproverRow[]>(() => {
     if (activeType !== "LOCATION_TRANSFER") return passes;
     const groups = new Map<string, GatePass[]>();

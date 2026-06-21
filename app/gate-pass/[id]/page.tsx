@@ -381,6 +381,18 @@ function InitiatorGatePassDetailPageInner() {
       .catch(() => { setError("Failed to load."); setLoading(false); });
   }, [id]);
 
+  // Silent background refresh every 30 s — picks up status changes made by other users
+  // (approver approves, cashier clears, security gates out) without a manual page reload
+  useEffect(() => {
+    const poll = setInterval(() => {
+      fetch(`/api/gate-pass/${id}/sub-passes`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.pass) setData(d.pass); })
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(poll);
+  }, [id]);
+
   // Fetch service orders for:
   //   1. Approver reviewing AFTER_SALES MAIN_OUT credit orders
   //   2. CUSTOMER_DELIVERY — display SAP invoice status panel

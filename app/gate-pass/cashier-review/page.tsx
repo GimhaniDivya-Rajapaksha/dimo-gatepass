@@ -1642,6 +1642,12 @@ export default function CashierReviewPage() {
 
   useEffect(() => { void fetchPasses(); }, [fetchPasses]);
 
+  // Silent background refresh every 30 s so newly entered CD passes appear without manual reload
+  useEffect(() => {
+    const poll = setInterval(() => void fetchPasses(), 30_000);
+    return () => clearInterval(poll);
+  }, [fetchPasses]);
+
   // Refresh the currently-open modal pass from the server (used by waiting state).
   // Also fetches escalationApproved via a raw-SQL endpoint because the Prisma client
   // may be stale and not return the new column from findMany.
