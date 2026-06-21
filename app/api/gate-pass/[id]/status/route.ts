@@ -38,14 +38,18 @@ async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string 
     });
   }
 
-  // Match SOs whose defaultLocation also resolves to the same plant code
+  // Match SOs whose defaultLocation also resolves to the same plant code.
+  // If the SO's defaultLocation is not in LocationOption, fall back to plant-prefix comparison.
   const allSOs = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
   return allSOs.filter((so) => {
     const soLower = (so.defaultLocation ?? "").toLowerCase();
     const soOpt = allOpts.find(
       (o) => `${o.plantDescription} - ${o.storageDescription}`.toLowerCase() === soLower
     );
-    return soOpt?.plantCode === srcOpt.plantCode;
+    if (soOpt) return soOpt.plantCode === srcOpt.plantCode;
+    // SO's location not in LocationOption — match by plant-description prefix
+    const soPlant = (so.defaultLocation ?? "").split(" - ")[0].trim().toLowerCase();
+    return soPlant === srcOpt.plantDescription.toLowerCase();
   });
 }
 
