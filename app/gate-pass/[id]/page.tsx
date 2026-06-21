@@ -2396,7 +2396,7 @@ function InitiatorGatePassDetailPageInner() {
               {data?.passType === "CUSTOMER_DELIVERY" ? (
                 <>
                   <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
-                    {data?.status === "APPROVED" && data?.paymentType !== "INVOICED"
+                    {data?.status === "APPROVED" && data?.cashierCleared === true && data?.paymentType !== "INVOICED"
                       ? "The Cashier has processed payment but has not yet confirmed the receipt. You will be notified once the receipt is confirmed."
                       : data?.status === "APPROVED"
                       ? <>Printing will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.</>
@@ -2432,7 +2432,7 @@ function InitiatorGatePassDetailPageInner() {
                 Back
               </button>
               {data?.passType === "CUSTOMER_DELIVERY" ? (
-                data?.status === "APPROVED" && data?.paymentType !== "INVOICED" ? (
+                data?.status === "APPROVED" && data?.cashierCleared === true && data?.paymentType !== "INVOICED" ? (
                   <div className="flex-1 flex items-center gap-2 rounded-xl px-3 py-2.5"
                     style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
                     <svg className="w-4 h-4 flex-shrink-0 animate-spin" style={{ color: "#d97706" }} fill="none" viewBox="0 0 24 24">
