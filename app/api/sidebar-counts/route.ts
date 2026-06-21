@@ -131,7 +131,8 @@ export async function GET(req: NextRequest) {
     } else if (role === "CASHIER") {
       if (plantPrefix) {
         const cashierFilter = { fromLocation: { startsWith: plantPrefix, mode: "insensitive" as const } };
-        completed = await prisma.gatePass.count({ where: { AND: [cashierFilter, { status: "COMPLETED" }] } as any });
+        pending   = await prisma.gatePass.count({ where: { AND: [cashierFilter, { status: "CASHIER_REVIEW" }] } as any });
+        completed = await prisma.gatePass.count({ where: { AND: [cashierFilter, { status: "COMPLETED"      }] } as any });
       }
     }
 

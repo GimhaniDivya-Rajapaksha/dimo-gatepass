@@ -113,7 +113,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   ],
   CASHIER: [
     { label: "Dashboard", href: "/cashier", icon: <DashboardIcon /> },
-    { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon /> },
+    { label: "Order Review", href: "/gate-pass/cashier-review", icon: <CheckIcon />, showPendingBadge: true },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
