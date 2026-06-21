@@ -105,6 +105,16 @@ export async function GET(req: NextRequest) {
           ],
         } as any,
       });
+      // Also count CD single-order escalations directed at this specific approver (by user ID)
+      try {
+        const cdEscalated: { count: bigint }[] = await prisma.$queryRaw`
+          SELECT COUNT(*)::bigint AS count FROM "GatePass"
+          WHERE status = 'CASHIER_REVIEW'
+          AND "singleOrderEscalated" = true
+          AND "singleOrderEscalatedApproverId" = ${userId}
+        `;
+        pending += Number(cdEscalated[0]?.count ?? 0);
+      } catch { /* column may not exist on this deployment */ }
       completed = await prisma.gatePass.count({ where: { status: "COMPLETED" } as any });
 
     } else if (role === "DELIVERY_COORDINATOR") {

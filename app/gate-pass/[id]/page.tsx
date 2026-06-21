@@ -2396,7 +2396,9 @@ function InitiatorGatePassDetailPageInner() {
               {data?.passType === "CUSTOMER_DELIVERY" ? (
                 <>
                   <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
-                    {data?.status === "APPROVED"
+                    {data?.status === "APPROVED" && data?.paymentType !== "INVOICED"
+                      ? "The Cashier has processed payment but has not yet confirmed the receipt. You will be notified once the receipt is confirmed."
+                      : data?.status === "APPROVED"
                       ? <>Printing will mark the delivery as <span className="font-semibold">Completed</span>. This action cannot be undone.</>
                       : "Print a copy of this gate pass."}
                   </p>
@@ -2430,14 +2432,27 @@ function InitiatorGatePassDetailPageInner() {
                 Back
               </button>
               {data?.passType === "CUSTOMER_DELIVERY" ? (
-                <button
-                  type="button"
-                  onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
-                  style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}
-                >
-                  Confirm &amp; Print
-                </button>
+                data?.status === "APPROVED" && data?.paymentType !== "INVOICED" ? (
+                  <div className="flex-1 flex items-center gap-2 rounded-xl px-3 py-2.5"
+                    style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
+                    <svg className="w-4 h-4 flex-shrink-0 animate-spin" style={{ color: "#d97706" }} fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    <p className="text-xs font-semibold" style={{ color: "#92400e" }}>
+                      Waiting for Cashier to confirm receipt…
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setShowSapConfirm(false); void handlePrintGatePass(false); }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90"
+                    style={{ background: "linear-gradient(135deg,#065f46,#059669)" }}
+                  >
+                    Confirm &amp; Print
+                  </button>
+                )
               ) : (
                 <button
                   type="button"

@@ -401,17 +401,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     if (newCdStatus === "APPROVED") {
-      // Notify initiator to print gate pass (same as LT: initiator print OR Security Gate OUT, first one wins)
-      await prisma.notification.create({
-        data: {
-          userId: gatePass.createdById,
-          type: "GATE_PASS_APPROVED",
-          title: "Payment Cleared — Print Gate Pass to Release Vehicle",
-          message: `Gate pass ${gatePass.gatePassNumber} — payment confirmed by Cashier. Please print the gate pass to complete the delivery.`,
-          gatePassId: gatePass.id,
-        },
-      });
-      // Notify Security Officers at fromLocation — same as LT: whoever acts first (Security Gate OUT or Initiator print) → COMPLETED
+      // Notify Security Officers at fromLocation — Security Gate OUT or Initiator print (first one wins) → COMPLETED
+      // Initiator notification is deferred until Cashier confirms receipt via cashier_confirm_receipt
       const securityOfficers = await findSOsAtSamePlant(gatePass.fromLocation as string | null);
       if (securityOfficers.length > 0) {
         await prisma.notification.createMany({
@@ -2002,6 +1993,69 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     return NextResponse.json({ ok: true, resubmitted: true });
+  }
+
+  // CASHIER: confirm receipt printed for CD — sets paymentType=INVOICED and notifies Initiator to print gate pass
+  if (action === "cashier_confirm_receipt") {
+    if (session.user.role !== "CASHIER") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.passType !== "CUSTOMER_DELIVERY") {
+      return NextResponse.json({ error: "cashier_confirm_receipt only valid for Customer Delivery" }, { status: 400 });
+    }
+    if (gatePass.status !== "APPROVED" || !gatePass.cashierCleared) {
+      return NextResponse.json({ ok: true }); // not yet approved, silently ignore
+    }
+    const alreadyConfirmed = (gatePass as any).paymentType === "INVOICED";
+    if (!alreadyConfirmed) {
+      await prisma.gatePass.update({
+        where: { id },
+        data: { paymentType: "INVOICED" } as any,
+      });
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_APPROVED",
+          title: "Receipt Confirmed — Print Gate Pass to Release Vehicle",
+          message: `Gate pass ${gatePass.gatePassNumber} — cashier confirmed receipt. Please print the gate pass to complete the delivery.`,
+          gatePassId: gatePass.id,
+        },
+      });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // CASHIER: cancel a pending CD single-order escalation (payment received directly)
+  if (action === "cashier_cancel_escalation") {
+    if (session.user.role !== "CASHIER") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.passType !== "CUSTOMER_DELIVERY") {
+      return NextResponse.json({ error: "Only valid for Customer Delivery" }, { status: 400 });
+    }
+    if (!(gatePass as any).singleOrderEscalated) {
+      return NextResponse.json({ error: "No active escalation to cancel" }, { status: 400 });
+    }
+
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: false } });
+
+    const approverId = (gatePass as any).singleOrderEscalatedApproverId as string | null;
+    if (approverId) {
+      const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true } });
+      if (approverUser) {
+        await prisma.notification.create({
+          data: {
+            userId: approverUser.id,
+            type: "GATE_PASS_REJECTED",
+            title: "Escalation Cancelled by Cashier",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — the cashier received payment directly and cancelled the sign-off request.`,
+            gatePassId: gatePass.id,
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

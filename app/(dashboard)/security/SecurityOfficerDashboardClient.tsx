@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 
@@ -22,7 +22,7 @@ export default function SecurityOfficerDashboardClient({ user }: Props) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchQueue = useCallback(() => {
     const plantName = user.defaultLocation ? user.defaultLocation.split(" - ")[0].trim() : null;
     const fromLocQ = plantName ? `&fromLocationPlant=${encodeURIComponent(plantName)}` : "";
 
@@ -42,6 +42,12 @@ export default function SecurityOfficerDashboardClient({ user }: Props) {
       })
       .catch(() => setLoading(false));
   }, [user.defaultLocation]);
+
+  useEffect(() => {
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 30000);
+    return () => clearInterval(interval);
+  }, [fetchQueue]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>

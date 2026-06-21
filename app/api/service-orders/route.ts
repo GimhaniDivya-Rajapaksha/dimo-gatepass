@@ -67,15 +67,11 @@ export async function PATCH(req: NextRequest) {
   if (body.action === "assign") {
     const { gatePassId, assignedIds } = body as { gatePassId: string; assignedIds: string[] };
 
-    // Set isAssigned = true for assignedIds, false for all others in this pass
-    await prisma.serviceOrder.updateMany({
-      where: { gatePassId, id: { in: assignedIds } },
-      data: { isAssigned: true },
-    });
-    await prisma.serviceOrder.updateMany({
-      where: { gatePassId, id: { notIn: assignedIds } },
-      data: { isAssigned: false },
-    });
+    // Use raw SQL — isAssigned column may postdate the last Prisma client generation
+    await prisma.$executeRaw`UPDATE "ServiceOrder" SET "isAssigned" = false WHERE "gatePassId" = ${gatePassId}`;
+    for (const orderId of assignedIds) {
+      await prisma.$executeRaw`UPDATE "ServiceOrder" SET "isAssigned" = true WHERE id = ${orderId} AND "gatePassId" = ${gatePassId}`;
+    }
 
     return NextResponse.json({ ok: true });
   }

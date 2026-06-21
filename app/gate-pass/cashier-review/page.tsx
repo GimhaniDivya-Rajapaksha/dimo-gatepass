@@ -132,6 +132,11 @@ function OrderModal({
   const [sapSyncing, setSapSyncing] = useState(false);
   const [sapSyncMsg, setSapSyncMsg] = useState<string | null>(null);
   const [deleteOrderConfirmId, setDeleteOrderConfirmId] = useState<string | null>(null);
+  const [cancelEscalationConfirm, setCancelEscalationConfirm] = useState(false);
+  const [cancellingEscalation, setCancellingEscalation] = useState(false);
+  const [showPrintReceiptConfirm, setShowPrintReceiptConfirm] = useState(false);
+  const [showDoneConfirm, setShowDoneConfirm] = useState(false);
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
 
   // Selected checkboxes on the left (available) side
   const [selectedLeft, setSelectedLeft] = useState<Set<string>>(new Set());
@@ -227,6 +232,14 @@ function OrderModal({
   useEffect(() => { void fetchOrders(); }, [fetchOrders]);
   useEffect(() => { void syncFromSap(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fix 4: Auto-refresh every 10 s while in State C (waiting for approver decision)
+  useEffect(() => {
+    const inStateC = pass.singleOrderEscalated && !(pass as any).escalationApproved && step === "confirm";
+    if (!inStateC) return;
+    const id = setInterval(() => { void onRefreshPass(); }, 10000);
+    return () => clearInterval(id);
+  }, [pass.singleOrderEscalated, (pass as any).escalationApproved, step, onRefreshPass]);
+
 
 
   async function handleDeleteOrder(id: string) {
@@ -269,6 +282,43 @@ function OrderModal({
     setSelectedRight(new Set());
     await fetchOrders();
     setSaving(false);
+  }
+
+  // Fix 6: Cancel a pending CD escalation and return to order review
+  async function handleCancelEscalation() {
+    setCancellingEscalation(true);
+    try {
+      const res = await fetch(`/api/gate-pass/${pass.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_cancel_escalation" }),
+      });
+      if (res.ok) {
+        setCancelEscalationConfirm(false);
+        setStep("review");
+        await onRefreshPass();
+        await fetchOrders();
+      } else {
+        const d = await res.json();
+        setError(d.error ?? "Failed to cancel escalation");
+      }
+    } finally {
+      setCancellingEscalation(false);
+    }
+  }
+
+  // Fix 7: Confirm receipt — notifies Initiator, sets paymentType=INVOICED
+  async function handleConfirmReceipt() {
+    setConfirmingReceipt(true);
+    try {
+      await fetch(`/api/gate-pass/${pass.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cashier_confirm_receipt" }),
+      });
+    } finally {
+      setConfirmingReceipt(false);
+    }
   }
 
   async function handleProceed() {
@@ -672,6 +722,16 @@ function OrderModal({
                         </svg>
                         {refreshing ? "Refreshing…" : "Refresh Status"}
                       </button>
+                      <button
+                        onClick={() => setCancelEscalationConfirm(true)}
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
+                        style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        Payment Received — Cancel Escalation
+                      </button>
                     </div>
                   );
                 }
@@ -1006,7 +1066,7 @@ function OrderModal({
             <div className="px-6 py-4 border-t flex items-center gap-3 flex-shrink-0"
               style={{ borderColor: "var(--border)" }}>
               <button
-                onClick={handlePrint}
+                onClick={() => isCustomerDelivery ? setShowPrintReceiptConfirm(true) : handlePrint()}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all hover:opacity-80"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               >
@@ -1027,7 +1087,7 @@ function OrderModal({
               </button>
               <div className="flex-1" />
               <button
-                onClick={() => onProceed(proceededResult)}
+                onClick={() => isCustomerDelivery ? setShowDoneConfirm(true) : onProceed(proceededResult!)}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow"
                 style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}
               >
@@ -1084,6 +1144,126 @@ function OrderModal({
             </div>
           </div>
         )}
+      {/* ── Cancel Escalation Confirm (Fix 6) ─────────────────────── */}
+        {cancelEscalationConfirm && (
+          <div className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: "rgba(15,23,42,0.45)", zIndex: 20 }}>
+            <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#fef2f2" }}>
+                  <svg className="w-5 h-5" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: "var(--text)" }}>Cancel Escalation?</h3>
+                  <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                    This will cancel the pending approver request. The approver will be notified. You can then mark all orders as paid and generate the invoice.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setCancelEscalationConfirm(false)} disabled={cancellingEscalation}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                  Back
+                </button>
+                <button onClick={() => void handleCancelEscalation()} disabled={cancellingEscalation}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#dc2626,#ef4444)" }}>
+                  {cancellingEscalation ? "Cancelling…" : "Yes, Cancel Escalation"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* ── Print Receipt Confirm (Fix 7) ─────────────────────────── */}
+        {showPrintReceiptConfirm && (
+          <div className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: "rgba(15,23,42,0.45)", zIndex: 20 }}>
+            <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#f0fdf4" }}>
+                  <svg className="w-5 h-5" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: "var(--text)" }}>Confirm & Print Receipt</h3>
+                  <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                    This will print the payment receipt and notify the Initiator to print the gate pass and release the vehicle.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setShowPrintReceiptConfirm(false)} disabled={confirmingReceipt}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                  Back
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowPrintReceiptConfirm(false);
+                    await handleConfirmReceipt();
+                    handlePrint();
+                  }}
+                  disabled={confirmingReceipt}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                  {confirmingReceipt ? "Confirming…" : "Confirm & Print"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* ── Done Confirm (Fix 7) ───────────────────────────────────── */}
+        {showDoneConfirm && (
+          <div className="absolute inset-0 flex items-center justify-center p-6"
+            style={{ background: "rgba(15,23,42,0.45)", zIndex: 20 }}>
+            <div className="w-full max-w-md rounded-2xl p-5 shadow-2xl"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "#f0fdf4" }}>
+                  <svg className="w-5 h-5" style={{ color: "#15803d" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: "var(--text)" }}>Confirm & Done</h3>
+                  <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                    This will notify the Initiator to print the gate pass and release the vehicle, then close this window.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setShowDoneConfirm(false)} disabled={confirmingReceipt}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                  Back
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowDoneConfirm(false);
+                    await handleConfirmReceipt();
+                    onProceed(proceededResult!);
+                  }}
+                  disabled={confirmingReceipt}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                  {confirmingReceipt ? "Confirming…" : "Confirm & Done"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* ── Delete Order Confirm Modal ──────────────────────────────── */}
       <AnimatePresence>
         {deleteOrderConfirmId && (

@@ -271,7 +271,12 @@ export async function GET(req: NextRequest) {
   if (cashierClearedParam === "true")  (where as any).cashierCleared = true;
   if (cashierClearedParam === "false") (where as any).cashierCleared = false;
   const cashierOverride = searchParams.get("cashierOverride") === "true";
-  if (cashierOverride) (where as any).cashierOverrideRequested = true;
+  if (cashierOverride) {
+    (where as any).AND = [
+      ...((where as any).AND ?? []),
+      { OR: [{ cashierOverrideRequested: true }, { singleOrderEscalated: true }] },
+    ];
+  }
 
   if (search) {
     where.OR = [
