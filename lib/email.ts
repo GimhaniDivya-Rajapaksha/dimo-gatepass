@@ -95,7 +95,7 @@ async function sendGraphMail(to: string, subject: string, html: string) {
   }
 }
 
-export function createApprovalToken(passId: string, action: "approve" | "reject", approverId?: string): string {
+export function createApprovalToken(passId: string, action: "approve" | "reject" | "escalation_approve" | "escalation_reject", approverId?: string): string {
   const expiry = Date.now() + 48 * 60 * 60 * 1000;
   const secret = process.env.NEXTAUTH_SECRET!;
   const payload = `${passId}:${action}:${expiry}:${approverId ?? ""}`;
@@ -859,10 +859,15 @@ export async function sendEscalationRequestEmail(
     paidCount: number;
     unpaidCount: number;
     totalCount: number;
-  }
+  },
+  approverId?: string
 ): Promise<void> {
   const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
-  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+  const approveToken = createApprovalToken(passId, "escalation_approve", approverId);
+  const rejectToken  = createApprovalToken(passId, "escalation_reject",  approverId);
+  const approveUrl = `${baseUrl}/api/gate-pass/${passId}/email-action?token=${approveToken}&action=escalation_approve`;
+  const rejectUrl  = `${baseUrl}/api/gate-pass/${passId}/email-action?token=${rejectToken}&action=escalation_reject`;
+  const viewUrl    = `${baseUrl}/gate-pass/${passId}`;
 
   const now = new Date().toLocaleString("en-GB", {
     day: "2-digit", month: "short", year: "numeric",
@@ -928,27 +933,48 @@ ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier E
       <tr><td>Awaiting Your Sign-off</td><td style="color:#dc2626;font-weight:700">${pass.unpaidCount}</td></tr>
     </table>
   </div>
+  <hr class="div">
   <div class="action-box">
     <div class="action-head">
       <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
         <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="white" stroke-width="1.3" stroke-linejoin="round"/>
         <path d="M7.5 5.5V9M7.5 11h.01" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
       </svg>
-      Action Required &mdash; Log in to Review &amp; Decide
+      Action Required &mdash; Your Decision
     </div>
     <div class="action-body">
       <div class="action-desc">
-        Please log in to the system to review the order details and approve or reject the cashier&rsquo;s escalation. The vehicle cannot be released until you take action.
+        Approving authorises the Cashier to generate the invoice and release the vehicle. Rejecting will notify the Cashier to resolve the outstanding orders.
       </div>
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
-        <tr><td align="center" style="padding:0">
-          <a href="${viewUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#d97706;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(217,119,6,0.4),0 1px 3px rgba(0,0,0,0.14)">
-            <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M8.5 3v11M3 8.5h11" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
-            Review &amp; Take Action in System
-          </a>
-        </td></tr>
+        <tr>
+          <td align="center" style="padding:0">
+            <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
+              <tr>
+                <td style="padding:0 16px 0 0">
+                  <a href="${approveUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Approve Sign-off
+                  </a>
+                </td>
+                <td style="padding:0 0 0 16px">
+                  <a href="${rejectUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+                    Reject Sign-off
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
       </table>
+      <div class="expiry-note">
+        &#x26A0; These links expire in <strong>48 hours</strong>. After expiry, please log in to the system to take action.
+      </div>
     </div>
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Full Details in System &rarr;</a>
   </div>
 </div>
 ${emailFooter(pass.gatePassNumber)}
@@ -961,6 +987,116 @@ ${emailFooter(pass.gatePassNumber)}
     `[Action Required] Payment Sign-off — Gate Pass ${pass.gatePassNumber}`,
     html
   );
+}
+
+export async function sendEscalationInitiatorEmail(
+  initiatorEmail: string,
+  initiatorName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+  },
+  event: "escalated" | "approved" | "rejected",
+  details: { approverName: string; rejectionReason?: string | null }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+  const now = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const configs = {
+    escalated: {
+      title: "Cashier Escalated to Approver",
+      subtitle: "Customer Delivery &middot; Status Update",
+      subject: `Gate Pass ${pass.gatePassNumber} — Cashier escalated to approver`,
+      barClass: "notice-bar",
+      barText: `Payment clearance sent to ${details.approverName} for sign-off. No action required from you yet.`,
+      statusColor: "#6ea02f", statusBg: "#f6fbe9",
+      iconColor: "#8DC63F", iconText: "→", iconTextColor: "#000",
+      heading: "Cashier Escalated — Awaiting Approver",
+      body: `Cashier has cleared all immediate orders and sent the remaining order${""} to <strong>${details.approverName}</strong> for sign-off. You will be notified once the approver responds.`,
+    },
+    approved: {
+      title: "Approver Signed Off",
+      subtitle: "Customer Delivery &middot; Status Update",
+      subject: `Gate Pass ${pass.gatePassNumber} — Approver signed off, invoice being generated`,
+      barClass: "notice-bar",
+      barText: `${details.approverName} approved the remaining orders. Cashier will now generate the invoice.`,
+      statusColor: "#6ea02f", statusBg: "#f6fbe9",
+      iconColor: "#8DC63F", iconText: "✓", iconTextColor: "#000",
+      heading: "Approver Signed Off — Invoice In Progress",
+      body: `<strong>${details.approverName}</strong> has approved the remaining unpaid orders. The Cashier will now generate the invoice. You will be notified when the vehicle is ready for Gate OUT.`,
+    },
+    rejected: {
+      title: "Sign-off Rejected",
+      subtitle: "Customer Delivery &middot; Status Update",
+      subject: `Gate Pass ${pass.gatePassNumber} — Approver rejected sign-off request`,
+      barClass: "alert-bar",
+      barText: `${details.approverName} rejected the cashier's sign-off request. The Cashier will need to resolve the pending orders.`,
+      statusColor: "#991b1b", statusBg: "#fef2f2",
+      iconColor: "#dc2626", iconText: "✕", iconTextColor: "#fff",
+      heading: "Sign-off Rejected — Cashier Taking Action",
+      body: `<strong>${details.approverName}</strong> rejected the sign-off request.${details.rejectionReason ? ` Reason: <em>${details.rejectionReason}</em>.` : ""} The Cashier will resolve the pending orders and may re-escalate.`,
+    },
+  };
+  const cfg = configs[event];
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${cfg.title} &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader(cfg.title, cfg.subtitle, pass.gatePassNumber)}
+<div class="${cfg.barClass}">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+    <path d="M7.5 5v4M7.5 10.5h.01" stroke="#496d10" stroke-width="1.3" stroke-linecap="round"/>
+  </svg>
+  ${cfg.barText}
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${initiatorName}</strong>,<br>
+    ${cfg.body}
+  </div>
+  <div style="border:1px solid ${cfg.statusBg === "#fef2f2" ? "#fecaca" : "rgba(141,198,63,0.35)"};background:${cfg.statusBg};border-radius:4px;padding:16px 16px 14px;margin-bottom:22px">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:${cfg.iconColor};text-align:center;line-height:34px;color:${cfg.iconTextColor};font-size:18px;font-weight:800">${cfg.iconText}</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div style="font-size:17px;font-weight:800;color:${cfg.statusColor}">${cfg.heading}</div>
+      </td>
+    </tr></table>
+    <div style="font-size:13px;color:#555">Updated on ${now}.</div>
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Approver</div><div class="ic-val">${details.approverName}</div></div>
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(initiatorEmail, cfg.subject, html);
 }
 
 export async function sendEscalationApprovedEmail(

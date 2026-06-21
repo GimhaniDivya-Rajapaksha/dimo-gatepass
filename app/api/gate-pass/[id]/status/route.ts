@@ -1832,7 +1832,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         paidCount,
         unpaidCount,
         totalCount: allOrders.length,
-      }).catch((e: unknown) => console.error("[email] escalation request email failed:", e));
+      }, approverUser.id).catch((e: unknown) => console.error("[email] escalation request email failed:", e));
     }
 
     // Notify initiator that escalation was sent
@@ -1845,6 +1845,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         gatePassId: gatePass.id,
       },
     });
+    // Email initiator
+    const escalateCreator = await prisma.user.findUnique({ where: { id: gatePass.createdById }, select: { email: true, name: true } });
+    if (escalateCreator?.email) {
+      const { sendEscalationInitiatorEmail } = await import("@/lib/email");
+      sendEscalationInitiatorEmail(escalateCreator.email, escalateCreator.name ?? "Initiator", id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        vehicle: gatePass.vehicle ?? "",
+        chassis: gatePass.chassis,
+        fromLocation: gatePass.fromLocation as string | null,
+      }, "escalated", { approverName: approverUser.name ?? "Approver" })
+        .catch((e: unknown) => console.error("[email] escalation initiator email failed:", e));
+    }
 
     return NextResponse.json({ ok: true, singleOrderEscalated: true });
   }
@@ -1911,6 +1923,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           gatePassId: gatePass.id,
         },
       });
+      // Email initiator
+      const approveCreator = await prisma.user.findUnique({ where: { id: gatePass.createdById }, select: { email: true, name: true } });
+      if (approveCreator?.email) {
+        const { sendEscalationInitiatorEmail } = await import("@/lib/email");
+        sendEscalationInitiatorEmail(approveCreator.email, approveCreator.name ?? "Initiator", id, {
+          gatePassNumber: gatePass.gatePassNumber,
+          vehicle: gatePass.vehicle ?? "",
+          chassis: gatePass.chassis,
+          fromLocation: gatePass.fromLocation as string | null,
+        }, "approved", { approverName: session.user.name ?? "Approver" })
+          .catch((e: unknown) => console.error("[email] escalation initiator approve email failed:", e));
+      }
 
       return NextResponse.json({ ok: true, status: "CASHIER_REVIEW", escalationApproved: true });
     }
@@ -2021,6 +2045,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         gatePassId: gatePass.id,
       },
     });
+    // Email initiator
+    const rejectCreator = await prisma.user.findUnique({ where: { id: gatePass.createdById }, select: { email: true, name: true } });
+    if (rejectCreator?.email) {
+      const { sendEscalationInitiatorEmail } = await import("@/lib/email");
+      sendEscalationInitiatorEmail(rejectCreator.email, rejectCreator.name ?? "Initiator", id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        vehicle: gatePass.vehicle ?? "",
+        chassis: gatePass.chassis,
+        fromLocation: gatePass.fromLocation as string | null,
+      }, "rejected", { approverName: session.user.name ?? "Approver", rejectionReason: reason })
+        .catch((e: unknown) => console.error("[email] escalation initiator reject email failed:", e));
+    }
 
     return NextResponse.json({ ok: true, status: "CASHIER_REVIEW" });
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyApprovalToken, sendApprovalNotificationEmail } from "@/lib/email";
+import { verifyApprovalToken, sendApprovalNotificationEmail, sendEscalationApprovedEmail, sendEscalationRejectedEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 
 async function findTokenApprover(approverId?: string | null) {
@@ -112,6 +112,67 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!gatePass) {
     return new NextResponse(errorPage("Gate pass not found."), { status: 404, headers: { "Content-Type": "text/html" } });
   }
+
+  // ── Cashier escalation sign-off via email ────────────────────────────────────
+  if (action === "escalation_approve" || action === "escalation_reject") {
+    const isEligible = gatePass.status === "CASHIER_REVIEW" && !!(gatePass as any).singleOrderEscalated;
+    if (!isEligible) {
+      return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
+    }
+    const assignedApproverId = (gatePass as any).singleOrderEscalatedApproverId as string | null;
+    if (assignedApproverId && verified.approverId && assignedApproverId !== verified.approverId) {
+      return new NextResponse(errorPage("This link is not assigned to you. Please contact the Cashier."), { status: 403, headers: { "Content-Type": "text/html" } });
+    }
+
+    if (action === "escalation_approve") {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationApproved" = true WHERE id = ${id}`;
+      const fromLoc = gatePass.fromLocation as string | null;
+      const plantPrefix = fromLoc ? fromLoc.split(" - ")[0].trim() : null;
+      const cashierWhere = plantPrefix
+        ? { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix } }
+        : { role: "CASHIER" as any };
+      const cashiers = await prisma.user.findMany({ where: cashierWhere });
+      const approverUser = await prisma.user.findFirst({ where: { id: verified.approverId ?? "" }, select: { name: true } });
+      const approverName = approverUser?.name ?? "Approver";
+      if (cashiers.length > 0) {
+        await prisma.notification.createMany({
+          data: cashiers.map((c: { id: string }) => ({
+            userId: c.id,
+            type: "GATE_PASS_APPROVED",
+            title: "Approver Signed Off — Generate Invoice Now",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — ${approverName} has approved the remaining orders. Please open the pass and generate the invoice.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+        for (const c of cashiers as { id: string; email: string | null; name: string | null }[]) {
+          if (c.email) {
+            sendEscalationApprovedEmail(c.email, c.name ?? "Cashier", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: fromLoc,
+              approverName,
+            }).catch((e: unknown) => console.error("[email] escalation approved email failed:", e));
+          }
+        }
+      }
+      await prisma.notification.create({
+        data: {
+          userId: gatePass.createdById,
+          type: "GATE_PASS_SUBMITTED",
+          title: "Approver Signed Off — Awaiting Cashier Invoice",
+          message: `Gate pass ${gatePass.gatePassNumber} — ${approverName} approved remaining orders. Cashier will now generate the invoice.`,
+          gatePassId: gatePass.id,
+        },
+      });
+      return new NextResponse(escalationApprovedPage(gatePass.gatePassNumber), { headers: { "Content-Type": "text/html" } });
+    }
+
+    // action === "escalation_reject": show reject form
+    return new NextResponse(escalationRejectFormPage(id, token, gatePass.gatePassNumber, gatePass.vehicle ?? ""), { headers: { "Content-Type": "text/html" } });
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   const canProcessByEmail = gatePass.status === "PENDING_APPROVAL"
     || (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved);
   if (!canProcessByEmail) {
@@ -207,7 +268,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const verified = verifyApprovalToken(token);
-  if (!verified || verified.passId !== id || verified.action !== "reject") {
+  if (!verified || verified.passId !== id || (verified.action !== "reject" && verified.action !== "escalation_reject")) {
     return new NextResponse(errorPage("This rejection link is invalid or has expired."), { status: 400, headers: { "Content-Type": "text/html" } });
   }
 
@@ -219,6 +280,62 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!gatePass) {
     return new NextResponse(errorPage("Gate pass not found."), { status: 404, headers: { "Content-Type": "text/html" } });
   }
+
+  // ── Cashier escalation reject (POST from email form) ─────────────────────────
+  if (verified.action === "escalation_reject") {
+    const isEligible = gatePass.status === "CASHIER_REVIEW" && !!(gatePass as any).singleOrderEscalated;
+    if (!isEligible) {
+      return new NextResponse(alreadyProcessedPage(gatePass.gatePassNumber, gatePass.status), { headers: { "Content-Type": "text/html" } });
+    }
+    const reason = comment.trim() || null;
+    await (prisma.gatePass as any).update({ where: { id }, data: { singleOrderEscalated: false } });
+    try {
+      await prisma.$executeRaw`UPDATE "GatePass" SET "escalationRejectionReason" = ${reason} WHERE id = ${id}`;
+    } catch { /* column may not exist on older deployments */ }
+    const fromLoc = gatePass.fromLocation as string | null;
+    const plantPrefix = fromLoc ? fromLoc.split(" - ")[0].trim() : null;
+    const cashierWhere = plantPrefix
+      ? { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix } }
+      : { role: "CASHIER" as any };
+    const cashiersRej = await prisma.user.findMany({ where: cashierWhere });
+    const approverUser = await prisma.user.findFirst({ where: { id: verified.approverId ?? "" }, select: { name: true } });
+    const approverName = approverUser?.name ?? "Approver";
+    if (cashiersRej.length > 0) {
+      await prisma.notification.createMany({
+        data: cashiersRej.map((c: { id: string }) => ({
+          userId: c.id,
+          type: "GATE_PASS_REJECTED",
+          title: "Sign-off Rejected — Action Required",
+          message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — ${approverName} rejected the order sign-off.${reason ? ` Reason: ${reason}` : ""} Please resolve the pending orders.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+      for (const c of cashiersRej as { id: string; email: string | null; name: string | null }[]) {
+        if (c.email) {
+          sendEscalationRejectedEmail(c.email, c.name ?? "Cashier", id, {
+            gatePassNumber: gatePass.gatePassNumber,
+            vehicle: gatePass.vehicle ?? "",
+            chassis: gatePass.chassis,
+            fromLocation: fromLoc,
+            approverName,
+            rejectionReason: reason,
+          }).catch((e: unknown) => console.error("[email] escalation rejected email failed:", e));
+        }
+      }
+    }
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_REJECTED",
+        title: "Order Sign-off Rejected",
+        message: `Gate pass ${gatePass.gatePassNumber} — ${approverName} rejected the cashier's sign-off request.${reason ? ` Reason: ${reason}` : ""}`,
+        gatePassId: gatePass.id,
+      },
+    });
+    return new NextResponse(escalationRejectedPage(gatePass.gatePassNumber, reason ?? ""), { headers: { "Content-Type": "text/html" } });
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   const canProcessByEmail = gatePass.status === "PENDING_APPROVAL"
     || (gatePass.status === "CASHIER_REVIEW" && gatePass.hasCredit && !gatePass.creditApproved);
   if (!canProcessByEmail) {
@@ -376,5 +493,49 @@ function errorPage(message: string) {
     <h1>Link Expired</h1>
     <p>${message}</p>
     <a href="${BASE}/gate-pass/approve" class="btn btn-blue">Open App</a>
+  `);
+}
+
+function escalationApprovedPage(gpNumber: string) {
+  return shell("Sign-off Approved", `
+    <div class="icon" style="background:linear-gradient(135deg,#15803d,#22c55e)">
+      <svg width="34" height="34" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+    </div>
+    <h1>Sign-off Approved!</h1>
+    <div class="gp">${gpNumber}</div>
+    <p>You have approved the remaining orders. The Cashier has been notified and will generate the invoice.</p>
+    <a href="${BASE}/gate-pass/approve" class="btn btn-blue">Back to Dashboard</a>
+  `);
+}
+
+function escalationRejectFormPage(id: string, token: string, gpNumber: string, vehicle: string) {
+  return shell("Reject Sign-off Request", `
+    <div class="icon" style="background:#fef2f2">
+      <svg width="34" height="34" fill="none" stroke="#dc2626" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+    </div>
+    <h1>Reject Sign-off Request</h1>
+    <div class="pass-info">
+      <div class="row"><span>${gpNumber}</span><em>${vehicle}</em></div>
+    </div>
+    <form method="POST" action="/api/gate-pass/${id}/email-action">
+      <input type="hidden" name="token" value="${token}">
+      <label>Reason for rejection <span style="color:#dc2626">*</span></label>
+      <textarea name="comment" placeholder="Enter the reason for rejecting this sign-off request..." required></textarea>
+      <button type="submit" class="btn btn-red" style="padding:14px">Confirm Rejection</button>
+    </form>
+    <a href="${BASE}/gate-pass/approve" class="btn btn-ghost" style="display:block;margin-top:12px;font-size:13px">Cancel — Open App</a>
+  `);
+}
+
+function escalationRejectedPage(gpNumber: string, comment: string) {
+  return shell("Sign-off Rejected", `
+    <div class="icon" style="background:linear-gradient(135deg,#dc2626,#ef4444)">
+      <svg width="34" height="34" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+    </div>
+    <h1>Rejected</h1>
+    <div class="gp">${gpNumber}</div>
+    ${comment ? `<p style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;color:#991b1b;margin-top:12px;font-size:13px"><strong>Reason:</strong> ${comment}</p>` : ""}
+    <p style="margin-top:14px">The Cashier has been notified and must resolve the outstanding orders.</p>
+    <a href="${BASE}/gate-pass/approve" class="btn btn-blue" style="margin-top:20px">Back to Dashboard</a>
   `);
 }
