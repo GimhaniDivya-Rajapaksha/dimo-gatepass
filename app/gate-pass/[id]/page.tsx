@@ -736,7 +736,10 @@ function InitiatorGatePassDetailPageInner() {
     ? { ...rawSc, label: "Gate In" }
     : rawSc;
   const isLT = data.passType === "LOCATION_TRANSFER";
-  const canCancel  = data.status === "PENDING_APPROVAL" && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
+  const canCancel  = (
+    data.status === "PENDING_APPROVAL" ||
+    (data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW")
+  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
   const isApproverView = role === "APPROVER" || role === "ADMIN";
   // True if this approver is specifically assigned to this gate pass.
   // null intendedApprover means old pass (no selection stored) — allow any approver.
@@ -1996,6 +1999,17 @@ function InitiatorGatePassDetailPageInner() {
                       ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
                       : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
                     Cancel Request
+                  </motion.button>
+                )}
+                {data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW" && isInitiatorView && (
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                    onClick={() => router.push(`/gate-pass/create?rejectedId=${id}`)}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
+                    style={{ background: "var(--surface)", borderColor: "#3b82f6", color: "#3b82f6" }}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Edit Pass
                   </motion.button>
                 )}
                 {!["REJECTED", "CANCELLED", "PENDING_APPROVAL"].includes(data.status) && (

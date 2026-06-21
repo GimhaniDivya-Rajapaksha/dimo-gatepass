@@ -1509,7 +1509,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.createdById !== session.user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (gatePass.status !== "REJECTED") {
+    const isCdCashierReviewEdit = gatePass.passType === "CUSTOMER_DELIVERY" && gatePass.status === "CASHIER_REVIEW";
+    if (gatePass.status !== "REJECTED" && !isCdCashierReviewEdit) {
       return NextResponse.json({ error: "Only rejected passes can be resubmitted" }, { status: 400 });
     }
 
@@ -1529,7 +1530,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const updated = await prisma.gatePass.update({
       where: { id },
       data: {
-        status: "PENDING_APPROVAL",
+        // CD CASHIER_REVIEW edits stay in CASHIER_REVIEW — service orders already fetched, only form fields change
+        status: isCdCashierReviewEdit ? "CASHIER_REVIEW" : "PENDING_APPROVAL",
         resubmitCount: (gatePass.resubmitCount ?? 0) + 1,
         resubmitNote: resubmitNote || null,
         ...(vehicle        ? { vehicle }        : {}),
@@ -1559,6 +1561,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(approver !== undefined ? { intendedApprover: (typeof approver === "string" ? approver.trim() || null : null) } : {}),
       },
     });
+
+    // CD CASHIER_REVIEW edit: notify cashier of updated details, skip approver notifications
+    if (isCdCashierReviewEdit) {
+      const plantPrefix = gatePass.fromLocation ? gatePass.fromLocation.split(" - ")[0].trim() : null;
+      const cashiers = plantPrefix
+        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } } })
+        : await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+      if (cashiers.length > 0) {
+        await prisma.notification.createMany({
+          data: cashiers.map((c: { id: string }) => ({
+            userId: c.id,
+            type: "GATE_PASS_SUBMITTED",
+            title: "CD Pass Updated by Initiator",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — the initiator updated the pass details. Please review before proceeding.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
 
     // Notify only the (possibly new) intended approver + admins
     const newIntendedApprover = (typeof approver === "string" ? approver.trim() : null) || gatePass.intendedApprover;
@@ -1621,7 +1643,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.createdById !== session.user.id && session.user.role !== "ADMIN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (gatePass.status !== "PENDING_APPROVAL") {
+    const isCdCashierReview = gatePass.passType === "CUSTOMER_DELIVERY" && gatePass.status === "CASHIER_REVIEW";
+    if (gatePass.status !== "PENDING_APPROVAL" && !isCdCashierReview) {
       return NextResponse.json({ error: "Only pending passes can be cancelled" }, { status: 400 });
     }
 
@@ -1630,6 +1653,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { status: "CANCELLED" as any },
     });
+
+    // Notify cashiers when a CD pass in CASHIER_REVIEW is cancelled
+    if (isCdCashierReview) {
+      const plantPrefix = gatePass.fromLocation ? gatePass.fromLocation.split(" - ")[0].trim() : null;
+      const cashiers = plantPrefix
+        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } } })
+        : await prisma.user.findMany({ where: { role: "CASHIER" as any } });
+      if (cashiers.length > 0) {
+        await prisma.notification.createMany({
+          data: cashiers.map((c: { id: string }) => ({
+            userId: c.id,
+            type: "GATE_PASS_REJECTED",
+            title: "CD Pass Cancelled",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) — the initiator cancelled this Customer Delivery. No further action needed.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
 
     return NextResponse.json({ gatePass: updated });
   }
