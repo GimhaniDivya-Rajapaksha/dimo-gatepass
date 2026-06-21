@@ -845,6 +845,288 @@ ${emailFooter(pass.gatePassNumber)}
   );
 }
 
+export async function sendEscalationRequestEmail(
+  approverEmail: string,
+  approverName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    toLocation?: string | null;
+    cashierName: string;
+    paidCount: number;
+    unpaidCount: number;
+    totalCount: number;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Sign-off Required &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier Escalation", pass.gatePassNumber)}
+<div class="alert-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+  </svg>
+  Your sign-off is required before this vehicle can be released.
+  <span>The Cashier has escalated an unpaid order to you.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${approverName}</strong>,<br>
+    Cashier <strong>${pass.cashierName}</strong> has escalated gate pass <strong>${pass.gatePassNumber}</strong> to you. <strong>${pass.paidCount} of ${pass.totalCount} service orders</strong> have been cleared — the remaining <strong>${pass.unpaidCount} order${pass.unpaidCount !== 1 ? "s" : ""}</strong> require your sign-off before an invoice can be generated and the vehicle released.
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Escalated By</div><div class="ic-val">${pass.cashierName} (Cashier)</div></div>
+      <div class="ic"><div class="ic-lbl">Timestamp</div><div class="ic-val">${now}</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+    </div>
+  </div>
+  <div class="sec">
+    ${secLabel("Vehicle Details")}
+    <div class="vtable-wrap">
+      <div class="vtable-bar"><span>Vehicle on this pass</span><span class="vtable-badge">1</span></div>
+      <table class="vt">
+        <thead><tr><th>#</th><th>Vehicle No.</th>${pass.chassis ? "<th>Chassis No.</th>" : ""}<th>Location</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="rn">1</span></td>
+            <td class="m">${pass.vehicle}</td>
+            ${pass.chassis ? `<td class="m">${pass.chassis}</td>` : ""}
+            <td>${pass.fromLocation ? `<span class="dtag">${pass.fromLocation}</span>` : "&mdash;"}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="audit-wrap">
+    <div class="audit-head">Order Summary</div>
+    <table class="audit-table">
+      <tr><td>Total Orders</td><td>${pass.totalCount}</td></tr>
+      <tr><td>Cleared by Cashier</td><td style="color:#4a8c1c;font-weight:700">${pass.paidCount}</td></tr>
+      <tr><td>Awaiting Your Sign-off</td><td style="color:#dc2626;font-weight:700">${pass.unpaidCount}</td></tr>
+    </table>
+  </div>
+  <div class="action-box">
+    <div class="action-head">
+      <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+        <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="white" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M7.5 5.5V9M7.5 11h.01" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
+      </svg>
+      Action Required &mdash; Log in to Review &amp; Decide
+    </div>
+    <div class="action-body">
+      <div class="action-desc">
+        Please log in to the system to review the order details and approve or reject the cashier&rsquo;s escalation. The vehicle cannot be released until you take action.
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr><td align="center" style="padding:0">
+          <a href="${viewUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#d97706;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(217,119,6,0.4),0 1px 3px rgba(0,0,0,0.14)">
+            <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M8.5 3v11M3 8.5h11" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
+            Review &amp; Take Action in System
+          </a>
+        </td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    approverEmail,
+    `[Action Required] Payment Sign-off — Gate Pass ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendEscalationApprovedEmail(
+  cashierEmail: string,
+  cashierName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    approverName: string;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approver Signed Off &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Approver Signed Off", "Customer Delivery &middot; Generate Invoice Now", pass.gatePassNumber)}
+<div class="notice-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  ${pass.approverName} approved the remaining orders. Please generate the invoice.
+  <span>Action required from you.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${cashierName}</strong>,<br>
+    <strong>${pass.approverName}</strong> has signed off on the remaining unpaid orders for gate pass <strong>${pass.gatePassNumber}</strong>. Please log in and generate the invoice to release the vehicle.
+  </div>
+  <div class="status-box">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#8DC63F;text-align:center;line-height:34px;color:#000;font-size:18px;font-weight:800">&#10003;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#6ea02f">Orders Approved — Generate Invoice</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">Signed off by <strong>${pass.approverName}</strong> on ${now}.</div>
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Approved By</div><div class="ic-val">${pass.approverName}</div></div>
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">Open Pass &amp; Generate Invoice &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    cashierEmail,
+    `Approver Signed Off — Generate Invoice Now — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendEscalationRejectedEmail(
+  cashierEmail: string,
+  cashierName: string,
+  passId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    approverName: string;
+    rejectionReason?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign-off Rejected &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required", pass.gatePassNumber)}
+<div class="alert-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+  </svg>
+  ${pass.approverName} rejected the sign-off request.
+  <span>Please resolve the pending orders and re-escalate if needed.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${cashierName}</strong>,<br>
+    <strong>${pass.approverName}</strong> has rejected the sign-off request for the remaining unpaid orders on gate pass <strong>${pass.gatePassNumber}</strong>. Please log in to review and take the appropriate action.
+  </div>
+  <div class="reject-box">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#dc2626;text-align:center;line-height:34px;color:#fff;font-size:16px;font-weight:800">&#10005;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="reject-title" style="font-size:17px;font-weight:800;color:#991b1b">Sign-off Rejected</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">Rejected by <strong>${pass.approverName}</strong> on ${now}.</div>
+    ${pass.rejectionReason ? `<div class="reject-reason"><strong>Reason:</strong> ${pass.rejectionReason}</div>` : ""}
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Rejected By</div><div class="ic-val">${pass.approverName}</div></div>
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">Open Pass &amp; Re-escalate &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    cashierEmail,
+    `Sign-off Rejected — Action Required — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
 export async function sendAsoArrivalEmail(
   asoEmail: string,
   asoName: string,

@@ -1790,7 +1790,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const approverId: string | undefined = body.approverId;
     if (!approverId) return NextResponse.json({ error: "approverId is required" }, { status: 400 });
 
-    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true, role: true } });
+    const approverUser = await prisma.user.findUnique({ where: { id: approverId }, select: { id: true, name: true, role: true, email: true } });
     if (!approverUser || approverUser.role !== "APPROVER") {
       return NextResponse.json({ error: "Selected user is not an approver" }, { status: 400 });
     }
@@ -1818,6 +1818,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         gatePassId: gatePass.id,
       },
     });
+
+    // Email the selected approver
+    if (approverUser.email) {
+      const { sendEscalationRequestEmail } = await import("@/lib/email");
+      sendEscalationRequestEmail(approverUser.email, approverUser.name ?? "Approver", id, {
+        gatePassNumber: gatePass.gatePassNumber,
+        vehicle: gatePass.vehicle ?? "",
+        chassis: gatePass.chassis,
+        fromLocation: gatePass.fromLocation as string | null,
+        toLocation: gatePass.toLocation as string | null,
+        cashierName: session.user.name ?? "Cashier",
+        paidCount,
+        unpaidCount,
+        totalCount: allOrders.length,
+      }).catch((e: unknown) => console.error("[email] escalation request email failed:", e));
+    }
 
     // Notify initiator that escalation was sent
     await prisma.notification.create({
@@ -1870,6 +1886,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             gatePassId: gatePass.id,
           })),
         });
+        // Email cashiers
+        const { sendEscalationApprovedEmail } = await import("@/lib/email");
+        for (const c of cashiersEsc as { id: string; email: string | null; name: string | null }[]) {
+          if (c.email) {
+            sendEscalationApprovedEmail(c.email, c.name ?? "Cashier", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation as string | null,
+              approverName: session.user.name ?? "Approver",
+            }).catch((e: unknown) => console.error("[email] escalation approved email failed:", e));
+          }
+        }
       }
 
       // Notify initiator
@@ -1966,6 +1995,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           gatePassId: gatePass.id,
         })),
       });
+      // Email cashiers
+      const { sendEscalationRejectedEmail } = await import("@/lib/email");
+      for (const c of cashiersRej as { id: string; email: string | null; name: string | null }[]) {
+        if (c.email) {
+          sendEscalationRejectedEmail(c.email, c.name ?? "Cashier", id, {
+            gatePassNumber: gatePass.gatePassNumber,
+            vehicle: gatePass.vehicle ?? "",
+            chassis: gatePass.chassis,
+            fromLocation: gatePass.fromLocation as string | null,
+            approverName: session.user.name ?? "Approver",
+            rejectionReason: reason,
+          }).catch((e: unknown) => console.error("[email] escalation rejected email failed:", e));
+        }
+      }
     }
 
     // Notify initiator
