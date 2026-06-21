@@ -13,6 +13,7 @@ const CHASSIS_TO_DELETE = [
   "WDD205077789488",
   "WDD205077789487",
   "WDD205077789486",
+  "WDD205077789485",
 ];
 
 async function main() {
