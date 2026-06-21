@@ -18,7 +18,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <Sidebar user={session.user} role={session.user.role} />
         </Suspense>
       )}
-      <div className={`flex-1 min-w-0 flex flex-col h-screen overflow-hidden ${isSO ? "" : "ml-64"}`}>
+      <div className={`flex-1 min-w-0 flex flex-col h-screen overflow-hidden ${isSO ? "" : "md:ml-64"}`}>
         <DashboardHeader user={session.user} />
         <main className="flex-1 p-6 main-bg overflow-y-auto overflow-x-hidden flex flex-col" style={{ minHeight: 0 }}>
           {children}

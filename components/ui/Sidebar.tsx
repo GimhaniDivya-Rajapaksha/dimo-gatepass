@@ -40,6 +40,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const searchParams = useSearchParams();
   const { theme }  = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
   const [overrideCount, setOverrideCount] = useState(0);
   const [pendingCompletionCount, setPendingCompletionCount] = useState(0);
@@ -50,6 +51,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const [completedCount, setCompletedCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
 
   useEffect(() => {
     if (role !== "INITIATOR" && role !== "SERVICE_ADVISOR") return;
@@ -164,13 +166,40 @@ export default function Sidebar({ user, role }: SidebarProps) {
   };
 
   return (
-    <aside
-      className="fixed left-0 top-0 h-screen w-64 flex flex-col z-50"
-      style={{
-        background: mounted ? (isDark ? "#060c18" : "#0d1b3e") : "#0d1b3e",
-        borderRight: `1px solid rgba(255,255,255,0.07)`,
-      }}
-    >
+    <>
+      {/* Hamburger toggle — mobile only */}
+      <button
+        className="md:hidden fixed top-3 left-3 z-[60] w-10 h-10 rounded-lg flex items-center justify-center"
+        style={{ background: "#0d1b3e", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
+        onClick={() => setMobileOpen(o => !o)}
+        aria-label="Toggle navigation"
+      >
+        {mobileOpen ? (
+          <svg width="18" height="18" fill="none" stroke="white" strokeWidth="2.5" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        ) : (
+          <svg width="18" height="18" fill="none" stroke="white" strokeWidth="2.2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        )}
+      </button>
+
+      {/* Overlay — mobile only, closes sidebar on tap */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed left-0 top-0 h-screen w-64 flex flex-col z-50 transition-transform duration-300 ease-in-out md:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+        style={{
+          background: mounted ? (isDark ? "#060c18" : "#0d1b3e") : "#0d1b3e",
+          borderRight: `1px solid rgba(255,255,255,0.07)`,
+        }}
+      >
       {/* Logo */}
       <div className="px-5 pt-6 pb-5">
         <div className="relative h-11 w-[130px] mb-3">
@@ -324,5 +353,6 @@ export default function Sidebar({ user, role }: SidebarProps) {
         </div>
       </div>
     </aside>
+    </>
   );
 }

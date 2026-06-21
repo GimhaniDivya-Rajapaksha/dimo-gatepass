@@ -80,7 +80,7 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
 
   return (
     <header
-      className="h-16 flex items-center justify-between px-6 sticky top-0 z-40 border-b"
+      className="h-16 flex items-center justify-between pl-14 pr-6 md:px-6 sticky top-0 z-40 border-b"
       style={{
         background: "var(--surface)",
         borderColor: "var(--border)",

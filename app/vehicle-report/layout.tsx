@@ -11,7 +11,7 @@ export default async function VehicleReportLayout({ children }: { children: Reac
   return (
     <div className="flex min-h-screen">
       <Sidebar user={session.user} role={session.user.role} />
-      <div className="flex-1 ml-64 flex flex-col" style={{ height: "100vh" }}>
+      <div className="flex-1 md:ml-64 flex flex-col" style={{ height: "100vh" }}>
         <DashboardHeader user={session.user} />
         <main className="flex-1 flex flex-col overflow-hidden p-6 main-bg">
           {children}
