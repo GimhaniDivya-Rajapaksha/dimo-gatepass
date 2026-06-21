@@ -556,8 +556,21 @@ export default function SecurityGateDashboard() {
       // toLocQ because the vehicle's toLocation = Security's gate.
       const clearedData            = await fetchJson(`/api/gate-pass?status=COMPLETED&updatedAfter=${encodeURIComponent(todayISO)}&limit=200${toLocQ}`);
 
-      // Server already scoped by location — filter by pass type/subtype
-      const approvedAll: Pass[] = outData.passes ?? [];
+      // Server already scoped by location — filter by pass type/subtype.
+      // CD passes whose fromLocation was populated from SAP may only contain the plant name
+      // (e.g. "Mercedes Centre 800") without the storage code (e.g. "DIMO 800"), so the
+      // fromLocationCode contains-filter misses them. Fetch CD APPROVED passes separately
+      // using fromLocationPlant (prefix match) and merge, deduplicating by id.
+      let cdFallbackPasses: Pass[] = [];
+      if (plantName) {
+        const cdFallback = await fetchJson(`/api/gate-pass?status=APPROVED&passType=CUSTOMER_DELIVERY&limit=100&fromLocationPlant=${encodeURIComponent(plantName)}`);
+        cdFallbackPasses = cdFallback.passes ?? [];
+      }
+      const seenIds = new Set<string>((outData.passes ?? []).map((p: Pass) => p.id));
+      const approvedAll: Pass[] = [
+        ...(outData.passes ?? []),
+        ...cdFallbackPasses.filter((p: Pass) => !seenIds.has(p.id)),
+      ];
 
       // Bug fix: MAIN_IN APPROVED at fromLocQ = vehicle departing from Security's plant for service.
       // These need Gate OUT confirmation (not Gate IN). Include in outPasses.
