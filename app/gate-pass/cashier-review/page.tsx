@@ -26,6 +26,7 @@ type GatePass = {
   singleOrderEscalated?: boolean;
   singleOrderEscalatedApproverId?: string | null;
   escalationApproved?: boolean;
+  escalationRejectionReason?: string | null;
   createdBy: { name: string; email: string };
   createdAt: string;
   parentPass: { id: string; gatePassNumber: string; vehicle: string; serviceJobNo: string | null } | null;
@@ -120,7 +121,7 @@ function OrderModal({
 
   // 2-step flow: 'review' = order columns, 'confirm' = escalation/proceed
   const [step, setStep] = useState<"review" | "confirm">(() =>
-    (pass as any).escalationApproved || pass.singleOrderEscalated ? "confirm" : "review"
+    (pass as any).escalationApproved || pass.singleOrderEscalated || !!(pass as any).escalationRejectionReason ? "confirm" : "review"
   );
   const [refreshing, setRefreshing] = useState(false);
 
@@ -658,6 +659,7 @@ function OrderModal({
               (() => {
                 const escalationApproved = !!(pass as any).escalationApproved;
                 const escalated = !!pass.singleOrderEscalated;
+                const escalationRejectionReason = (pass as any).escalationRejectionReason as string | null | undefined;
                 const escalationApproverName = approverList.find(a => a.id === pass.singleOrderEscalatedApproverId)?.name ?? "the approver";
 
                 if (escalationApproved) {
@@ -686,6 +688,53 @@ function OrderModal({
                         {saving ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>}
                         {saving ? "Generating…" : "Generate Invoice"}
                       </button>
+                    </div>
+                  );
+                }
+
+                if (!escalated && !escalationApproved && escalationRejectionReason) {
+                  // State E: approver rejected escalation — show reason + allow re-escalation
+                  return (
+                    <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>
+                          <svg className="w-5 h-5" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm" style={{ color: "#991b1b" }}>Sign-off Rejected by {escalationApproverName}</p>
+                          <p className="text-xs mt-0.5" style={{ color: "#dc2626" }}>{escalationRejectionReason}</p>
+                        </div>
+                      </div>
+                      <p className="text-xs rounded-xl px-4 py-3" style={{ background: "#fee2e2", color: "#991b1b" }}>
+                        You can send to the same or a different approver, or wait for the customer to pay the remaining order.
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Re-escalate to Approver</label>
+                        <div className="flex gap-2 flex-wrap">
+                          <select
+                            value={selectedEscalationApprover}
+                            onChange={e => setSelectedEscalationApprover(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                            style={{ background: "var(--surface2)", borderColor: "#fca5a5", color: "var(--text)", minWidth: 200 }}
+                          >
+                            <option value="">Choose an approver…</option>
+                            {approverList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                          <button
+                            onClick={() => onSingleOrderEscalate(pass.id)}
+                            disabled={!selectedEscalationApprover || escalating}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-all hover:opacity-90"
+                            style={{ background: "linear-gradient(135deg,#dc2626,#b91c1c)" }}
+                          >
+                            {escalating
+                              ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Sending…</>
+                              : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg> Send Again</>}
+                          </button>
+                        </div>
+                        {error && <p className="text-xs font-medium mt-1" style={{ color: "#ef4444" }}>{error}</p>}
+                      </div>
                     </div>
                   );
                 }
@@ -1539,11 +1588,11 @@ export default function CashierReviewPage() {
   function openModal(p: GatePass) {
     // If the pass was escalated, fetch escalationApproved via raw SQL before showing the modal
     // (Prisma client may be stale and not include this column in findMany results).
-    if (p.singleOrderEscalated) {
+    if (p.singleOrderEscalated || !!p.singleOrderEscalatedApproverId) {
       fetch(`/api/gate-pass/${p.id}/escalation-status`)
         .then(r => r.ok ? r.json() : null)
-        .then((d: { escalationApproved?: boolean } | null) => {
-          setModalPass(d ? { ...p, escalationApproved: d.escalationApproved ?? false } : p);
+        .then((d: { escalationApproved?: boolean; escalationRejectionReason?: string | null } | null) => {
+          setModalPass(d ? { ...p, escalationApproved: d.escalationApproved ?? false, escalationRejectionReason: d.escalationRejectionReason ?? null } : p);
         })
         .catch(() => setModalPass(p));
     } else {
@@ -1610,7 +1659,7 @@ export default function CashierReviewPage() {
     let updated = cdFiltered.find(p => p.id === modalPass.id) ?? null;
     if (updated && escRes.ok) {
       const escData = await escRes.json();
-      updated = { ...updated, escalationApproved: escData.escalationApproved ?? false };
+      updated = { ...updated, escalationApproved: escData.escalationApproved ?? false, escalationRejectionReason: escData.escalationRejectionReason ?? null };
     }
     if (updated) setModalPass(updated);
   }, [modalPass]);
