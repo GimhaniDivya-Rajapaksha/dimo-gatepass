@@ -108,9 +108,9 @@ function SingleOrderApprovalPanel({ gatePassId, data, onApproved, onRejected }: 
           </svg>
         </div>
         <div className="flex-1">
-          <p className="text-sm font-bold" style={{ color: "#92400e" }}>Single Order Sign-off Required</p>
+          <p className="text-sm font-bold" style={{ color: "#92400e" }}>Single Order Sign-off Required — Sent by Cashier</p>
           <p className="text-xs mt-0.5" style={{ color: "#b45309" }}>
-            Cashier cleared {paid} of {orders.length} orders — 1 remaining order requires your authorisation.
+            The Cashier could not clear 1 order and has requested your authorisation to proceed. Cashier cleared {paid} of {orders.length} orders — 1 remaining order requires your sign-off.
           </p>
         </div>
       </div>
@@ -1452,8 +1452,8 @@ function InitiatorGatePassDetailPageInner() {
             </div>
           )}
 
-          {/* ── APPROVER / ALL: Customer Delivery Invoice Status panel (hidden from Security) ── */}
-          {data?.passType === "CUSTOMER_DELIVERY" && serviceOrders.length > 0 && !isSecurityOfficer && (() => {
+          {/* ── APPROVER / ALL: Customer Delivery Invoice Status panel (hidden from Security and from Approver on cashier-escalated passes) ── */}
+          {data?.passType === "CUSTOMER_DELIVERY" && serviceOrders.length > 0 && !isSecurityOfficer && !(isApproverView && data?.singleOrderEscalated) && (() => {
             const isInvoiced = data.paymentType === "INVOICED";
             return (
               <div className="w-full rounded-2xl border mb-3 overflow-hidden"
