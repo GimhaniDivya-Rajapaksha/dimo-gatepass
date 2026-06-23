@@ -1243,6 +1243,7 @@ export default function CreateGatePassPage() {
   useEffect(() => {
     if (status !== "authenticated") return;
     fetch("/api/lookups?field=vehicle&q=a&passType=LOCATION_TRANSFER").catch(() => {});
+    fetch("/api/lookups?field=vehicle&q=a&passType=CUSTOMER_DELIVERY").catch(() => {});
   }, [status]);
 
   useEffect(() => {
