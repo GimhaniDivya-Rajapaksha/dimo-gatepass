@@ -9,7 +9,7 @@ ALTER TYPE "GatePassStatus" ADD VALUE IF NOT EXISTS 'CASHIER_REVIEW';
 -- ── PassType enum (may already exist from db push) ───────────────────────────
 DO $$ BEGIN
   CREATE TYPE "PassType" AS ENUM ('LOCATION_TRANSFER', 'CUSTOMER_DELIVERY', 'AFTER_SALES');
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+EXCEPTION WHEN others THEN null; END $$;
 
 -- ── Role enum: add values introduced after the initial schema push ────────────
 ALTER TYPE "Role" ADD VALUE IF NOT EXISTS 'ADMIN';
@@ -25,14 +25,12 @@ ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "defaultLocation"  TEXT;
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "resetToken"       TEXT;
 ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "resetTokenExpiry" TIMESTAMP(3);
 
-DO $$ BEGIN
-  ALTER TABLE "User" ADD CONSTRAINT "User_resetToken_key" UNIQUE ("resetToken");
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS "User_resetToken_key" ON "User"("resetToken");
 
 DO $$ BEGIN
   ALTER TABLE "User" ADD CONSTRAINT "User_approverId_fkey"
     FOREIGN KEY ("approverId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+EXCEPTION WHEN others THEN null; END $$;
 
 -- ── GatePass: passType column ─────────────────────────────────────────────────
 ALTER TABLE "GatePass" ADD COLUMN IF NOT EXISTS "passType" "PassType" NOT NULL DEFAULT 'LOCATION_TRANSFER';
@@ -99,7 +97,7 @@ ALTER TABLE "GatePass" ADD COLUMN IF NOT EXISTS "gateInBy"        TEXT;
 DO $$ BEGIN
   ALTER TABLE "GatePass" ADD CONSTRAINT "GatePass_parentPassId_fkey"
     FOREIGN KEY ("parentPassId") REFERENCES "GatePass"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+EXCEPTION WHEN others THEN null; END $$;
 
 -- ── ServiceOrder table ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "ServiceOrder" (
@@ -121,7 +119,7 @@ CREATE TABLE IF NOT EXISTS "ServiceOrder" (
 DO $$ BEGIN
   ALTER TABLE "ServiceOrder" ADD CONSTRAINT "ServiceOrder_gatePassId_fkey"
     FOREIGN KEY ("gatePassId") REFERENCES "GatePass"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+EXCEPTION WHEN others THEN null; END $$;
 
 -- ── Notification table ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "Notification" (
@@ -139,7 +137,7 @@ CREATE TABLE IF NOT EXISTS "Notification" (
 DO $$ BEGIN
   ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-EXCEPTION WHEN duplicate_object THEN null; END $$;
+EXCEPTION WHEN others THEN null; END $$;
 
 -- ── LocationLabel table ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "LocationLabel" (
