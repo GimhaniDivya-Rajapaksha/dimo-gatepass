@@ -185,6 +185,7 @@ function GatePassListPageInner() {
   const isInitiator = session?.user?.role === "INITIATOR";
   const isASO = session?.user?.role === "AREA_SALES_OFFICER";
   const isDC = session?.user?.role === "DELIVERY_COORDINATOR";
+  const isApprover = session?.user?.role === "APPROVER";
   const [gatingInId, setGatingInId] = useState<string | null>(null);
   const [markingInId, setMarkingInId] = useState<string | null>(null);
   const [printingId, setPrintingId] = useState<string | null>(null);
@@ -398,7 +399,7 @@ function GatePassListPageInner() {
           <h1 className="text-2xl font-bold" style={{ color: "var(--text)" }}>My Gate Passes</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>{total} records found</p>
         </div>
-        {!isDC && (
+        {!isDC && !isApprover && (
           <Link href="/gate-pass/create" className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-md"
             style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)" }}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
