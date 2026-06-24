@@ -28,7 +28,7 @@ async function apimPost(
   endpoint: string,
   filter: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${APIM_BASE}/dimogatepass/dev/${endpoint}`;
+  const url = `${APIM_BASE}/dimogatepass/qa/${endpoint}`;
 
   const res = await fetch(url, {
     method:  "POST",

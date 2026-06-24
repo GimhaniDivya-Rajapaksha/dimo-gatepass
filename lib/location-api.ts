@@ -196,8 +196,8 @@ export function findPlantLocationOption(
 export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<PlantVehicleRow[]> {
   // QAS requires OData-style filter: Vhvin eq 'value'
   const url = vehicleFilter
-    ? `${APIM_BASE}/dimogatepass/dev/plant?filter=${encodeURIComponent(`Vhvin eq '${vehicleFilter}'`)}`
-    : `${APIM_BASE}/dimogatepass/dev/plant`;
+    ? `${APIM_BASE}/dimogatepass/qa/plant?filter=${encodeURIComponent(`Vhvin eq '${vehicleFilter}'`)}`
+    : `${APIM_BASE}/dimogatepass/qa/plant`;
   const res = await fetch(url, {
     method: "GET",
     headers: buildHeaders(),
@@ -322,7 +322,7 @@ export async function updateVehiclePlantLocation(params: {
 
   let lastMessage = "Vehicle location update failed.";
   let lastStatus = 0;
-  const url = `${APIM_BASE}/dimogatepass/dev/location/`;
+  const url = `${APIM_BASE}/dimogatepass/qa/location/`;
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     for (const payload of uniquePayloadCandidates) {
