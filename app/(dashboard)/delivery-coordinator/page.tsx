@@ -313,14 +313,7 @@ export default function DeliveryCoordinatorDashboard() {
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
             Updated {fmtTime(lastRefresh.toISOString())}
           </span>
-          <Link href="/delivery-coordinator/guide"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all hover:opacity-80"
-            style={{ background: "#f0fdfa", borderColor: "#99f6e4", color: "#0d9488" }}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            How It Works
-          </Link>
+
           <button onClick={() => void fetchStats()}
             className="w-9 h-9 rounded-xl border flex items-center justify-center hover:opacity-70 transition-opacity"
             style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
