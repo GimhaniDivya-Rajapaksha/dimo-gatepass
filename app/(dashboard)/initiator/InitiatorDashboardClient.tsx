@@ -720,7 +720,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
         if (!res.ok) return;
         const data = await res.json();
         const count = (data.notifications ?? []).filter(
-          (n: { type: string; read: boolean }) => n.type === "GATE_PASS_RECEIVED" && !n.read
+          (n: { type: string; read: boolean }) => !n.read
         ).length;
         if (count > lastArrivalsNotif.current) {
           lastArrivalsNotif.current = count;
@@ -741,7 +741,7 @@ export default function InitiatorDashboardClient({ user }: Props) {
           lastArrivalsNotif.current = count;
         }
       } catch { /* ignore */ }
-    }, 15_000);
+    }, 5_000);
     return () => clearInterval(poll);
   }, [isASO, fetchArrivingVehicles]);
 
