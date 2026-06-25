@@ -163,16 +163,18 @@ export async function fetchSapVehicles(
   passType: "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both" = "both"
 ): Promise<SapVehicle[]> {
 
-  // Always fetch with the base status filter — JS filtering handles the search
-  // query. SAP OData substringof() support is inconsistent across endpoints.
-  // No mmsta filter — return all vehicles from /in regardless of primary status
+  // Send chassis filter to SAP when query is >= 3 chars — reduces payload from
+  // hundreds of vehicles to a single match. Below 3 chars: no SAP filter (fetch all).
+  const chassisQ = q.trim().length >= 3 ? q.trim().replace(/'/g, "''") : null;
+
   const fetchIN = () =>
-    apimPost("in", "")
+    apimPost("in", chassisQ ? `substringof('${chassisQ}', vhvin)` : "")
       .then((rows) => rows.map(mapVehicle));
 
   // New FS §2.2: accept QS60 (happy path) + QS50/QS5X/QS40/QS4X (intermediate invoice stages)
+  const sdstaFilter = "sdsta eq 'QS60' or sdsta eq 'QS50' or sdsta eq 'QS5X' or sdsta eq 'QS40' or sdsta eq 'QS4X'";
   const fetchOUT = () =>
-    apimPost("out", "sdsta eq 'QS60' or sdsta eq 'QS50' or sdsta eq 'QS5X' or sdsta eq 'QS40' or sdsta eq 'QS4X'")
+    apimPost("out", chassisQ ? `(${sdstaFilter}) and substringof('${chassisQ}', vhvin)` : sdstaFilter)
       .then((rows) => rows.map(mapVehicle));
 
   let raw: SapVehicle[];
