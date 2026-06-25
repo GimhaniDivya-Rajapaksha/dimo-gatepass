@@ -297,7 +297,6 @@ export async function GET(req: NextRequest) {
         description: string;
         model: string;
         make: string;
-        colourFamily: string;
         colour: string;
         matnr: string;
         internalNo: string;
@@ -345,7 +344,6 @@ export async function GET(req: NextRequest) {
             description: v.model ?? "",
             model: v.model ?? "",
             make: v.make ?? "",
-            colourFamily: "",
             colour: v.colour ?? "",
             matnr,
             internalNo: v.internalNo ?? "",
@@ -383,7 +381,6 @@ export async function GET(req: NextRequest) {
             description: row.modelCode ?? "",
             model: row.modelCode ?? "",
             make: "",
-            colourFamily: "",
             colour: "",
             matnr: row.materialNo ?? "",
             internalNo: row.internalNo ?? "",
@@ -418,7 +415,6 @@ export async function GET(req: NextRequest) {
           description: row.description ?? "",
           model: row.model ?? "",
           make: row.make ?? "",
-          colourFamily: row.colourFamily ?? "",
           colour: row.colour ?? "",
           label: row.chassisNo ? `${row.vehicleNo} / ${row.chassisNo}` : row.vehicleNo,
           matnr: "",
@@ -649,7 +645,6 @@ export async function POST(req: NextRequest) {
   const description = normalize(body.description ?? "");
   const model = normalize(body.model ?? "");
   const make = normalize(body.make ?? "");
-  const colourFamily = normalize(body.colourFamily ?? "");
   const colour = normalize(body.colour ?? "");
 
   if (!vehicleNo) {
@@ -664,7 +659,6 @@ export async function POST(req: NextRequest) {
         description: description || null,
         model: model || null,
         make: make || null,
-        colourFamily: colourFamily || null,
         colour: colour || null,
       },
       create: {
@@ -673,7 +667,6 @@ export async function POST(req: NextRequest) {
         description: description || null,
         model: model || null,
         make: make || null,
-        colourFamily: colourFamily || null,
         colour: colour || null,
       },
     });
@@ -686,7 +679,6 @@ export async function POST(req: NextRequest) {
         description: created.description ?? "",
         model: created.model ?? "",
         make: created.make ?? "",
-        colourFamily: created.colourFamily ?? "",
         colour: created.colour ?? "",
         label: created.chassisNo ? `${created.vehicleNo} / ${created.chassisNo}` : created.vehicleNo,
       },
