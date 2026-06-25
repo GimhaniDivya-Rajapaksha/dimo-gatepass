@@ -428,7 +428,7 @@ function LockedVehicleField({
 }: {
   label: string;
   vehicle: string;
-  details?: { chassisNo?: string | null; model?: string | null; make?: string | null; colourFamily?: string | null; colour?: string | null; currentLocation?: string | null } | null;
+  details?: { chassisNo?: string | null; model?: string | null; make?: string | null; colour?: string | null; currentLocation?: string | null } | null;
 }) {
   return (
     <Field label={label} required>
@@ -448,7 +448,6 @@ function LockedVehicleField({
               { label: "Chassis No", val: details.chassisNo },
               { label: "Model", val: details.model },
               { label: "Make", val: details.make },
-              { label: "Colour Family", val: details.colourFamily },
               { label: "Colour", val: details.colour },
               { label: "Current Location", val: details.currentLocation },
             ].filter((item) => item.val).map((item) => (
@@ -471,10 +470,6 @@ const VEHICLE_MAKES = [
   "Volkswagen","Tata","Ashok Leyland","Bajaj","Other",
 ];
 
-const COLOUR_FAMILIES = [
-  "White","Black","Silver","Grey","Red","Blue","Green",
-  "Yellow","Orange","Brown","Beige","Purple","Gold","Maroon","Navy",
-];
 
 function AddVehicleModal({ onClose, onAdd }: {
   onClose: () => void;
@@ -484,23 +479,15 @@ function AddVehicleModal({ onClose, onAdd }: {
   const [chassisNo,    setChassisNo]    = useState("");
   const [model,        setModel]        = useState("");
   const [make,         setMake]         = useState("");
-  const [colourFamily, setColourFamily] = useState("");
-  const [colourSearch, setColourSearch] = useState("");
-  const [colourOpen,   setColourOpen]   = useState(false);
   const [colour,       setColour]       = useState("");
   const [loading,      setLoading]      = useState(false);
   const [errors,       setErrors]       = useState<Record<string, string>>({});
-
-  const filteredColours = COLOUR_FAMILIES.filter((c) =>
-    c.toLowerCase().includes(colourSearch.toLowerCase())
-  );
 
   const validate = () => {
     const e: Record<string, string> = {};
     if (!vehicleNo.trim())    e.vehicleNo    = "Vehicle number is required";
     if (!model.trim())        e.model        = "Vehicle model is required";
     if (!make)                e.make         = "Vehicle make is required";
-    if (!colourFamily)        e.colourFamily = "Colour family is required";
     return e;
   };
 
@@ -519,7 +506,6 @@ function AddVehicleModal({ onClose, onAdd }: {
           chassisNo: chassisNo.trim(),
           model: model.trim(),
           make,
-          colourFamily,
           colour: colour.trim(),
         }),
       });
@@ -607,41 +593,6 @@ function AddVehicleModal({ onClose, onAdd }: {
             </div>
           </Field>
 
-          {/* Colour Family — searchable dropdown */}
-          <Field label="Colour Family" required error={errors.colourFamily}>
-            <div className="relative">
-              <input
-                value={colourFamily ? colourFamily : colourSearch}
-                onChange={(e) => { setColourSearch(e.target.value); setColourFamily(""); setColourOpen(true); }}
-                onFocus={() => setColourOpen(true)}
-                onBlur={() => setTimeout(() => setColourOpen(false), 150)}
-                placeholder="Select vehicle colour"
-                className="w-full border rounded-xl px-4 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
-                style={inputStyle(errors.colourFamily)}
-              />
-              <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: "var(--text-muted)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              {colourOpen && filteredColours.length > 0 && (
-                <div className="absolute z-30 mt-1 w-full max-h-44 overflow-auto rounded-xl border shadow-lg"
-                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-                  {filteredColours.map((c) => (
-                    <button key={c} type="button"
-                      className="w-full text-left px-4 py-2 text-sm hover:bg-blue-500/10 flex items-center gap-2.5"
-                      style={{ color: "var(--text)" }}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => { setColourFamily(c); setColourSearch(""); setColourOpen(false); setErrors((p) => ({ ...p, colourFamily: "" })); }}
-                    >
-                      <span className="w-3 h-3 rounded-full flex-shrink-0 border border-black/10"
-                        style={{ background: c.toLowerCase() === "silver" ? "#c0c0c0" : c.toLowerCase() === "navy" ? "#001f5b" : c.toLowerCase() === "maroon" ? "#800000" : c.toLowerCase() === "beige" ? "#f5f0dc" : c.toLowerCase() === "gold" ? "#FFD700" : c.toLowerCase() }} />
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Field>
-
           {/* Vehicle Colour */}
           <Field label="Vehicle Colour">
             <input
@@ -717,7 +668,7 @@ export default function CreateGatePassPage() {
     plantCode: string; storageLocation: string;
   } | null>(null);
   const [selectedVehicleDetail, setSelectedVehicleDetail] = useState<{
-    chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
+    chassisNo: string; model: string; make: string; colour: string;
     matnr?: string;
     currentLocation?: string;
     internalNo?: string;
@@ -768,7 +719,6 @@ export default function CreateGatePassPage() {
     chassisNo: string;
     model: string;
     make: string;
-    colourFamily: string;
     colour: string;
     matnr?: string;
     currentLocation?: string;
@@ -784,10 +734,10 @@ export default function CreateGatePassPage() {
   const [ltBulkLocationOptions, setLtBulkLocationOptions] = useState<Record<string, LookupOption[]>>({});
   const [ltBulkLocationLoading, setLtBulkLocationLoading] = useState<Record<string, boolean>>({});
   const [selectedCdVehicleDetail, setSelectedCdVehicleDetail] = useState<{
-    vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string; currentLocation?: string;
+    vehicleNo: string; chassisNo: string; model: string; make: string; colour: string; currentLocation?: string;
   } | null>(null);
   const [selectedSrVehicleDetail, setSelectedSrVehicleDetail] = useState<{
-    vehicleNo: string; chassisNo: string; model: string; make: string; colourFamily: string; colour: string;
+    vehicleNo: string; chassisNo: string; model: string; make: string; colour: string;
   } | null>(null);
   const [srVehicleHasSearched, setSrVehicleHasSearched] = useState(false);
 
@@ -940,7 +890,6 @@ export default function CreateGatePassPage() {
             chassisNo:    pass.chassis ?? "",
             model:        "",
             make:         pass.make ?? "",
-            colourFamily: "",
             colour:       pass.vehicleColor ?? "",
             currentLocation: resolvedFromLocation || undefined,
           });
@@ -956,7 +905,6 @@ export default function CreateGatePassPage() {
             chassisNo: pass.chassis ?? "",
             model: "",
             make: pass.make ?? "",
-            colourFamily: "",
             colour: pass.vehicleColor ?? "",
           });
         } else if (pass.passType === "AFTER_SALES") {
@@ -982,7 +930,6 @@ export default function CreateGatePassPage() {
             chassisNo: pass.chassis ?? "",
             model: "",
             make: pass.make ?? "",
-            colourFamily: "",
             colour: pass.vehicleColor ?? "",
           });
           setAsFoundPass({
@@ -1055,7 +1002,6 @@ export default function CreateGatePassPage() {
             chassisNo: pass.chassis ?? "",
             model: "",
             make: pass.make ?? "",
-            colourFamily: "",
             colour: pass.vehicleColor ?? "",
             currentLocation: pass.fromLocation ?? undefined,
           });
@@ -1082,7 +1028,6 @@ export default function CreateGatePassPage() {
             chassisNo: pass.chassis ?? "",
             model: "",
             make: pass.make ?? "",
-            colourFamily: "",
             colour: pass.vehicleColor ?? "",
           });
         } else if (pass.passType === "AFTER_SALES") {
@@ -1106,7 +1051,6 @@ export default function CreateGatePassPage() {
             chassisNo: pass.chassis ?? "",
             model: "",
             make: pass.make ?? "",
-            colourFamily: "",
             colour: pass.vehicleColor ?? "",
           });
           setAsFromLocation(pass.fromLocation ?? "");
@@ -1648,7 +1592,6 @@ export default function CreateGatePassPage() {
       chassisNo: row.chassisNo,
       make: row.make,
       model: row.model,
-      colourFamily: row.colour,
       colour: row.colour,
     });
     setSrVehicleHasSearched(!!row.vehicleNo.trim());
@@ -2299,11 +2242,11 @@ export default function CreateGatePassPage() {
             onAdd={(opt) => {
               if (addVehicleTarget === "cd") {
                 setC("vehicle", opt.value);
-                setSelectedCdVehicleDetail({ vehicleNo: opt.value, chassisNo: opt.chassisNo ?? "", model: opt.model ?? "", make: opt.make ?? "", colourFamily: opt.colourFamily ?? "", colour: opt.colour ?? "" });
+                setSelectedCdVehicleDetail({ vehicleNo: opt.value, chassisNo: opt.chassisNo ?? "", model: opt.model ?? "", make: opt.make ?? "", colour: opt.colour ?? "" });
                 setErrors((p) => { const n = { ...p }; delete n.vehicle; return n; });
               } else if (addVehicleTarget === "sr") {
                 setS("vehicle", opt.value);
-                setSelectedSrVehicleDetail({ vehicleNo: opt.value, chassisNo: opt.chassisNo ?? "", model: opt.model ?? "", make: opt.make ?? "", colourFamily: opt.colourFamily ?? "", colour: opt.colour ?? "" });
+                setSelectedSrVehicleDetail({ vehicleNo: opt.value, chassisNo: opt.chassisNo ?? "", model: opt.model ?? "", make: opt.make ?? "", colour: opt.colour ?? "" });
                 setErrors((p) => { const n = { ...p }; delete n.vehicle; return n; });
               } else {
                 setL("vehicle", opt.value);
@@ -2311,7 +2254,6 @@ export default function CreateGatePassPage() {
                   chassisNo:    opt.chassisNo    ?? "",
                   model:        opt.model        ?? "",
                   make:         opt.make         ?? "",
-                  colourFamily: opt.colourFamily ?? "",
                   colour:       opt.colour       ?? "",
                   internalNo:   opt.internalNo   ?? "",
                   matnr:        (opt as any).matnr ?? "",
@@ -2678,7 +2620,7 @@ export default function CreateGatePassPage() {
                           placeholder="Search by vehicle no or chassis no"
                           error={errors.vehicle}
                           options={lookupOptions.vehicle}
-                          onSelect={(o) => { setS("vehicle", o.value); setSrVehicleHasSearched(true); setSelectedSrVehicleDetail({ vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" }); }}
+                          onSelect={(o) => { setS("vehicle", o.value); setSrVehicleHasSearched(true); setSelectedSrVehicleDetail({ vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colour: o.colour ?? "" }); }}
                           renderOption={(o) => (
                             <div className="flex items-center gap-3 w-full py-0.5">
                               <div className="flex-1 min-w-0">
@@ -2700,7 +2642,7 @@ export default function CreateGatePassPage() {
                       {selectedSrVehicleDetail && (
                         <div className="mt-2 rounded-xl border grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-2 px-4 py-3"
                           style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
-                          {[["Chassis", selectedSrVehicleDetail.chassisNo], ["Make", selectedSrVehicleDetail.make], ["Model", selectedSrVehicleDetail.model], ["Colour", selectedSrVehicleDetail.colour || selectedSrVehicleDetail.colourFamily]].map(([lbl, val]) => (
+                          {[["Chassis", selectedSrVehicleDetail.chassisNo], ["Make", selectedSrVehicleDetail.make], ["Model", selectedSrVehicleDetail.model], ["Colour", selectedSrVehicleDetail.colour]].map(([lbl, val]) => (
                             <div key={lbl}>
                               <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>{lbl}</p>
                               <p className="text-sm font-medium" style={{ color: val ? "var(--text)" : "var(--text-muted)" }}>{val || "—"}</p>
@@ -3580,7 +3522,6 @@ export default function CreateGatePassPage() {
                             chassisNo: ltBulkVehicles[0].chassisNo,
                             model: ltBulkVehicles[0].model,
                             make: ltBulkVehicles[0].make,
-                            colourFamily: ltBulkVehicles[0].colourFamily,
                             colour: ltBulkVehicles[0].colour,
                             matnr: ltBulkVehicles[0].matnr,
                             currentLocation: ltBulkVehicles[0].currentLocation,
@@ -3620,7 +3561,6 @@ export default function CreateGatePassPage() {
                               chassisNo:    o.chassisNo    ?? "",
                               model:        o.model        ?? "",
                               make:         o.make         ?? "",
-                              colourFamily: o.colourFamily ?? "",
                               colour:       o.colour       ?? "",
                               matnr:        o.matnr        ?? "",
                             };
@@ -3644,7 +3584,6 @@ export default function CreateGatePassPage() {
                                   chassisNo: detail.chassisNo,
                                   model: detail.model,
                                   make: detail.make,
-                                  colourFamily: detail.colourFamily,
                                   colour: detail.colour,
                                   matnr: detail.matnr,
                                 });
@@ -3887,10 +3826,9 @@ export default function CreateGatePassPage() {
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
                         {[
                           { label: "Chassis No",    val: selectedVehicleDetail.chassisNo },
-                          { label: "Model",         val: selectedVehicleDetail.model },
-                          { label: "Make",          val: selectedVehicleDetail.make },
-                          { label: "Colour Family", val: selectedVehicleDetail.colourFamily },
-                          { label: "Colour",        val: selectedVehicleDetail.colour },
+                          { label: "Model",  val: selectedVehicleDetail.model },
+                          { label: "Make",   val: selectedVehicleDetail.make },
+                          { label: "Colour", val: selectedVehicleDetail.colour },
                         ].map(({ label, val }) => (
                           <div key={label}>
                             <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>{label}</p>
@@ -4256,7 +4194,7 @@ export default function CreateGatePassPage() {
                               minSearchLength={3}
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
-                                const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
+                                const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colour: o.colour ?? "" };
                                 const sapLocation = o.sapCurrentLocation || "";
                                 if (sapLocation) {
                                   setSelectedCdVehicleDetail({ ...detail, currentLocation: sapLocation });
@@ -4350,10 +4288,9 @@ export default function CreateGatePassPage() {
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
                             {[
                               { label: "Chassis No",    val: selectedCdVehicleDetail.chassisNo },
-                              { label: "Model",         val: selectedCdVehicleDetail.model },
-                              { label: "Make",          val: selectedCdVehicleDetail.make },
-                              { label: "Colour Family", val: selectedCdVehicleDetail.colourFamily },
-                              { label: "Colour",        val: selectedCdVehicleDetail.colour },
+                              { label: "Model",  val: selectedCdVehicleDetail.model },
+                              { label: "Make",   val: selectedCdVehicleDetail.make },
+                              { label: "Colour", val: selectedCdVehicleDetail.colour },
                             ].map(({ label, val }) => (
                               <div key={label}>
                                 <p className="text-xs font-semibold mb-0.5" style={{ color: "var(--text-muted)" }}>{label}</p>
