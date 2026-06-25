@@ -30,7 +30,7 @@ function Field({ children, label: lbl, required, error, className = "" }: {
   );
 }
 
-function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption, loading, onSearch }: {
+function SearchInput({ value, onChange, placeholder, error, onFocus, options, onSelect, renderOption, loading, onSearch, minSearchLength }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -41,21 +41,37 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
   renderOption?: (o: LookupOption) => React.ReactNode;
   loading?: boolean;
   onSearch?: (value: string) => void;
+  minSearchLength?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [recentlyTyped, setRecentlyTyped] = useState(false);
+  const [searchCompleted, setSearchCompleted] = useState(false);
+  const prevLoadingRef = useRef(false);
   const blurTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset "searching" indicator as soon as new options arrive
-  useEffect(() => { setRecentlyTyped(false); }, [options]);
+  // Clear "searching" indicator only when actual results arrive (not on empty response)
+  useEffect(() => { if (options && options.length > 0) setRecentlyTyped(false); }, [options]);
+
+  // Detect loading true→false transition to mark search as completed
+  useEffect(() => {
+    if (prevLoadingRef.current && !loading) {
+      setSearchCompleted(true);
+      setRecentlyTyped(false);
+    }
+    prevLoadingRef.current = loading ?? false;
+  }, [loading]);
+
+  const isTooShort = onSearch && minSearchLength != null && value.trim().length < minSearchLength && value.trim().length > 0;
 
   function triggerSearch() {
+    setOpen(true);
+    if (isTooShort || !value.trim()) return; // block blank / too-short — no SAP call
+    setSearchCompleted(false);
     setRecentlyTyped(true);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(() => setRecentlyTyped(false), 5000);
     onSearch?.(value);
-    setOpen(true);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -123,7 +139,11 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
       {open && (
         <div className="absolute z-50 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
           style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-          {(loading || recentlyTyped) ? (
+          {isTooShort ? (
+            <p className="px-3 py-2.5 text-sm" style={{ color: "var(--text-muted)" }}>
+              Type at least {minSearchLength} characters to search
+            </p>
+          ) : (loading || recentlyTyped) ? (
             <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -147,6 +167,19 @@ function SearchInput({ value, onChange, placeholder, error, onFocus, options, on
                 {renderOption ? renderOption(o) : o.label}
               </button>
             ))
+          ) : searchCompleted && onSearch ? (
+            <div className="px-3 py-2.5">
+              <p className="text-sm mb-1.5" style={{ color: "var(--text-muted)" }}>No matches found</p>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={triggerSearch}
+                className="text-xs px-2.5 py-1 rounded-lg border transition-colors hover:bg-blue-500/10"
+                style={{ color: "var(--accent)", borderColor: "var(--border)" }}
+              >
+                Search again
+              </button>
+            </div>
           ) : (
             <p className="px-3 py-2.5 text-sm" style={{ color: "var(--text-muted)" }}>
               {value ? "No matches found" : "Type to search…"}
@@ -3576,6 +3609,7 @@ export default function CreateGatePassPage() {
                             }
                           }}
                           onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
+                          minSearchLength={3}
                           placeholder="Search by vehicle no or chassis no"
                           error={errors.vehicle}
                           loading={vehicleLoading}
@@ -4219,6 +4253,7 @@ export default function CreateGatePassPage() {
                                 if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); }
                               }}
                               onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
+                              minSearchLength={3}
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
                                 const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colourFamily: o.colourFamily ?? "", colour: o.colour ?? "" };
