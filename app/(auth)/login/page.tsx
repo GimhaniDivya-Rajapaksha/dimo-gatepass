@@ -1,10 +1,9 @@
 "use client";
 
 import { Suspense, useState, useEffect } from "react";
-import { signIn, getSession } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
-import Link from "next/link";
 import { motion } from "framer-motion";
 
 const FLOATING_ICONS = [
@@ -22,14 +21,10 @@ const STAT_ICONS = [
   { label: "Users", icon: "👥" },
 ];
 
-function LoginForm() {
-  const router = useRouter();
+function MicrosoftLoginForm() {
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const authError = searchParams.get("error");
   const externalError =
@@ -47,41 +42,6 @@ function LoginForm() {
                 ? "Your account has been disabled. Please contact your administrator."
                 : "";
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const result = await signIn("credentials", { email, password, redirect: false });
-
-    if (result?.error) {
-      const msg = result.error.toLowerCase();
-      if (msg.includes("accountdisabled") || msg.includes("disabled")) {
-        setError("Your account has been disabled. Please contact your administrator.");
-      } else if (msg.includes("database") || msg.includes("unavailable") || msg.includes("pool") || msg.includes("maxclients")) {
-        setError("Database temporarily unavailable. Please wait a moment and try again.");
-      } else {
-        setError("Invalid email or password. Please try again.");
-      }
-      setLoading(false);
-      return;
-    }
-
-    const session = await getSession();
-    const role = session?.user?.role;
-
-    if (role === "ADMIN") router.push("/admin");
-    else if (role === "INITIATOR") router.push("/initiator");
-    else if (role === "APPROVER") router.push("/approver");
-    else if (role === "RECIPIENT") router.push("/recipient");
-    else if (role === "CASHIER") router.push("/cashier");
-    else if (role === "AREA_SALES_OFFICER") router.push("/aso");
-    else if (role === "SECURITY_OFFICER") router.push("/gate-pass/security-gate-out");
-    else if (role === "SERVICE_ADVISOR") router.push("/initiator");
-    else if (role === "DELIVERY_COORDINATOR") router.push("/delivery-coordinator");
-    else router.push("/");
-  }
-
   async function handleMicrosoftSignIn() {
     setLoading(true);
     setError("");
@@ -89,131 +49,64 @@ function LoginForm() {
   }
 
   return (
-    <>
-      <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.25, duration: 0.45 }}>
-        <h1 className="text-3xl font-bold mb-1" style={{ color: "var(--text)" }}>Welcome back</h1>
-        <p className="text-sm mb-8" style={{ color: "var(--text-muted)" }}>
-          Sign in to your DIMO Gate Pass account
-        </p>
+    <motion.div
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: 0.25, duration: 0.45 }}
+      className="flex flex-col items-center text-center"
+    >
+      <div className="mb-2 flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg" style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+        <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Email address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="you@dimo.lk"
-              className="w-full px-4 py-3 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-              suppressHydrationWarning
-            />
-          </div>
+      <h1 className="text-3xl font-bold mt-4 mb-2" style={{ color: "var(--text)" }}>Welcome back</h1>
+      <p className="text-sm mb-8 max-w-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
+        Please sign in using your DIMO Microsoft account to access the Gate Pass system.
+      </p>
 
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium" style={{ color: "var(--text)" }}>Password</label>
-              <Link href="/forgot-password" className="text-xs font-medium hover:underline" style={{ color: "var(--accent)" }}>
-                Forgot password?
-              </Link>
-            </div>
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="••••••••••"
-                className="w-full px-4 py-3 pr-12 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-                suppressHydrationWarning
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors"
-                style={{ color: "var(--text-muted)" }}
-                suppressHydrationWarning
-              >
-                {showPassword ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {(error || externalError) && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl"
-            >
-              {error || externalError}
-            </motion.div>
-          )}
-
-          <motion.button
-            type="submit"
-            disabled={loading}
-            whileHover={{ scale: loading ? 1 : 1.02 }}
-            whileTap={{ scale: loading ? 1 : 0.98 }}
-            className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg transition-opacity disabled:opacity-70"
-            style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
-            suppressHydrationWarning
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Signing in...
-              </span>
-            ) : "Sign In"}
-          </motion.button>
-        </form>
-
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
-          <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>or</span>
-          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
-        </div>
-
-        <motion.button
-          type="button"
-          onClick={handleMicrosoftSignIn}
-          disabled={loading}
-          whileHover={{ scale: loading ? 1 : 1.02 }}
-          whileTap={{ scale: loading ? 1 : 0.98 }}
-          className="w-full py-3 rounded-xl font-semibold text-sm border transition-all disabled:opacity-70 flex items-center justify-center gap-3"
-          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
-          suppressHydrationWarning
+      {(error || externalError) && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full text-sm text-red-600 bg-red-50 border border-red-200 px-4 py-3 rounded-xl mb-6 text-left"
         >
+          {error || externalError}
+        </motion.div>
+      )}
+
+      <motion.button
+        type="button"
+        onClick={handleMicrosoftSignIn}
+        disabled={loading}
+        whileHover={{ scale: loading ? 1 : 1.02 }}
+        whileTap={{ scale: loading ? 1 : 0.98 }}
+        className="w-full py-4 rounded-2xl font-semibold text-base border transition-all disabled:opacity-70 flex items-center justify-center gap-3 shadow-md"
+        style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+        suppressHydrationWarning
+      >
+        {loading ? (
+          <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+          </svg>
+        ) : (
           <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="#f25022" d="M1 1h10v10H1z" />
             <path fill="#00a4ef" d="M13 1h10v10H13z" />
             <path fill="#7fba00" d="M1 13h10v10H1z" />
             <path fill="#ffb900" d="M13 13h10v10H13z" />
           </svg>
-          Sign in with Microsoft
-        </motion.button>
+        )}
+        {loading ? "Signing in..." : "Sign in with Microsoft"}
+      </motion.button>
 
-        <p className="text-center text-sm mt-6" style={{ color: "var(--text-muted)" }}>
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="font-semibold hover:underline" style={{ color: "var(--accent)" }}>
-            Create account
-          </Link>
-        </p>
-      </motion.div>
-    </>
+      <p className="text-xs mt-8 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+        Use your <span className="font-semibold">@dimo.lk</span> Microsoft account.<br />
+        Contact your administrator if you need access.
+      </p>
+    </motion.div>
   );
 }
 
@@ -396,7 +289,7 @@ export default function LoginPage() {
           </div>
 
           <Suspense fallback={<div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading...</div>}>
-            <LoginForm />
+            <MicrosoftLoginForm />
           </Suspense>
         </div>
       </motion.div>
