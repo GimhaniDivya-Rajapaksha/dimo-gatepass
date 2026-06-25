@@ -290,12 +290,12 @@ function GatePassListPageInner() {
         if (!res.ok) return;
         const data = await res.json();
         const count = (data.notifications ?? []).filter(
-          (n: { type: string; read: boolean }) => n.type === "GATE_PASS_RECEIVED" && !n.read
+          (n: { type: string; read: boolean }) => !n.read
         ).length;
         if (count > lastNotifCount.current) { lastNotifCount.current = count; fetchPasses(); }
         else { lastNotifCount.current = count; }
       } catch { /* ignore */ }
-    }, 10_000);
+    }, 5_000);
     return () => clearInterval(poll);
   }, [fetchPasses]);
 
