@@ -163,8 +163,8 @@ export async function fetchSapVehicles(
   passType: "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both" = "both"
 ): Promise<SapVehicle[]> {
 
-  // Send chassis filter to SAP when query is >= 3 chars — reduces payload from
-  // hundreds of vehicles to a single match. Below 3 chars: no SAP filter (fetch all).
+  // Send chassis filter to SAP when query is >= 3 chars — reduces payload.
+  // substringof matches anywhere in the VIN (prefix, middle, suffix all work).
   const chassisQ = q.trim().length >= 3 ? q.trim().replace(/'/g, "''") : null;
 
   const fetchIN = () =>
