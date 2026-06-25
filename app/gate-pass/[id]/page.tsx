@@ -903,8 +903,8 @@ function InitiatorGatePassDetailPageInner() {
               { l: "Created At", v: new Date(data.createdAt).toLocaleDateString() },
               { l: "Departure Date", v: data.departureDate || "—" },
               { l: "Departure Time", v: data.departureTime || "—" },
-              { l: `${approvalActorLabel} By`, v: data.approvedBy?.name || "—" },
-              { l: `${approvalActorLabel} At`, v: data.approvedAt ? new Date(data.approvedAt).toLocaleDateString() : "—" },
+              { l: isCashierCompletedFlow ? "Cleared By" : "Approved By", v: data.approvedBy?.name || "—" },
+              { l: isCashierCompletedFlow ? "Cleared At" : "Approved At", v: data.approvedAt ? new Date(data.approvedAt).toLocaleDateString() : "—" },
             ].map(({ l, v }) => (
               <div key={l} className="rounded p-2" style={{ background: "#f3f4f6", border: "1px solid #e5e7eb" }}>
                 <p style={{ color: "#6b7280", fontSize: "8pt", marginBottom: "2px" }}>{l}</p>
@@ -931,7 +931,7 @@ function InitiatorGatePassDetailPageInner() {
           </button>
           <div className="flex-1">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate - Out Pass {data.parentPass?.gatePassNumber ?? data.gatePassNumber}</h1>
+              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate Pass {data.parentPass?.gatePassNumber ?? data.gatePassNumber}</h1>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.dot }} />
                 {sc.label}
