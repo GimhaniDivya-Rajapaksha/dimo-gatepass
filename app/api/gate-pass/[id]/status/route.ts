@@ -729,16 +729,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let liveLocationUpdateError: string | null = null;
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
-      const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
+      const toPlant = toLoc ? toLoc.split(" - ")[0].trim() : null;
+      const toCode  = toLoc ? toLoc.split(" - ").slice(1).join(" - ").trim() : null;
+      // OR: match by plant-prefix (primary) or storage-code contains (fallback for format variations)
+      const destLocationWhere = toPlant && toCode
+        ? { OR: [{ defaultLocation: { startsWith: toPlant, mode: "insensitive" as const } }, { defaultLocation: { contains: toCode, mode: "insensitive" as const } }] }
+        : toPlant ? { defaultLocation: { startsWith: toPlant, mode: "insensitive" as const } }
+        : toCode  ? { defaultLocation: { contains: toCode,  mode: "insensitive" as const } }
+        : {};
 
       const [destSecurity, destInitiators, asoUsers] = await Promise.all([
-        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...asoPlantFilter } }),
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destLocationWhere } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...destLocationWhere } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...destLocationWhere } }),
       ]);
 
-      const allDestUsers = [...destSecurity, ...destInitiators, ...asoUsers];
+      const allDestUsers = [...new Map([...destSecurity, ...destInitiators, ...asoUsers].map(u => [u.id, u])).values()];
       if (allDestUsers.length > 0) {
         await prisma.notification.createMany({
           data: allDestUsers.map((u) => {
@@ -961,13 +967,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let printLiveUpdateError: string | null = null;
     if (gatePass.passType === "LOCATION_TRANSFER") {
       const toLoc = gatePass.toLocation as string | null;
-      const locationFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
+      const toPlant2 = toLoc ? toLoc.split(" - ")[0].trim() : null;
+      const toCode2  = toLoc ? toLoc.split(" - ").slice(1).join(" - ").trim() : null;
+      const destLocationWhere2 = toPlant2 && toCode2
+        ? { OR: [{ defaultLocation: { startsWith: toPlant2, mode: "insensitive" as const } }, { defaultLocation: { contains: toCode2, mode: "insensitive" as const } }] }
+        : toPlant2 ? { defaultLocation: { startsWith: toPlant2, mode: "insensitive" as const } }
+        : toCode2  ? { defaultLocation: { contains: toCode2,  mode: "insensitive" as const } }
+        : {};
       const [destSecurity, destInitiators, destAsos] = await Promise.all([
-        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...locationFilter } }),
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destLocationWhere2 } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...destLocationWhere2 } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...destLocationWhere2 } }),
       ]);
-      const allDestUsers = [...destSecurity, ...destInitiators, ...destAsos];
+      const allDestUsers = [...new Map([...destSecurity, ...destInitiators, ...destAsos].map(u => [u.id, u])).values()];
       if (allDestUsers.length > 0) {
         const destSOIds  = new Set(destSecurity.map((s: { id: string }) => s.id));
         const destAsoIds = new Set(destAsos.map((a: { id: string }) => a.id));

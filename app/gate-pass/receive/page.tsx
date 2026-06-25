@@ -87,13 +87,10 @@ export default function ReceivePage() {
     try {
       // locationView=true bypasses the INITIATOR "own passes only" filter so destination
       // initiators can see incoming passes they did not create.
-      // Use server-side toLocationCode (CONTAINS) — same approach as security gate page —
-      // so SAP description typos ("Mercedeze" vs "Mercedes") never break the match.
-      const myCode  = myLocation ? myLocation.split(" - ").slice(1).join(" - ").trim() : null;
+      // Use plant-level (toLocationPlant startsWith) so ALL users at the same plant see
+      // arrivals regardless of which storage location they are assigned to.
       const myPlant = myLocation ? myLocation.split(" - ")[0].trim() : null;
-      const toLocQ  = myCode  ? `&toLocationCode=${encodeURIComponent(myCode)}`
-                    : myPlant ? `&toLocationPlant=${encodeURIComponent(myPlant)}`
-                    : "";
+      const toLocQ  = myPlant ? `&toLocationPlant=${encodeURIComponent(myPlant)}` : "";
 
       const ltParams      = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT",  limit: "100", locationView: "true" });
       const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT",  limit: "50",  locationView: "true" });
@@ -110,19 +107,12 @@ export default function ReceivePage() {
       const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}${toLocQ}`);
       const asCompData    = asCompRes.ok ? await asCompRes.json() : { passes: [] };
 
-      // Keep client-side match as secondary check (handles edge cases where myLocation is null)
-      const myCodeLower = myCode?.toLowerCase() ?? null;
+      // Client-side secondary check: plant-level prefix match (consistent with server filter)
       const myPlantLower = myPlant?.toLowerCase() ?? null;
       const locationMatch = (p: GatePass) => {
         if (!myLocation) return true;
         const toLoc = (p.toLocation ?? "").toLowerCase().trim();
         if (!toLoc) return true;
-        // Primary: match on plant code (e.g. "DIMO 800") — immune to description typos
-        if (myCodeLower) {
-          const passCode = toLoc.split(" - ").slice(1).join(" - ").trim();
-          if (passCode === myCodeLower) return true;
-        }
-        // Fallback: plant description prefix
         if (myPlantLower && toLoc.startsWith(myPlantLower)) return true;
         return false;
       };
