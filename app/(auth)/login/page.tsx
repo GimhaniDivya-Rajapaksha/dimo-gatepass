@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -16,10 +16,10 @@ const FLOATING_ICONS = [
   { icon: "🔑", x: 35, y: 10, delay: 1.2, size: 20 },
 ];
 
-const STATS = [
-  { label: "Gate Passes", value: "2,400+", icon: "📋" },
-  { label: "Vehicles Tracked", value: "850+", icon: "🚗" },
-  { label: "Users", value: "120+", icon: "👥" },
+const STAT_ICONS = [
+  { label: "Gate Passes", icon: "📋" },
+  { label: "Vehicles Tracked", icon: "🚗" },
+  { label: "Users", icon: "👥" },
 ];
 
 function LoginForm() {
@@ -218,6 +218,27 @@ function LoginForm() {
 }
 
 export default function LoginPage() {
+  const [stats, setStats] = useState([
+    { label: "Gate Passes", value: "...", icon: "📋" },
+    { label: "Vehicles Tracked", value: "...", icon: "🚗" },
+    { label: "Users", value: "...", icon: "👥" },
+  ]);
+
+  useEffect(() => {
+    fetch("/api/public-stats")
+      .then((r) => r.json())
+      .then((d) => {
+        setStats([
+          { label: "Gate Passes", value: d.gatePasses.toLocaleString(), icon: "📋" },
+          { label: "Vehicles Tracked", value: d.vehiclesTracked.toLocaleString(), icon: "🚗" },
+          { label: "Users", value: d.users.toLocaleString(), icon: "👥" },
+        ]);
+      })
+      .catch(() => {
+        setStats(STAT_ICONS.map((s) => ({ ...s, value: "—" })));
+      });
+  }, []);
+
   return (
     <div className="min-h-screen flex" style={{ background: "var(--bg)" }}>
       <motion.div
@@ -326,7 +347,7 @@ export default function LoginPage() {
           </motion.p>
 
           <div className="flex flex-col gap-3 w-full max-w-xs">
-            {STATS.map((s, i) => (
+            {stats.map((s, i) => (
               <motion.div
                 key={s.label}
                 initial={{ x: -20, opacity: 0 }}
