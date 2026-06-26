@@ -261,9 +261,9 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
         <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:4px;word-break:break-word">${title}</div>
         <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
       </td>
-      <td width="100" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:100px">
+      <td width="120" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:120px;white-space:nowrap">
         <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
-        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em;white-space:nowrap">${gpNumber}</div>
       </td>
     </tr>
   </table>
