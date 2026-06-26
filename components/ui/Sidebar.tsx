@@ -123,13 +123,13 @@ export default function Sidebar({ user, role }: SidebarProps) {
       const meRes = await fetch("/api/me").catch(() => null);
       const meData = meRes?.ok ? await meRes.json() : {};
       const userLocation: string | null = meData.user?.defaultLocation ?? null;
-      const myCode = userLocation ? userLocation.split(" - ").slice(1).join(" - ").trim() : null;
+      const myPlant = userLocation ? userLocation.split(" - ")[0].trim() : null;
 
       const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "1", locationView: "true" });
       const asParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "1", locationView: "true" });
-      if (myCode) {
-        ltParams.set("toLocationCode", myCode);
-        asParams.set("toLocationCode", myCode);
+      if (myPlant) {
+        ltParams.set("toLocationPlant", myPlant);
+        asParams.set("toLocationPlant", myPlant);
       }
       const ltRes = await fetch(`/api/gate-pass?${ltParams}`).catch(() => null);
       const ltData = ltRes?.ok ? await ltRes.json() : { total: 0 };
