@@ -235,7 +235,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .header-gp{border-left:none;border-top:1px solid rgba(255,255,255,0.12);align-items:flex-start}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
-  .btn-row{flex-direction:column;gap:24px}
+  .btn-row{flex-direction:column;gap:0}
   .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
@@ -427,7 +427,7 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
       <div class="btn-row">
-        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);margin-right:24px">
+        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);margin-right:24px;margin-bottom:24px">
           <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Approve Gate Pass
         </a>
