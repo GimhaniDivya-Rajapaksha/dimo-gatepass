@@ -203,7 +203,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .action-head{background:#000;padding:11px 18px;display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;color:#fff;letter-spacing:0.04em;text-transform:uppercase}
 .action-body{background:#f4f6fb;padding:16px 18px 18px}
 .action-desc{font-size:13px;font-weight:300;color:#555;line-height:1.6;margin-bottom:16px}
-.btn-row{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;align-items:center}
+.btn-row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;align-items:center}
 .btn-ok{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)}
 .btn-no{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
@@ -235,32 +235,59 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .header-gp{border-left:none;border-top:1px solid rgba(255,255,255,0.12);align-items:flex-start}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
-  .btn-row{flex-direction:column}
+  .btn-row{flex-direction:column;gap:14px}
+  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
+  .desktop-hd{display:none !important}
+  .mobile-hd{display:block !important;max-height:none !important;overflow:visible !important}
+  .vtable-wrap{overflow-x:auto}
+  table.vt{font-size:11px}
+  table.vt thead th{font-size:8.5px;padding:8px 9px}
+  table.vt td{padding:9px}
 }`;
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
   return `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
+  <!-- Desktop: 3-column single row (hidden on mobile via media query) -->
+  <table width="100%" class="desktop-hd" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
     <tr>
-      <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
-        <img src="cid:logo@dimo" alt="DIMO" style="width:72px;height:auto;display:block">
+      <td width="80" style="padding:18px 14px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:80px">
+        <img src="cid:logo@dimo" alt="DIMO" style="width:72px;height:auto;display:block;margin:0 auto">
       </td>
-      <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
-        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Gate Pass No.</div>
-        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
-      </td>
-    </tr>
-    <tr>
-      <td colspan="2" style="padding:16px 20px;vertical-align:middle">
+      <td style="padding:18px 16px;vertical-align:middle">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
         <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:4px;word-break:break-word">${title}</div>
         <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
       </td>
+      <td width="100" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:100px">
+        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+      </td>
     </tr>
   </table>
+  <!-- Mobile: 2-row layout (hidden by default, shown on mobile via media query) -->
+  <div class="mobile-hd" style="display:none;max-height:0;overflow:hidden;background:#1E4FA0">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
+      <tr>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
+          <img src="cid:logo@dimo" alt="DIMO" style="width:64px;height:auto;display:block">
+        </td>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
+          <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Gate Pass No.</div>
+          <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:14px 16px;vertical-align:middle">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:5px">Diesel &amp; Motor Engineering Plc.</div>
+          <div style="font-size:19px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:3px;word-break:break-word">${title}</div>
+          <div style="font-size:11px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
   <div style="height:4px;background:#8DC63F"></div>`;
 }
 
