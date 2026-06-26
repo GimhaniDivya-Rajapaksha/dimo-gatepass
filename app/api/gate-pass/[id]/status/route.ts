@@ -769,6 +769,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         });
       }
 
+      // Send Confirm Arrival email to TO-plant ASOs (LT only)
+      if (gatePass.passType === "LOCATION_TRANSFER" && asoUsers.length > 0) {
+        const { sendAsoConfirmArrivalEmail } = await import("@/lib/email");
+        for (const aso of asoUsers as { id: string; email: string | null; name: string | null }[]) {
+          if (aso.email) {
+            sendAsoConfirmArrivalEmail(aso.email, aso.name ?? "ASO", id, aso.id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation,
+              toLocation: toLoc,
+            }).catch((e: unknown) => console.error("[email] ASO confirm-arrival email (security_gate_out) failed:", e));
+          }
+        }
+      }
+
       // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)
       if (!gatePass.asoCreated && gatePass.fromLocation) {
         const fromAsoFilter = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
@@ -1000,6 +1016,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             gatePassId: gatePass.id,
           })),
         });
+      }
+
+      // Send Confirm Arrival email to TO-plant ASOs (LT only)
+      if (gatePass.passType === "LOCATION_TRANSFER" && destAsos.length > 0) {
+        const { sendAsoConfirmArrivalEmail } = await import("@/lib/email");
+        for (const aso of destAsos as { id: string; email: string | null; name: string | null }[]) {
+          if (aso.email) {
+            sendAsoConfirmArrivalEmail(aso.email, aso.name ?? "ASO", id, aso.id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation,
+              toLocation: toLoc,
+            }).catch((e: unknown) => console.error("[email] ASO confirm-arrival email (print_gate_out) failed:", e));
+          }
+        }
       }
 
       // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)

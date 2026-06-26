@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyApprovalToken, sendApprovalNotificationEmail, sendEscalationApprovedEmail, sendEscalationRejectedEmail } from "@/lib/email";
+import { verifyApprovalToken, sendApprovalNotificationEmail, sendEscalationApprovedEmail, sendEscalationRejectedEmail, sendAsoArrivalEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
 
 async function findTokenApprover(approverId?: string | null) {
@@ -170,6 +170,75 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // action === "escalation_reject": show reject form
     return new NextResponse(escalationRejectFormPage(id, token, gatePass.gatePassNumber, gatePass.vehicle ?? ""), { headers: { "Content-Type": "text/html" } });
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── ASO: Confirm Arrival via email link ──────────────────────────────────────
+  if (action === "confirm_arrival") {
+    if (gatePass.status !== "GATE_OUT") {
+      return new NextResponse(alreadyConfirmedArrivalPage(gatePass.gatePassNumber), { headers: { "Content-Type": "text/html" } });
+    }
+
+    // Look up the ASO who clicked (token carries asoId as approverId)
+    let confirmedByName = "Area Sales Officer";
+    if (verified.approverId) {
+      const asoUser = await prisma.user.findFirst({
+        where: { id: verified.approverId, role: "AREA_SALES_OFFICER" as any },
+        select: { name: true },
+      });
+      if (asoUser?.name) confirmedByName = asoUser.name;
+    }
+
+    await prisma.gatePass.update({
+      where: { id },
+      data: { status: "COMPLETED", gateInBy: confirmedByName },
+    });
+
+    // Notify pass creator
+    await prisma.notification.create({
+      data: {
+        userId: gatePass.createdById,
+        type: "GATE_PASS_RECEIVED",
+        title: "Vehicle Received",
+        message: `Gate pass ${gatePass.gatePassNumber} confirmed received by ${confirmedByName} (Area Sales Officer).`,
+        gatePassId: gatePass.id,
+      },
+    });
+
+    // For LT passes: notify FROM-plant ASOs (bell + sendAsoArrivalEmail)
+    if (gatePass.passType === "LOCATION_TRANSFER" && gatePass.fromLocation) {
+      const fromPlant = (gatePass.fromLocation as string).split(" - ")[0].trim();
+      const fromAsos = await prisma.user.findMany({
+        where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: { startsWith: fromPlant, mode: "insensitive" as const } },
+        select: { id: true, email: true, name: true },
+      });
+      if (fromAsos.length > 0) {
+        await prisma.notification.createMany({
+          data: fromAsos.map((aso: { id: string }) => ({
+            userId: aso.id,
+            type: "GATE_PASS_RECEIVED",
+            title: "Vehicle Arrived at Destination",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle ?? ""}) — ${confirmedByName} (Area Sales Officer) at ${gatePass.toLocation ?? "destination"} confirmed arrival. Vehicle transferred from ${gatePass.fromLocation} to ${gatePass.toLocation ?? "destination"}.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+        for (const aso of fromAsos) {
+          if (aso.email) {
+            sendAsoArrivalEmail(aso.email, aso.name ?? "ASO", id, {
+              gatePassNumber: gatePass.gatePassNumber,
+              vehicle: gatePass.vehicle ?? "",
+              chassis: gatePass.chassis,
+              fromLocation: gatePass.fromLocation as string,
+              toLocation: gatePass.toLocation as string | null,
+              confirmedByName,
+              confirmedByRole: "Area Sales Officer",
+            }).catch((e: unknown) => console.error("[email] ASO arrival notification (email confirm_arrival) failed:", e));
+          }
+        }
+      }
+    }
+
+    return new NextResponse(confirmedArrivalPage(gatePass.gatePassNumber), { headers: { "Content-Type": "text/html" } });
   }
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -537,5 +606,29 @@ function escalationRejectedPage(gpNumber: string, comment: string) {
     ${comment ? `<p style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;color:#991b1b;margin-top:12px;font-size:13px"><strong>Reason:</strong> ${comment}</p>` : ""}
     <p style="margin-top:14px">The Cashier has been notified and must resolve the outstanding orders.</p>
     <a href="${BASE}/gate-pass/approve" class="btn btn-blue" style="margin-top:20px">Back to Dashboard</a>
+  `);
+}
+
+function confirmedArrivalPage(gpNumber: string) {
+  return shell("Arrival Confirmed", `
+    <div class="icon" style="background:linear-gradient(135deg,#15803d,#22c55e)">
+      <svg width="34" height="34" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+    </div>
+    <h1>Arrival Confirmed!</h1>
+    <div class="gp">${gpNumber}</div>
+    <p>You have confirmed the vehicle has arrived at your plant.<br>The source location has been notified of the successful transfer.</p>
+    <a href="${BASE}" class="btn btn-blue">Back to Dashboard</a>
+  `);
+}
+
+function alreadyConfirmedArrivalPage(gpNumber: string) {
+  return shell("Already Confirmed", `
+    <div class="icon" style="background:#f3f4f6">
+      <svg width="34" height="34" fill="none" stroke="#9ca3af" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    </div>
+    <h1>Already Confirmed</h1>
+    <div class="gp">${gpNumber}</div>
+    <p>The arrival for this gate pass has already been confirmed by someone.<br>No further action is needed.</p>
+    <a href="${BASE}" class="btn btn-blue">Open App</a>
   `);
 }
