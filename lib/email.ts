@@ -238,27 +238,26 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .btn-row{flex-direction:column}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
-  .email-hd .hd-logo{display:block !important;width:50% !important;float:left !important;border-right:none !important;border-bottom:1px solid rgba(255,255,255,0.12) !important;box-sizing:border-box !important}
-  .email-hd .hd-gp{display:block !important;width:50% !important;float:right !important;border-left:none !important;border-bottom:1px solid rgba(255,255,255,0.12) !important;box-sizing:border-box !important}
-  .email-hd .hd-mid{display:block !important;width:100% !important;clear:both !important}
 }`;
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
   return `
-  <table width="100%" cellpadding="0" cellspacing="0" class="email-hd" style="background:#1E4FA0;border-collapse:collapse">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
     <tr>
-      <td width="80" class="hd-logo" style="padding:18px 14px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:80px">
-        <img src="cid:logo@dimo" alt="DIMO" style="width:72px;height:auto;display:block;margin:0 auto">
+      <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
+        <img src="cid:logo@dimo" alt="DIMO" style="width:72px;height:auto;display:block">
       </td>
-      <td class="hd-mid" style="padding:18px 16px;vertical-align:middle">
+      <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
+        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Gate Pass No.</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" style="padding:16px 20px;vertical-align:middle">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
         <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:4px;word-break:break-word">${title}</div>
         <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
-      </td>
-      <td width="100" class="hd-gp" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:100px">
-        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
-        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
       </td>
     </tr>
   </table>
