@@ -366,7 +366,7 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
     ${secLabel("Departure Schedule")}
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d0d8e8;border-radius:4px;border-collapse:collapse;overflow:hidden">
       <tr>
-        <td width="50%" style="background:#fff;padding:13px 15px;border-right:1px solid #d0d8e8;vertical-align:middle">
+        <td style="background:#fff;padding:13px 15px;vertical-align:middle">
           <table cellpadding="0" cellspacing="0">
             <tr>
               <td width="47" style="vertical-align:middle;padding-right:13px">
@@ -378,22 +378,6 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
                 <div style="font-size:8.5px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:4px">Estimated Departure</div>
                 <div style="font-size:13px;font-weight:700;color:#111">${pass.departureDate}</div>
                 ${pass.departureTime ? `<div style="font-size:12.5px;font-weight:500;color:#1E4FA0;margin-top:2px;letter-spacing:0.04em">${pass.departureTime}</div>` : ""}
-              </td>
-            </tr>
-          </table>
-        </td>
-        <td width="50%" style="background:#fff;padding:13px 15px;vertical-align:middle">
-          <table cellpadding="0" cellspacing="0">
-            <tr>
-              <td width="47" style="vertical-align:middle;padding-right:13px">
-                <table cellpadding="0" cellspacing="0"><tr>
-                  <td width="34" height="34" align="center" valign="middle" style="width:34px;height:34px;background:#dbeafe;border-radius:17px;text-align:center;vertical-align:middle;font-size:18px;line-height:34px">&#128663;</td>
-                </tr></table>
-              </td>
-              <td style="vertical-align:middle">
-                <div style="font-size:8.5px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:4px">Vehicle</div>
-                <div style="font-size:13px;font-weight:700;color:#111">${pass.vehicle}</div>
-                ${pass.chassis ? `<div style="font-size:12.5px;font-weight:500;color:#1E4FA0;margin-top:2px;letter-spacing:0.04em">${pass.chassis}</div>` : ""}
               </td>
             </tr>
           </table>
@@ -502,13 +486,15 @@ export async function sendRequestedByNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Information", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M7.5 5v4M7.5 10.5h.01" stroke="#496d10" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Gate pass created and sent for approval.
-  <span>No action is required from you at this stage.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M7.5 5v4M7.5 10.5h.01" stroke="#496d10" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Gate pass created and sent for approval.
+  </div>
+  <div style="font-weight:400;color:#5e6b46;padding-left:24px">No action is required from you at this stage.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -622,13 +608,15 @@ export async function sendRejectionNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  This gate pass has been rejected by ${pass.approverName}.
-  <span>Please review the reason below and resubmit if required.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This gate pass has been rejected by ${pass.approverName}.
+  </div>
+  <div style="font-weight:300;padding-left:24px">Please review the reason below and resubmit if required.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -715,13 +703,15 @@ export async function sendApprovalNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  This gate pass has been approved by ${pass.approverName}.
-  <span>The vehicle is cleared for movement.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    This gate pass has been approved by ${pass.approverName}.
+  </div>
+  <div style="font-weight:400;color:#5e6b46;padding-left:24px">The vehicle is cleared for movement.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -809,13 +799,15 @@ export async function sendAsoTransferOutEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer Notification", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  A vehicle has been transferred out of your location by an Initiator.
-  <span>Please review the transfer details below.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A vehicle has been transferred out of your location by an Initiator.
+  </div>
+  <div style="font-weight:300;padding-left:24px">Please review the transfer details below.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -902,13 +894,15 @@ export async function sendEscalationRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier Escalation", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Your sign-off is required before this vehicle can be released.
-  <span>The Cashier has escalated an unpaid order to you.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Your sign-off is required before this vehicle can be released.
+  </div>
+  <div style="font-weight:300;padding-left:24px">The Cashier has escalated an unpaid order to you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1147,13 +1141,15 @@ export async function sendEscalationApprovedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Approver Signed Off", "Customer Delivery &middot; Generate Invoice Now", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  ${pass.approverName} approved the remaining orders. Please generate the invoice.
-  <span>Action required from you.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    ${pass.approverName} approved the remaining orders. Please generate the invoice.
+  </div>
+  <div style="font-weight:400;color:#5e6b46;padding-left:24px">Action required from you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1229,13 +1225,15 @@ export async function sendEscalationRejectedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  ${pass.approverName} rejected the sign-off request.
-  <span>Please resolve the pending orders and re-escalate if needed.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    ${pass.approverName} rejected the sign-off request.
+  </div>
+  <div style="font-weight:300;padding-left:24px">Please resolve the pending orders and re-escalate if needed.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1313,13 +1311,15 @@ export async function sendAsoArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arrival Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
-    <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  The vehicle you transferred out has arrived safely at its destination.
-  <span>Transfer complete.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    The vehicle you transferred out has arrived safely at its destination.
+  </div>
+  <div style="font-weight:300;padding-left:24px;color:#065f46">Transfer complete.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1400,13 +1400,15 @@ export async function sendAsoConfirmArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot; Arrival Confirmation Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  A vehicle is on its way to your plant and requires arrival confirmation.
-  <span>Please confirm once the vehicle has arrived.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A vehicle is on its way to your plant and requires arrival confirmation.
+  </div>
+  <div style="font-weight:300;padding-left:24px">Please confirm once the vehicle has arrived.</div>
 </div>
 <div class="body">
   <div class="greeting">
