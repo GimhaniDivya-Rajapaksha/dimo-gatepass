@@ -235,7 +235,8 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .header-gp{border-left:none;border-top:1px solid rgba(255,255,255,0.12);align-items:flex-start}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
-  .btn-row{gap:12px;flex-wrap:nowrap}
+  .btn-row{flex-direction:column;gap:14px}
+  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
   .desktop-hd{display:none !important}
@@ -335,7 +336,7 @@ export async function sendApprovalRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -343,7 +344,7 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
     </svg>
     Your approval is required for this gate pass.
   </div>
-  <div style="font-weight:300;padding-left:24px">Review all details carefully before taking action.</div>
+  <div style="font-weight:300">Review all details carefully before taking action.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -486,7 +487,7 @@ export async function sendRequestedByNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Information", pass.gatePassNumber)}
-<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:700">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
@@ -494,7 +495,7 @@ ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Informat
     </svg>
     Gate pass created and sent for approval.
   </div>
-  <div style="font-weight:400;color:#5e6b46;padding-left:24px">No action is required from you at this stage.</div>
+  <div style="font-weight:400;color:#5e6b46">No action is required from you at this stage.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -608,7 +609,7 @@ export async function sendRejectionNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -616,7 +617,7 @@ ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", 
     </svg>
     This gate pass has been rejected by ${pass.approverName}.
   </div>
-  <div style="font-weight:300;padding-left:24px">Please review the reason below and resubmit if required.</div>
+  <div style="font-weight:300">Please review the reason below and resubmit if required.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -703,7 +704,7 @@ export async function sendApprovalNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:700">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
@@ -711,7 +712,7 @@ ${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", 
     </svg>
     This gate pass has been approved by ${pass.approverName}.
   </div>
-  <div style="font-weight:400;color:#5e6b46;padding-left:24px">The vehicle is cleared for movement.</div>
+  <div style="font-weight:400;color:#5e6b46">The vehicle is cleared for movement.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -799,7 +800,7 @@ export async function sendAsoTransferOutEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -807,7 +808,7 @@ ${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer No
     </svg>
     A vehicle has been transferred out of your location by an Initiator.
   </div>
-  <div style="font-weight:300;padding-left:24px">Please review the transfer details below.</div>
+  <div style="font-weight:300">Please review the transfer details below.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -894,7 +895,7 @@ export async function sendEscalationRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier Escalation", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -902,7 +903,7 @@ ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier E
     </svg>
     Your sign-off is required before this vehicle can be released.
   </div>
-  <div style="font-weight:300;padding-left:24px">The Cashier has escalated an unpaid order to you.</div>
+  <div style="font-weight:300">The Cashier has escalated an unpaid order to you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1141,7 +1142,7 @@ export async function sendEscalationApprovedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Approver Signed Off", "Customer Delivery &middot; Generate Invoice Now", pass.gatePassNumber)}
-<div class="notice-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:700">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
@@ -1149,7 +1150,7 @@ ${emailHeader("Approver Signed Off", "Customer Delivery &middot; Generate Invoic
     </svg>
     ${pass.approverName} approved the remaining orders. Please generate the invoice.
   </div>
-  <div style="font-weight:400;color:#5e6b46;padding-left:24px">Action required from you.</div>
+  <div style="font-weight:400;color:#5e6b46">Action required from you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1225,7 +1226,7 @@ export async function sendEscalationRejectedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -1233,7 +1234,7 @@ ${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required",
     </svg>
     ${pass.approverName} rejected the sign-off request.
   </div>
-  <div style="font-weight:300;padding-left:24px">Please resolve the pending orders and re-escalate if needed.</div>
+  <div style="font-weight:300">Please resolve the pending orders and re-escalate if needed.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1311,7 +1312,7 @@ export async function sendAsoArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arrival Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
@@ -1319,7 +1320,7 @@ ${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arri
     </svg>
     The vehicle you transferred out has arrived safely at its destination.
   </div>
-  <div style="font-weight:300;padding-left:24px;color:#065f46">Transfer complete.</div>
+  <div style="font-weight:300;color:#065f46">Transfer complete.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1400,7 +1401,7 @@ export async function sendAsoConfirmArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot; Arrival Confirmation Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -1408,7 +1409,7 @@ ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot
     </svg>
     A vehicle is on its way to your plant and requires arrival confirmation.
   </div>
-  <div style="font-weight:300;padding-left:24px">Please confirm once the vehicle has arrived.</div>
+  <div style="font-weight:300">Please confirm once the vehicle has arrived.</div>
 </div>
 <div class="body">
   <div class="greeting">
