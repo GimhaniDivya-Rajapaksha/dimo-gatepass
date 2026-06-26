@@ -235,8 +235,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .header-gp{border-left:none;border-top:1px solid rgba(255,255,255,0.12);align-items:flex-start}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
-  .btn-row{flex-direction:column;gap:14px}
-  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
+  .btn-row{gap:12px;flex-wrap:nowrap}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
   .desktop-hd{display:none !important}
@@ -295,7 +294,6 @@ function emailFooter(gpNumber: string): string {
   return `
   <div class="footer">
     <div class="ft-left">
-      <strong>Diesel &amp; Motor Engineering Plc.</strong> &mdash; Fleet Operations System<br>
       Automated notification. Do not reply to this email directly.
     </div>
     <div class="ft-ref">REF: ${gpNumber}</div>
@@ -337,18 +335,20 @@ export async function sendApprovalRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Your approval is required for this gate pass.
-  <span>Review all details carefully before taking action.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Your approval is required for this gate pass.
+  </div>
+  <div style="font-weight:300;padding-left:24px">Review all details carefully before taking action.</div>
 </div>
 <div class="body">
   <div class="greeting">
     Dear <strong>${approverName}</strong>,<br>
-    A vehicle gate pass has been submitted and requires your authorisation before departure. Please review the information below in full before making your decision.
+    A vehicle gate pass has been submitted and requires your authorisation before departure.
   </div>
   <div class="sec">
     ${secLabel("Pass Information")}
@@ -442,7 +442,7 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
       <div class="btn-row">
-        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
+        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);margin-right:24px">
           <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Approve Gate Pass
         </a>
