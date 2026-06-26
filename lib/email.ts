@@ -95,7 +95,7 @@ async function sendGraphMail(to: string, subject: string, html: string) {
   }
 }
 
-export function createApprovalToken(passId: string, action: "approve" | "reject" | "escalation_approve" | "escalation_reject", approverId?: string): string {
+export function createApprovalToken(passId: string, action: "approve" | "reject" | "escalation_approve" | "escalation_reject" | "confirm_arrival", approverId?: string): string {
   const expiry = Date.now() + 48 * 60 * 60 * 1000;
   const secret = process.env.NEXTAUTH_SECRET!;
   const payload = `${passId}:${action}:${expiry}:${approverId ?? ""}`;
@@ -570,7 +570,7 @@ ${emailFooter(pass.gatePassNumber)}
 
   await sendGraphMail(
     requestedByEmail,
-    `Gate Pass ${pass.gatePassNumber} — You are listed as Requested By`,
+    `Gate Pass ${pass.gatePassNumber} You are listed as Requested By`,
     html
   );
 }
@@ -1345,6 +1345,120 @@ ${emailFooter(pass.gatePassNumber)}
   await sendGraphMail(
     asoEmail,
     `Vehicle Arrived at Destination — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendAsoConfirmArrivalEmail(
+  asoEmail: string,
+  asoName: string,
+  passId: string,
+  asoId: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    chassis?: string | null;
+    fromLocation?: string | null;
+    toLocation?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const confirmToken = createApprovalToken(passId, "confirm_arrival", asoId);
+  const confirmUrl  = `${baseUrl}/api/gate-pass/${passId}/email-action?token=${confirmToken}&action=confirm_arrival`;
+  const viewUrl     = `${baseUrl}/gate-pass/${passId}`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle Incoming &mdash; Confirm Arrival &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot; Arrival Confirmation Required", pass.gatePassNumber)}
+<div class="alert-bar">
+  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+  </svg>
+  A vehicle is on its way to your plant and requires arrival confirmation.
+  <span>Please confirm once the vehicle has arrived.</span>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${asoName}</strong>,<br>
+    A vehicle has been released and is en route to your plant. Please confirm the arrival once the vehicle has physically reached your location.
+  </div>
+  <div class="status-box">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#3b82f6;text-align:center;line-height:34px;color:#fff;font-size:18px;font-weight:800">&#8594;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#1d4ed8">Vehicle Released — Awaiting Your Confirmation</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">
+      Released on ${now}. Vehicle is heading to <strong>${pass.toLocation ?? "your plant"}</strong>.
+    </div>
+  </div>
+  <div class="sec">
+    ${secLabel("Transfer Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+    </div>
+  </div>
+  <hr class="div">
+  <div class="action-box">
+    <div class="action-head">
+      <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+        <circle cx="7.5" cy="7.5" r="6" stroke="white" stroke-width="1.3"/>
+        <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="white" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Action Required &mdash; Confirm Vehicle Arrival
+    </div>
+    <div class="action-body">
+      <div class="action-desc">
+        Click the button below once the vehicle has physically arrived at your plant. If another ASO has already confirmed, the link will be inactive.
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr>
+          <td align="center" style="padding:0">
+            <a href="${confirmUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 36px;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(21,128,61,0.40),0 1px 3px rgba(0,0,0,0.14)">
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Confirm Arrival
+            </a>
+          </td>
+        </tr>
+      </table>
+      <div class="expiry-note">
+        &#x26A0; This link expires in <strong>48 hours</strong>. If it has expired, please log in to the system to confirm arrival from your ASO dashboard.
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    asoEmail,
+    `[Action Required] Confirm Vehicle Arrival — ${pass.gatePassNumber}`,
     html
   );
 }
