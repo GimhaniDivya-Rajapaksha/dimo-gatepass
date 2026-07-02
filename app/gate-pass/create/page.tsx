@@ -2302,7 +2302,8 @@ export default function CreateGatePassPage() {
             </svg>
           )},
         ] as { type: PassType; label: string; icon: React.ReactNode; asoHidden?: boolean }[])
-        .filter(({ asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER"))
+        // Service/Repair temporarily hidden pending future development — code preserved, see backup/service-repair-original
+        .filter(({ type: t, asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER") && t !== "AFTER_SALES")
         .map(({ type: t, label, icon }) => (
           <motion.button
             key={t}
