@@ -236,7 +236,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
   .btn-row{flex-direction:column;gap:0}
-  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
+  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box;margin-right:0 !important}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
   .desktop-hd{display:none !important}
