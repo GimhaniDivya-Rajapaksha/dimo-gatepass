@@ -435,21 +435,41 @@ export async function GET(req: NextRequest) {
       // CD only: exclude vehicles that already have an active or completed CD gate pass.
       // REJECTED and CANCELLED are the only statuses where a new CD is allowed.
       // LT vehicles are unaffected — they stay visible until their CD is completed.
+      let alreadyDeliveredInfo: { gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null } | null = null;
       if (rawPassType === "CUSTOMER_DELIVERY") {
         const usedCdPasses = await prisma.gatePass.findMany({
           where: { passType: "CUSTOMER_DELIVERY", status: { notIn: ["REJECTED", "CANCELLED"] } },
-          select: { vehicle: true, chassis: true },
+          select: { vehicle: true, chassis: true, status: true, gatePassNumber: true, gateOutBy: true, departureDate: true, departureTime: true },
         });
         const usedPlates  = new Set(usedCdPasses.map(p => (p.vehicle  ?? "").toUpperCase()).filter(Boolean));
         const usedChassis = new Set(usedCdPasses.map(p => (p.chassis  ?? "").toUpperCase()).filter(Boolean));
         sorted = sorted.filter(v =>
           !usedPlates.has(v.value.toUpperCase()) && !usedChassis.has(v.chassisNo.toUpperCase())
         );
+
+        // Informational only: surface details when the search matches a vehicle that
+        // was already Customer Delivered, so the empty result isn't mistaken for a bug.
+        const needle = q.trim().toUpperCase();
+        if (needle) {
+          const delivered = usedCdPasses.find(p =>
+            p.status === "COMPLETED" &&
+            ((p.vehicle ?? "").toUpperCase().includes(needle) || (p.chassis ?? "").toUpperCase().includes(needle))
+          );
+          if (delivered) {
+            alreadyDeliveredInfo = {
+              gatePassNumber: delivered.gatePassNumber,
+              gateOutBy: delivered.gateOutBy,
+              departureDate: delivered.departureDate,
+              departureTime: delivered.departureTime,
+            };
+          }
+        }
       }
 
       return NextResponse.json({
         options: sorted.slice(0, take),
         source: "combined",
+        ...(alreadyDeliveredInfo ? { alreadyDeliveredInfo } : {}),
       });
     }
 

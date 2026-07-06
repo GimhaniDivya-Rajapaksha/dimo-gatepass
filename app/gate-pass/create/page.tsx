@@ -675,6 +675,8 @@ export default function CreateGatePassPage() {
   } | null>(null);
   const [activePassWarning, setActivePassWarning] = useState<{ gatePassNumber: string; status: string; id: string } | null>(null);
   const [cdDeliveredWarning, setCdDeliveredWarning] = useState<{ gatePassNumber: string; id: string } | null>(null);
+  // Search-time info: vehicle searched isn't found because it was already Customer Delivered
+  const [cdSearchDeliveredInfo, setCdSearchDeliveredInfo] = useState<{ gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null } | null>(null);
 
   async function checkActivePass(chassis: string) {
     setActivePassWarning(null);
@@ -1178,8 +1180,14 @@ export default function CreateGatePassPage() {
       }
       const res = await fetch(`/api/lookups?${params.toString()}`);
       if (!res.ok) return;
-      const data = (await res.json()) as { options?: LookupOption[] };
+      const data = (await res.json()) as {
+        options?: LookupOption[];
+        alreadyDeliveredInfo?: { gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null };
+      };
       setLookupOptions((prev) => ({ ...prev, [field]: data.options ?? [] }));
+      if (field === "vehicle" && passType === "CUSTOMER_DELIVERY") {
+        setCdSearchDeliveredInfo(data.alreadyDeliveredInfo ?? null);
+      }
     } catch {
       // silently keep existing options
     } finally {
@@ -2309,7 +2317,7 @@ export default function CreateGatePassPage() {
             key={t}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => { if (isDraftMode || isRejectEditMode) return; setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); setLocationType(""); setSrMode("in"); }}
+            onClick={() => { if (isDraftMode || isRejectEditMode) return; setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setCdSearchDeliveredInfo(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); setLocationType(""); setSrMode("in"); }}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
             style={passType === t
               ? { background: "linear-gradient(135deg, #1a4f9e, #2563eb)", color: "#fff", border: "none" }
@@ -4189,12 +4197,14 @@ export default function CreateGatePassPage() {
                               value={cd.vehicle}
                               onChange={(v) => {
                                 setC("vehicle", v);
+                                setCdSearchDeliveredInfo(null);
                                 if (selectedCdVehicleDetail && v !== cd.vehicle) { setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); }
                               }}
                               onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
                               minSearchLength={3}
                               onSelect={(o) => {
                                 setC("vehicle", o.value);
+                                setCdSearchDeliveredInfo(null);
                                 const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colour: o.colour ?? "" };
                                 const sapLocation = o.sapCurrentLocation || "";
                                 if (sapLocation) {
@@ -4231,7 +4241,7 @@ export default function CreateGatePassPage() {
                             {cd.vehicle && (
                               <button
                                 type="button"
-                                onClick={() => { setC("vehicle", ""); setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); void fetchLookup("vehicle", ""); }}
+                                onClick={() => { setC("vehicle", ""); setSelectedCdVehicleDetail(null); setActivePassWarning(null); setCdDeliveredWarning(null); setCdSearchDeliveredInfo(null); void fetchLookup("vehicle", ""); }}
                                 className="absolute right-9 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
                                 style={{ color: "var(--text-muted)" }}
                                 title="Clear vehicle"
@@ -4243,6 +4253,20 @@ export default function CreateGatePassPage() {
                             )}
                           </div>
                         </div>
+                        {!selectedCdVehicleDetail && cdSearchDeliveredInfo && (
+                          <div className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-xl"
+                            style={{ background: "#fef2f2", border: "1px solid #fca5a5" }}>
+                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#dc2626" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            <p className="text-xs font-semibold flex-1" style={{ color: "#7f1d1d" }}>
+                              This vehicle was already Customer Delivered via <strong>{cdSearchDeliveredInfo.gatePassNumber}</strong>
+                              {cdSearchDeliveredInfo.gateOutBy && <> by <strong>{cdSearchDeliveredInfo.gateOutBy}</strong></>}
+                              {cdSearchDeliveredInfo.departureDate && <> on <strong>{cdSearchDeliveredInfo.departureDate}{cdSearchDeliveredInfo.departureTime ? ` ${cdSearchDeliveredInfo.departureTime}` : ""}</strong></>}
+                              . That's why it doesn't appear in the search.
+                            </p>
+                          </div>
+                        )}
                         {selectedCdVehicleDetail && (
                           <div className="mt-3 rounded-xl border px-4 py-3"
                             style={{ background: "var(--surface2)", borderColor: (cdDeliveredWarning || activePassWarning) ? "#f87171" : "var(--border)" }}>
