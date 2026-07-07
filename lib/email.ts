@@ -203,7 +203,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .action-head{background:#000;padding:11px 18px;display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;color:#fff;letter-spacing:0.04em;text-transform:uppercase}
 .action-body{background:#f4f6fb;padding:16px 18px 18px}
 .action-desc{font-size:13px;font-weight:300;color:#555;line-height:1.6;margin-bottom:16px}
-.btn-row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;align-items:center}
+.btn-row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;align-items:center;text-align:center}
 .btn-ok{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)}
 .btn-no{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
@@ -236,7 +236,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
   .btn-row{flex-direction:column;gap:0}
-  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box}
+  .btn-ok,.btn-no{width:100%;justify-content:center;box-sizing:border-box;margin-right:0 !important}
   .btn-ok{margin-bottom:24px}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
@@ -337,7 +337,7 @@ export async function sendApprovalRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -427,8 +427,8 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
       <div class="action-desc">
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
-      <div class="btn-row">
-        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
+      <div class="btn-row" style="text-align:center">
+        <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);margin-right:24px">
           <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Approve Gate Pass
         </a>
@@ -610,7 +610,7 @@ export async function sendRejectionNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -801,7 +801,7 @@ export async function sendAsoTransferOutEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -896,7 +896,7 @@ export async function sendEscalationRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier Escalation", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -1227,7 +1227,7 @@ export async function sendEscalationRejectedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
@@ -1313,7 +1313,7 @@ export async function sendAsoArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arrival Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
@@ -1402,7 +1402,7 @@ export async function sendAsoConfirmArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot; Arrival Confirmation Required", pass.gatePassNumber)}
-<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
