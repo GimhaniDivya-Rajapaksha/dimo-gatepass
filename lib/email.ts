@@ -194,7 +194,7 @@ table.vt thead tr{background:#f4f6fb;border-bottom:1px solid #d0d8e8}
 table.vt thead th{font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#555;padding:9px 13px;text-align:left}
 table.vt tbody tr{border-bottom:1px solid #d0d8e8}
 table.vt tbody tr:last-child{border-bottom:none}
-table.vt td{padding:10px 13px;color:#333;vertical-align:middle}
+table.vt td{padding:10px 13px;color:#333;vertical-align:middle;text-align:left}
 table.vt td.m{font-weight:700;color:#111;letter-spacing:0.03em}
 .rn{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;background:#1E4FA0;color:#fff;font-size:9.5px;font-weight:800;border-radius:50%}
 .dtag{display:inline-block;background:#f0f8e2;color:#6ea02f;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:3px;border:1px solid rgba(141,198,63,0.28);letter-spacing:0.02em}
@@ -207,7 +207,7 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .btn-ok{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)}
 .btn-no{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
-.expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:14px;font-size:11.5px;color:#92400e}
+.expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:16px;font-size:11.5px;color:#92400e}
 .status-box{border:1px solid rgba(141,198,63,0.35);background:linear-gradient(180deg,#f6fbe9 0%,#edf7dd 100%);border-radius:4px;padding:16px 16px 14px;margin-bottom:22px}
 .status-top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .status-icon{width:34px;height:34px;border-radius:50%;background:#8DC63F;display:flex;align-items:center;justify-content:center;color:#000;font-size:18px;font-weight:800;flex-shrink:0}
