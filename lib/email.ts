@@ -1483,3 +1483,333 @@ ${emailFooter(pass.gatePassNumber)}
     html
   );
 }
+
+// ─── Test Drive: Return Time exceeds the 1-hour cap (informational only, not a block) ───
+export async function sendTestDriveReturnTimeExceededEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    departureDate?: string | null;
+    departureTime?: string | null;
+    returnTime?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Return Time Exceeds 1 Hour &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive — Return Time Notice", "Test Drive &middot; Informational", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    The scheduled Return Time for this Test Drive exceeds the 1-hour limit.
+  </div>
+  <div style="font-weight:300">No action is required to block the pass — this is for your awareness.</div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was created with a scheduled Return Time more than 1 hour after the Gate Out Time.
+  </div>
+  <div class="sec">
+    ${secLabel("Schedule")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.departureDate ? `<div class="ic"><div class="ic-lbl">Gate Out</div><div class="ic-val">${pass.departureDate} ${pass.departureTime ?? ""}</div></div>` : ""}
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Return Time Exceeds 1 Hour — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+type TestDriveOverdueDetails = {
+  gatePassNumber: string;
+  passId?: string | null;
+  vehicle: string;
+  customerName?: string | null;
+  driverName?: string | null;
+  initiatorName: string;
+  returnTime?: string | null;
+};
+
+// ─── Test Drive overdue: reminder to the Initiator (send-once) ───
+export async function sendTestDriveOverdueInitiatorEmail(
+  toEmail: string,
+  toName: string,
+  pass: TestDriveOverdueDetails
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Vehicle Return Pending &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive Vehicle Return Pending", "Test Drive &middot; Action Required", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This Test Drive vehicle has not yet been marked as returned.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Our records indicate that the Test Drive vehicle below has not yet been marked as returned.
+  </div>
+  <div class="sec">
+    ${secLabel("Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.customerName ? `<div class="ic"><div class="ic-lbl">Customer</div><div class="ic-val">${pass.customerName}</div></div>` : ""}
+      ${pass.driverName ? `<div class="ic"><div class="ic-lbl">Driver</div><div class="ic-val">${pass.driverName}</div></div>` : ""}
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div class="greeting" style="margin-top:16px">
+    Please verify whether the vehicle has returned to the premises and update the Gate Pass System accordingly.
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Vehicle Return Pending — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+// ─── Test Drive overdue: reminder to the Initiator's Reporting Manager (send-once) ───
+export async function sendTestDriveOverdueManagerEmail(
+  toEmail: string,
+  toName: string,
+  pass: TestDriveOverdueDetails
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Vehicle Return Pending &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive Vehicle Return Pending", "Test Drive &middot; Follow-up Required", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A Test Drive vehicle has not been marked as returned after the scheduled return time.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    The following Test Drive vehicle has not been marked as returned after the scheduled return time.
+  </div>
+  <div class="sec">
+    ${secLabel("Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Initiator</div><div class="ic-val">${pass.initiatorName}</div></div>
+      ${pass.driverName ? `<div class="ic"><div class="ic-lbl">Driver</div><div class="ic-val">${pass.driverName}</div></div>` : ""}
+      ${pass.customerName ? `<div class="ic"><div class="ic-lbl">Customer</div><div class="ic-val">${pass.customerName}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Vehicle Number</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div class="greeting" style="margin-top:16px">
+    Please follow up with the initiator and ensure the vehicle has safely returned to the premises. Once confirmed, kindly request the initiator to update the Gate Pass System.
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Vehicle Return Pending — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+// ─── Gate Pass Cancelled — sent to both the approver and the creator ───
+export async function sendGatePassCancelledEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    cancelledByName: string;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gate Pass Cancelled &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Gate Pass Cancelled", "Status Update", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This gate pass has been cancelled.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was cancelled by <strong>${pass.cancelledByName}</strong>. No further action is required.
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Gate Pass Cancelled — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendDriverChangedEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    previousDriverName: string;
+    previousDriverNIC: string;
+    newDriverName: string;
+    newDriverNIC: string;
+    previousCompanyName?: string | null;
+    newCompanyName?: string | null;
+    changedByName: string;
+    reason?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+  const carrierChanged = !!pass.previousCompanyName && !!pass.newCompanyName;
+  const heading = carrierChanged ? "Driver / Carrier Changed" : "Driver Changed";
+  const bannerText = carrierChanged
+    ? "The driver and carrier on this gate pass were changed."
+    : "The driver on this gate pass was changed.";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${heading} &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader(heading, "Status Update", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    ${bannerText}
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    ${pass.changedByName} updated gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}).
+  </div>
+  <table class="vt" style="width:100%;margin-top:14px;border-collapse:collapse">
+    <tr><td style="padding:6px 0;color:#6b7280;text-align:left">Previous Driver</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.previousDriverName} (${pass.previousDriverNIC})</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280;text-align:left">New Driver</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.newDriverName} (${pass.newDriverNIC})</td></tr>
+    ${carrierChanged ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">Previous Carrier</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.previousCompanyName}</td></tr>` : ""}
+    ${carrierChanged ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">New Carrier</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.newCompanyName}</td></tr>` : ""}
+    ${pass.reason ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">Reason</td><td style="padding:6px 0;text-align:left">${pass.reason}</td></tr>` : ""}
+  </table>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `${heading} — ${pass.gatePassNumber}`,
+    html
+  );
+}

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES";
+type PassType = "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "AFTER_SALES" | "TEST_DRIVE";
 type LocationType = "DEALER" | "DIMO" | "PROMOTION" | "FINANCE" | "OTHER";
 type TransportMode = "CARRIER" | "DRIVER" | "CUSTOMER" | "OTHER";
 type LookupField = "location" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "driverNIC" | "driverName";
@@ -651,7 +651,7 @@ export default function CreateGatePassPage() {
   const [ltBulkMode, setLtBulkMode] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>("CARRIER");
   const [submitted, setSubmitted] = useState(false);
-  const [submittedRouting, setSubmittedRouting] = useState<"cashier" | "approver" | null>(null);
+  const [submittedRouting, setSubmittedRouting] = useState<"cashier" | "approver" | "security" | null>(null);
   const [loading, setLoading] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -750,6 +750,9 @@ export default function CreateGatePassPage() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [vehicleLoading, setVehicleLoading] = useState(false);
   const [draftGateDirection, setDraftGateDirection] = useState<string | null>(null);
+  // True once a Carrier has been picked and its mapped-driver list came back empty —
+  // prompts the user to add a new driver rather than leaving a silent empty dropdown.
+  const [noDriversForCarrier, setNoDriversForCarrier] = useState(false);
 
   const today = currentDateValue(); // "YYYY-MM-DD" for min date constraint
 
@@ -759,20 +762,49 @@ export default function CreateGatePassPage() {
     approver: "", departureDate: currentDateValue(), departureTime: currentTimeValue(), reasonToOut: "",
     arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
-    contactNo: "", mileage: "", insurance: "", garagePlate: "",
+    contactNo: "", mileage: "", insurance: "", garagePlate: "", remarks: "",
     requestedBy: "",
   });
   const [ltRequestedByOptions, setLtRequestedByOptions] = useState<LookupOption[]>([]);
   const [ltRequestedByLoading, setLtRequestedByLoading] = useState(false);
   const [ltRequestedByEmail, setLtRequestedByEmail] = useState("");
 
+  // LT Return Gate Pass — fully isolated additive state; when ltType is "NORMAL" (default),
+  // this is never read and the existing LT submit path behaves exactly as before.
+  const [ltType, setLtType] = useState<"NORMAL" | "RETURN">("NORMAL");
+  const [ltReturn, setLtReturn] = useState({
+    departureDate: "", departureTime: "", // Gate Out — Schedule Departure
+    arrivalDate: "", arrivalTime: "",      // Gate In — Expected Arrival
+    transportMode: "CARRIER" as "CARRIER" | "OTHER", // Transportation Details (mirrors LT's own Carrier/Other options)
+    companyName: "", carrierRegNo: "",
+    driverNIC: "", driverName: "", contactNo: "", remarks: "",
+  });
+
   // Customer Delivery fields
   const [cd, setCd] = useState({
     approver: "", vehicle: "", fromLocation: "",
     departureDate: currentDateValue(), departureTime: currentTimeValue(),
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
-    contactNo: "", mileage: "", insurance: "", garagePlate: "",
+    contactNo: "", mileage: "", insurance: "", garagePlate: "", remarks: "",
   });
+
+  // Test Drive fields — fully isolated from LT/CD/SR; never read/written by their code paths
+  const [testDrive, setTestDrive] = useState({
+    vehicle: "", fromLocation: "", requestedBy: "",
+    departureDate: currentDateValue(), departureTime: currentTimeValue(),
+    returnDate: currentDateValue(), returnTime: "",
+    transportType: "DRIVER" as "DRIVER" | "CUSTOMER",
+    driverName: "", driverNIC: "", driverContact: "",
+    customerName: "", customerNIC: "", customerContact: "",
+    mileage: "", insurance: "", garagePlate: "", remarks: "",
+  });
+  const [selectedTestDriveVehicleDetail, setSelectedTestDriveVehicleDetail] = useState<{
+    vehicleNo?: string; chassisNo: string; model: string; make: string; colour: string; currentLocation?: string;
+  } | null>(null);
+  const [testDriveRequestedByOptions, setTestDriveRequestedByOptions] = useState<LookupOption[]>([]);
+  const [testDriveRequestedByLoading, setTestDriveRequestedByLoading] = useState(false);
+  const [testDriveRequestedByEmail, setTestDriveRequestedByEmail] = useState("");
+  const [testDriveReturnTimeExceeded, setTestDriveReturnTimeExceeded] = useState(false);
 
   // Service/Repair fields
   const [sr, setSr] = useState({
@@ -781,7 +813,7 @@ export default function CreateGatePassPage() {
     customerName: "", customerContact: "",
     receivingLocation: "", arrivalDate: "", arrivalTime: "",
     companyName: "", carrierRegNo: "", driverNIC: "", driverName: "",
-    contactNo: "", mileage: "", insurance: "", garagePlate: "",
+    contactNo: "", mileage: "", insurance: "", garagePlate: "", remarks: "",
   });
   const [srVehicleTab, setSrVehicleTab] = useState<"add" | "general">("add");
   const [showSrBulkUpload, setShowSrBulkUpload] = useState(false);
@@ -797,6 +829,12 @@ export default function CreateGatePassPage() {
   const [showAddCarrier, setShowAddCarrier] = useState(false);
   const [newCarrierName, setNewCarrierName] = useState("");
   const [newCarrierReg, setNewCarrierReg] = useState("");
+
+  // Add New Driver (inline, Carrier mode only) — saves against the currently-selected
+  // Carrier's master-data record, mirroring "Add New Carrier" above.
+  const [showAddDriverInline, setShowAddDriverInline] = useState(false);
+  const [newDriverInline, setNewDriverInline] = useState({ name: "", nic: "", licenceNo: "", contact: "" });
+  const [newDriverInlineError, setNewDriverInlineError] = useState("");
 
   // Job multi-select for After Sales / SR
   const [srJobTypes, setSrJobTypes] = useState<string[]>([]);
@@ -999,6 +1037,7 @@ export default function CreateGatePassPage() {
             mileage: pass.mileage ?? "",
             insurance: pass.insurance ?? "",
             garagePlate: pass.garagePlate ?? "",
+            remarks: pass.remarks ?? "",
           }));
           setSelectedVehicleDetail({
             chassisNo: pass.chassis ?? "",
@@ -1024,6 +1063,7 @@ export default function CreateGatePassPage() {
             mileage: pass.mileage ?? "",
             insurance: pass.insurance ?? "",
             garagePlate: pass.garagePlate ?? "",
+            remarks: pass.remarks ?? "",
           }));
           setSelectedCdVehicleDetail({
             vehicleNo: pass.vehicle ?? "",
@@ -1048,6 +1088,7 @@ export default function CreateGatePassPage() {
           setS("mileage", pass.mileage ?? "");
           setS("insurance", pass.insurance ?? "");
           setS("garagePlate", pass.garagePlate ?? "");
+          setS("remarks", pass.remarks ?? "");
           setSelectedSrVehicleDetail({
             vehicleNo: pass.vehicle ?? "",
             chassisNo: pass.chassis ?? "",
@@ -1178,6 +1219,15 @@ export default function CreateGatePassPage() {
       if (field === "vehicle" && passType && passType !== "AFTER_SALES") {
         params.set("passType", passType);
       }
+      // Driver picker: only show drivers mapped to the Carrier currently entered on this form.
+      // Server resolves carrierRegNo -> CarrierOption -> its mapped drivers (falls back to
+      // unfiltered if that carrier isn't in master data yet).
+      if (field === "driverNIC" || field === "driverName") {
+        const activeCarrierRegNo = passType === "LOCATION_TRANSFER" ? lt.carrierRegNo
+          : passType === "AFTER_SALES" ? sr.carrierRegNo
+          : cd.carrierRegNo;
+        if (activeCarrierRegNo) params.set("carrierRegNo", activeCarrierRegNo);
+      }
       const res = await fetch(`/api/lookups?${params.toString()}`);
       if (!res.ok) return;
       const data = (await res.json()) as {
@@ -1193,6 +1243,67 @@ export default function CreateGatePassPage() {
     } finally {
       if (field === "location") setLocationLoading(false);
       if (field === "vehicle") setVehicleLoading(false);
+    }
+  };
+
+  // Called right when a Carrier is picked/created — clears whatever driver was previously
+  // selected (it may not belong to the new carrier) and preloads that carrier's own driver
+  // list directly (bypassing fetchLookup's closure so it always uses the carrier just picked,
+  // never a stale one from before this state update finished re-rendering).
+  const refreshDriverOptionsForCarrier = async (carrierRegNo: string) => {
+    if (!carrierRegNo) { setNoDriversForCarrier(false); return; }
+    try {
+      const params = new URLSearchParams({ field: "driverNIC", q: "", limit: "40", carrierRegNo });
+      const res = await fetch(`/api/lookups?${params.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { options?: LookupOption[] };
+      const options = data.options ?? [];
+      setLookupOptions((prev) => ({ ...prev, driverNIC: options, driverName: [] }));
+      setNoDriversForCarrier(options.length === 0);
+    } catch { /* non-critical */ }
+  };
+
+  // Resolve the currently-entered Carrier (companyName/carrierRegNo) to its master-data
+  // CarrierOption id, then save the new driver against it — same master-data record used
+  // by the Admin Master Data page and the post-approval Change Driver / Carrier screen.
+  const submitNewDriverInline = async () => {
+    setNewDriverInlineError("");
+    const { name, nic, licenceNo, contact } = newDriverInline;
+    if (!name.trim() || !nic.trim() || !licenceNo.trim()) {
+      setNewDriverInlineError("Name, NIC, and Driving Licence No. are all required.");
+      return;
+    }
+    if (!carrierFields.carrierRegNo) {
+      setNewDriverInlineError("Enter a Carrier Registration No. above first.");
+      return;
+    }
+    try {
+      let carrierId: string | null = null;
+      const carrierRes = await fetch(`/api/lookups?field=carrierRegNo&q=${encodeURIComponent(carrierFields.carrierRegNo)}&limit=5`);
+      if (carrierRes.ok) {
+        const carrierJson = await carrierRes.json();
+        const match = (carrierJson.options ?? []).find((o: { value: string }) => o.value === carrierFields.carrierRegNo);
+        if (match) carrierId = match.id;
+      }
+      if (!carrierId) {
+        setNewDriverInlineError("This carrier isn't in master data yet — add it via \"Add New Carrier\" first, then add the driver.");
+        return;
+      }
+      const res = await fetch("/api/lookups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field: "driver", name, nic, licenceNo, contact, carrierId }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setNewDriverInlineError(json.error || "Failed to add driver."); return; }
+      setCarrier("driverNIC", json.option.nic);
+      setCarrier("driverName", json.option.name);
+      if (json.option.contact) setCarrier("contactNo", json.option.contact);
+      void refreshDriverOptionsForCarrier(carrierFields.carrierRegNo);
+      setShowAddDriverInline(false);
+      setNewDriverInline({ name: "", nic: "", licenceNo: "", contact: "" });
+    } catch {
+      setNewDriverInlineError("Failed to add driver.");
     }
   };
 
@@ -1302,6 +1413,7 @@ export default function CreateGatePassPage() {
 
   const isLtLike = passType === "LOCATION_TRANSFER";
   const isSr = passType === "AFTER_SALES";
+  const isTestDrive = passType === "TEST_DRIVE";
   const linkedAfterSalesMinDate = asFoundPass?.departureDate || asFoundPass?.arrivalDate || today;
 
   // Determine vehicle's current location from the live plant API first, then fall back.
@@ -1690,6 +1802,7 @@ export default function CreateGatePassPage() {
         mileage: row.mileage || null,
         insurance: row.insurance || null,
         garagePlate: row.garagePlate || null,
+        remarks: null,
         comments: parts.length > 0 ? JSON.stringify(parts.map((p) => `${p.partName} (${p.partId})`)) : null,
       };
       try {
@@ -1815,6 +1928,26 @@ export default function CreateGatePassPage() {
       else if (!e.departureDate && isPastDateTime(cd.departureDate, cd.departureTime)) e.departureTime = "Departure time cannot be in the past";
     }
 
+    // LT Return Gate Pass: additive validation only, never runs unless explicitly selected
+    if (isLtLike && ltType === "RETURN") {
+      if (!ltReturn.departureDate) e.ltReturnDepartureDate = "Departure date is required";
+      else if (parseDate(ltReturn.departureDate) < today) e.ltReturnDepartureDate = "Departure date cannot be in the past";
+      if (!ltReturn.departureTime) e.ltReturnDepartureTime = "Departure time is required";
+      else if (!e.ltReturnDepartureDate && isPastDateTime(ltReturn.departureDate, ltReturn.departureTime)) e.ltReturnDepartureTime = "Departure time cannot be in the past";
+      if (!ltReturn.arrivalDate) e.ltReturnArrivalDate = "Expected arrival date is required";
+      if (ltReturn.arrivalDate && ltReturn.arrivalTime && ltReturn.departureDate && ltReturn.departureTime &&
+          ltReturn.arrivalDate === ltReturn.departureDate && ltReturn.arrivalTime <= ltReturn.departureTime) {
+        e.ltReturnArrivalTime = "Arrival time must be after the departure time";
+      }
+      if (ltReturn.transportMode === "CARRIER") {
+        if (!ltReturn.companyName) e.ltReturnCompanyName = "Carrier company name is required";
+        if (!ltReturn.carrierRegNo) e.ltReturnCarrierRegNo = "Carrier registration no is required";
+      }
+      if (!ltReturn.driverNIC) e.ltReturnDriverNIC = "DL / NIC No is required";
+      if (!ltReturn.driverName) e.ltReturnDriverName = "Driver name is required";
+      if (!ltReturn.contactNo) e.ltReturnContactNo = "Contact no is required";
+    }
+
     const needsTransportDetails = !(isSr && srMode === "out" && asSubType === "MAIN_OUT");
 
     // Carrier / Driver / Other transport validation
@@ -1856,9 +1989,9 @@ export default function CreateGatePassPage() {
     }
     setLoading(true);
 
-    const ltCarrierMileage = { companyName: lt.companyName, carrierRegNo: lt.carrierRegNo, driverName: lt.driverName, driverNIC: lt.driverNIC, driverContact: lt.contactNo, mileage: lt.mileage, insurance: lt.insurance, garagePlate: lt.garagePlate };
-    const cdCarrierMileage = { companyName: cd.companyName, carrierRegNo: cd.carrierRegNo, driverName: cd.driverName, driverNIC: cd.driverNIC, driverContact: cd.contactNo, mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate };
-    const srCarrierMileage = { companyName: sr.companyName, carrierRegNo: sr.carrierRegNo, driverName: sr.driverName, driverNIC: sr.driverNIC, driverContact: sr.contactNo, mileage: sr.mileage, insurance: sr.insurance, garagePlate: sr.garagePlate };
+    const ltCarrierMileage = { companyName: lt.companyName, carrierRegNo: lt.carrierRegNo, driverName: lt.driverName, driverNIC: lt.driverNIC, driverContact: lt.contactNo, mileage: lt.mileage, insurance: lt.insurance, garagePlate: lt.garagePlate, remarks: lt.remarks || null };
+    const cdCarrierMileage = { companyName: cd.companyName, carrierRegNo: cd.carrierRegNo, driverName: cd.driverName, driverNIC: cd.driverNIC, driverContact: cd.contactNo, mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate, remarks: cd.remarks || null };
+    const srCarrierMileage = { companyName: sr.companyName, carrierRegNo: sr.carrierRegNo, driverName: sr.driverName, driverNIC: sr.driverNIC, driverContact: sr.contactNo, mileage: sr.mileage, insurance: sr.insurance, garagePlate: sr.garagePlate, remarks: sr.remarks || null };
 
     if (isDraftMode && draftId) {
       const draftPayload = isLtLike
@@ -2008,7 +2141,7 @@ export default function CreateGatePassPage() {
         departureDate: cd.departureDate,
         departureTime: cd.departureTime,
         transportMode: isMainOut ? null : transportMode,
-        ...(isMainOut ? {} : srCarrierMileage),
+        ...(isMainOut ? { remarks: sr.remarks || null } : srCarrierMileage),
       };
       try {
         const res = await fetch("/api/gate-pass", {
@@ -2126,11 +2259,141 @@ export default function CreateGatePassPage() {
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
         if (payload.passType === "CUSTOMER_DELIVERY") {
-          const d = await res.json().catch(() => ({}));
-          const status = d.gatePass?.status;
-          setSubmittedRouting(status === "CASHIER_REVIEW" ? "cashier" : "approver");
+          // CD is now always auto-approved and ready for Security Gate Out — no
+          // Approver/Cashier review step to route to.
+          setSubmittedRouting("security");
+        }
+
+        // LT Return Gate Pass: additive only — original LT creation above is completely
+        // unchanged. This just creates a second, locked, linked pass with the journey
+        // reversed. Never runs unless the initiator explicitly picked "Return Gate Pass".
+        if (isLtLike && ltType === "RETURN" && !ltBulkMode) {
+          const created = await res.json().catch(() => ({}));
+          const gp1 = created.gatePass;
+          if (gp1?.id) {
+            const ltPayload = payload as Record<string, unknown>;
+            const returnPayload = {
+              passType: "LOCATION_TRANSFER",
+              vehicle: ltPayload.vehicle,
+              chassis: ltPayload.chassis,
+              make: ltPayload.make,
+              vehicleColor: ltPayload.vehicleColor,
+              toLocation: ltPayload.fromLocation,
+              toPlantCode: ltPayload.fromPlantCode,
+              toStorageLocation: ltPayload.fromStorageLocation,
+              fromLocation: ltPayload.toLocation,
+              fromPlantCode: ltPayload.toPlantCode,
+              fromStorageLocation: ltPayload.toStorageLocation,
+              outReason: ltPayload.outReason,
+              approver: ltPayload.approver,
+              requestedBy: ltPayload.requestedBy,
+              requestedByEmail: ltPayload.requestedByEmail,
+              departureDate: ltReturn.departureDate,
+              departureTime: ltReturn.departureTime,
+              arrivalDate: ltReturn.arrivalDate || null,
+              arrivalTime: ltReturn.arrivalTime || null,
+              transportMode: ltReturn.transportMode,
+              companyName: ltReturn.transportMode === "CARRIER" ? ltReturn.companyName : null,
+              carrierRegNo: ltReturn.transportMode === "CARRIER" ? ltReturn.carrierRegNo : null,
+              driverNIC: ltReturn.driverNIC || null,
+              driverName: ltReturn.driverName || null,
+              driverContact: ltReturn.contactNo || null,
+              remarks: ltReturn.remarks || null,
+              parentPassId: gp1.id,
+              returnPassLocked: true,
+            };
+            const returnRes = await fetch("/api/gate-pass", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(returnPayload),
+            });
+            if (!returnRes.ok) {
+              const rd = await returnRes.json().catch(() => ({}));
+              console.error("[LT Return Gate Pass] creation failed:", rd.error);
+            }
+          }
         }
       }
+      setSubmitted(true);
+      setTimeout(() => router.push("/gate-pass"), 3000);
+    } catch (err) {
+      setLoading(false);
+      setErrors({ form: String(err) });
+    }
+  };
+
+  // ─── Test Drive: fully isolated submit path — never touches LT/CD/SR state or logic ───
+  function isTestDriveReturnTimeOverCap(departureTime: string, returnTime: string): boolean {
+    if (!departureTime || !returnTime) return false;
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+    const diff = toMinutes(returnTime) - toMinutes(departureTime);
+    return diff <= 0 || diff > 60;
+  }
+
+  const handleTestDriveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!testDrive.vehicle) errs.testDriveVehicle = "Vehicle is required";
+    if (!testDrive.departureDate) errs.testDriveDepartureDate = "Gate Out Date is required";
+    if (!testDrive.departureTime) errs.testDriveDepartureTime = "Gate Out Time is required";
+    if (!testDrive.returnTime) errs.testDriveReturnTime = "Return Time is required";
+    if (testDrive.transportType === "DRIVER") {
+      if (!testDrive.driverName) errs.testDriveDriverName = "Driver Name is required";
+      if (!testDrive.driverNIC) errs.testDriveDriverNIC = "Driving License / NIC No is required";
+    } else {
+      if (!testDrive.customerNIC) errs.testDriveCustomerNIC = "Customer NIC No is required";
+      if (!testDrive.customerContact) errs.testDriveCustomerContact = "Contact Number is required";
+    }
+    if (!testDrive.mileage) errs.testDriveMileage = "Mileage / Meter Reading is required";
+    if (!testDrive.insurance) errs.testDriveInsurance = "Insurance Arrangements is required";
+    if (!testDrive.garagePlate) errs.testDriveGaragePlate = "Garage Plate / Trade Plate Allocation is required";
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      const firstKey = Object.keys(errs)[0];
+      document.querySelector(`[name="${firstKey}"], [data-field="${firstKey}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = {
+        passType: "TEST_DRIVE",
+        vehicle: testDrive.vehicle,
+        chassis: selectedTestDriveVehicleDetail?.chassisNo || null,
+        make: selectedTestDriveVehicleDetail?.make || null,
+        vehicleColor: selectedTestDriveVehicleDetail?.colour || null,
+        fromLocation: testDrive.fromLocation || null,
+        toLocation: testDrive.fromLocation || null, // Test Drive always returns to the same plant
+        requestedBy: testDrive.requestedBy || null,
+        requestedByEmail: testDriveRequestedByEmail || null,
+        departureDate: testDrive.departureDate,
+        departureTime: testDrive.departureTime,
+        returnDate: testDrive.returnDate,
+        returnTime: testDrive.returnTime,
+        returnTimeExceeded: testDriveReturnTimeExceeded,
+        transportMode: testDrive.transportType,
+        driverName: testDrive.transportType === "DRIVER" ? testDrive.driverName : null,
+        driverNIC: testDrive.transportType === "DRIVER" ? testDrive.driverNIC : null,
+        driverContact: testDrive.transportType === "DRIVER" ? testDrive.driverContact : null,
+        customerName: testDrive.transportType === "CUSTOMER" ? testDrive.customerName : null,
+        customerNIC: testDrive.transportType === "CUSTOMER" ? testDrive.customerNIC : null,
+        customerContact: testDrive.transportType === "CUSTOMER" ? testDrive.customerContact : null,
+        mileage: testDrive.mileage || null,
+        insurance: testDrive.insurance || null,
+        garagePlate: testDrive.garagePlate || null,
+        remarks: testDrive.remarks || null,
+      };
+
+      const res = await fetch("/api/gate-pass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to create Test Drive gate pass"); }
+
       setSubmitted(true);
       setTimeout(() => router.push("/gate-pass"), 3000);
     } catch (err) {
@@ -2144,6 +2407,8 @@ export default function CreateGatePassPage() {
       ? "Routed to Cashier for order review."
       : submittedRouting === "approver"
       ? "Routed to Approver for review."
+      : submittedRouting === "security"
+      ? "Approved automatically — ready for Security Gate Out."
       : null;
     return (
       <div className="flex items-center justify-center h-[70vh]">
@@ -2186,6 +2451,7 @@ export default function CreateGatePassPage() {
     : isSr
     ? { mileage: sr.mileage, insurance: sr.insurance, garagePlate: sr.garagePlate }
     : { mileage: cd.mileage, insurance: cd.insurance, garagePlate: cd.garagePlate };
+  const sharedRemarks = isLtLike ? lt.remarks : isSr ? sr.remarks : cd.remarks;
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -2354,6 +2620,11 @@ export default function CreateGatePassPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
             </svg>
           )},
+          { type: "TEST_DRIVE", label: "Test Drive", icon: (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17l4-9 4 9M9.5 14h5M3 17h18M5 17v2m14-2v2" />
+            </svg>
+          )},
           { type: "AFTER_SALES", label: "Service/Repair", icon: (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
@@ -2366,7 +2637,7 @@ export default function CreateGatePassPage() {
             key={t}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
-            onClick={() => { if (isDraftMode || isRejectEditMode) return; setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setCdSearchDeliveredInfo(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); setLocationType(""); setSrMode("in"); }}
+            onClick={() => { if (isDraftMode || isRejectEditMode) return; setPassType(t); setErrors({}); setTransportMode("CARRIER"); setCd(p => ({ ...p, vehicle: "" })); setSelectedCdVehicleDetail(null); setCdSearchDeliveredInfo(null); setSr(p => ({ ...p, vehicle: "" })); setSelectedSrVehicleDetail(null); setSrVehicleHasSearched(false); setLocationType(""); setSrMode("in"); setTestDrive(p => ({ ...p, vehicle: "" })); setSelectedTestDriveVehicleDetail(null); setTestDriveReturnTimeExceeded(false); setLtType("NORMAL"); setLtReturn({ departureDate: "", departureTime: "", arrivalDate: "", arrivalTime: "", transportMode: "CARRIER", companyName: "", carrierRegNo: "", driverNIC: "", driverName: "", contactNo: "", remarks: "" }); }}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
             style={passType === t
               ? { background: "linear-gradient(135deg, #1a4f9e, #2563eb)", color: "#fff", border: "none" }
@@ -2380,9 +2651,323 @@ export default function CreateGatePassPage() {
         ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-4xl">
+      <form onSubmit={isTestDrive ? handleTestDriveSubmit : handleSubmit} className="max-w-4xl">
         <AnimatePresence mode="wait">
-          {isSr ? (
+          {isTestDrive ? (
+            <motion.div key="testdrive" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
+
+              {/* Vehicle */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Vehicle</SectionTitle>
+                <Field label="Vehicle" required error={errors.testDriveVehicle}>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <SearchInput
+                        value={testDrive.vehicle}
+                        onChange={(v) => {
+                          setTestDrive(p => ({ ...p, vehicle: v }));
+                          if (selectedTestDriveVehicleDetail && v !== testDrive.vehicle) {
+                            setSelectedTestDriveVehicleDetail(null);
+                            setActivePassWarning(null);
+                            setErrors(p => { const n = { ...p }; delete n.testDriveVehicle; return n; });
+                          }
+                        }}
+                        onSearch={(v) => { if (v.trim()) void fetchLookup("vehicle", v); }}
+                        minSearchLength={3}
+                        placeholder="Search by vehicle no or chassis no"
+                        error={errors.testDriveVehicle}
+                        loading={vehicleLoading}
+                        options={lookupOptions.vehicle}
+                        onSelect={(o) => {
+                          const detail = { vehicleNo: o.value, chassisNo: o.chassisNo ?? "", model: o.model ?? "", make: o.make ?? "", colour: o.colour ?? "" };
+                          setTestDrive(p => ({ ...p, vehicle: o.value }));
+                          setSelectedTestDriveVehicleDetail(detail);
+                          setErrors(p => { const n = { ...p }; delete n.testDriveVehicle; return n; });
+                          void checkActivePass(o.chassisNo ?? "");
+                          void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                            if (result) {
+                              setTestDrive(p => ({ ...p, fromLocation: result.location }));
+                              setSelectedTestDriveVehicleDetail(prev => prev ? { ...prev, currentLocation: result.location } : prev);
+                            }
+                          });
+                        }}
+                        renderOption={(o) => (
+                          <div className="flex items-center gap-3 w-full py-0.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold truncate" style={{ color: "var(--text)" }}>{o.value}</p>
+                              {o.chassisNo && <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{o.chassisNo}</p>}
+                            </div>
+                            {(o.make || o.model) && (
+                              <span className="text-xs flex-shrink-0 text-right" style={{ color: "var(--text-muted)" }}>
+                                {[o.make, o.model].filter(Boolean).join(" ")}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      />
+                      {testDrive.vehicle && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTestDrive(p => ({ ...p, vehicle: "", fromLocation: "" }));
+                            setSelectedTestDriveVehicleDetail(null);
+                            setActivePassWarning(null);
+                            void fetchLookup("vehicle", "");
+                          }}
+                          className="absolute right-9 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
+                          style={{ color: "var(--text-muted)" }}
+                          title="Clear vehicle"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Field>
+                {activePassWarning && (
+                  <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                    <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-xs font-semibold flex-1" style={{ color: "#991b1b" }}>
+                      Active gate pass <strong>{activePassWarning.gatePassNumber}</strong> already exists for this vehicle
+                      <span className="ml-1 font-normal opacity-75">({activePassWarning.status.replace(/_/g, " ").toLowerCase()})</span>
+                    </p>
+                    <a href={`/gate-pass/${activePassWarning.id}`} target="_blank" rel="noreferrer"
+                      className="text-xs font-bold underline flex-shrink-0" style={{ color: "#dc2626" }}>View</a>
+                  </div>
+                )}
+                {selectedTestDriveVehicleDetail && (
+                  <div className="mt-3 rounded-xl border px-4 py-3" style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                    <div className="flex items-center gap-2 pb-3 mb-3" style={{ borderBottom: "1px solid var(--border)" }}>
+                      <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#2563eb" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Current Location</p>
+                        <p className="text-sm font-semibold" style={{ color: testDrive.fromLocation ? "#2563eb" : "var(--text-muted)" }}>
+                          {testDrive.fromLocation || <span className="italic font-normal">Detecting…</span>}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { label: "Model", val: selectedTestDriveVehicleDetail.model },
+                        { label: "Make", val: selectedTestDriveVehicleDetail.make },
+                        { label: "Colour", val: selectedTestDriveVehicleDetail.colour },
+                      ].map(f => (
+                        <div key={f.label}>
+                          <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "var(--text-muted)" }}>{f.label}</p>
+                          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{f.val || "—"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Requested By */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Requested By</SectionTitle>
+                <Field label="Requested By">
+                  <SearchInput
+                    value={testDrive.requestedBy}
+                    onChange={(v) => {
+                      setTestDrive(p => ({ ...p, requestedBy: v }));
+                      setTestDriveRequestedByEmail("");
+                      if (!v) { setTestDriveRequestedByOptions([]); return; }
+                      setTestDriveRequestedByLoading(true);
+                      fetch(`/api/ad-users?q=${encodeURIComponent(v)}`)
+                        .then(r => r.json())
+                        .then((d: { users?: { id: string; name: string; email: string }[] }) => {
+                          setTestDriveRequestedByOptions((d.users ?? []).map(u => ({ id: u.id, value: u.name, label: u.name, email: u.email })));
+                        })
+                        .finally(() => setTestDriveRequestedByLoading(false));
+                    }}
+                    placeholder="Search by name or email..."
+                    options={testDriveRequestedByOptions}
+                    loading={testDriveRequestedByLoading}
+                    onSelect={(o) => { setTestDrive(p => ({ ...p, requestedBy: o.value })); setTestDriveRequestedByEmail((o as any).email ?? ""); setTestDriveRequestedByOptions([]); }}
+                    renderOption={(o) => (
+                      <div>
+                        <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{o.label}</p>
+                        <p className="text-xs" style={{ color: "var(--text-muted)" }}>{(o as { email?: string }).email ?? ""}</p>
+                      </div>
+                    )}
+                  />
+                </Field>
+              </div>
+
+              {/* Gate Out Schedule */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Gate Out Schedule</SectionTitle>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Gate Out Date" required>
+                    <DatePicker
+                      value={testDrive.departureDate}
+                      onChange={(v) => setTestDrive(p => ({ ...p, departureDate: v, returnDate: v }))}
+                    />
+                  </Field>
+                  <Field label="Gate Out Time" required>
+                    <TimePicker
+                      value={testDrive.departureTime}
+                      onChange={(v) => {
+                        setTestDrive(p => ({ ...p, departureTime: v }));
+                        setTestDriveReturnTimeExceeded(false);
+                      }}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* Return Schedule */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Return Schedule</SectionTitle>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Return Date">
+                    <input
+                      type="text"
+                      value={testDrive.returnDate}
+                      disabled
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm opacity-70 cursor-not-allowed"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                  </Field>
+                  <Field label="Return Time" required error={errors.testDriveReturnTime}>
+                    <TimePicker
+                      value={testDrive.returnTime}
+                      onChange={(v) => {
+                        setTestDrive(p => ({ ...p, returnTime: v }));
+                        const exceeded = isTestDriveReturnTimeOverCap(testDrive.departureTime, v);
+                        setTestDriveReturnTimeExceeded(exceeded);
+                      }}
+                    />
+                  </Field>
+                </div>
+                {testDriveReturnTimeExceeded && (
+                  <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: "#fffbf0", border: "1px solid #fde68a" }}>
+                    <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#92610a" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                    <p className="text-xs font-semibold" style={{ color: "#92400e" }}>
+                      This exceeds the maximum 1-hour Test Drive duration. You can still submit, but the Initiator and Reporting Manager will be notified.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Transportation Details */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Transportation Details</SectionTitle>
+                <div className="flex gap-6 mb-4">
+                  {(["DRIVER", "CUSTOMER"] as const).map(v => (
+                    <label key={v} className="flex items-center gap-2 cursor-pointer">
+                      <div
+                        onClick={() => setTestDrive(p => ({ ...p, transportType: v }))}
+                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                        style={{ borderColor: testDrive.transportType === v ? "#2563eb" : "var(--border)" }}
+                      >
+                        {testDrive.transportType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                      </div>
+                      <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{v === "DRIVER" ? "Driver" : "Customer"}</span>
+                    </label>
+                  ))}
+                </div>
+                {testDrive.transportType === "DRIVER" ? (
+                  <div className="grid grid-cols-3 gap-4">
+                    <Field label="Driver Name" required error={errors.testDriveDriverName}>
+                      <input type="text" value={testDrive.driverName} onChange={(e) => setTestDrive(p => ({ ...p, driverName: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveDriverName ? "#f87171" : "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                    <Field label="Driving License / NIC No" required error={errors.testDriveDriverNIC}>
+                      <input type="text" value={testDrive.driverNIC} onChange={(e) => setTestDrive(p => ({ ...p, driverNIC: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveDriverNIC ? "#f87171" : "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                    <Field label="Contact Number">
+                      <input type="text" value={testDrive.driverContact} onChange={(e) => setTestDrive(p => ({ ...p, driverContact: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-4">
+                    <Field label="Customer Name" error={errors.testDriveCustomerName}>
+                      <input type="text" value={testDrive.customerName} onChange={(e) => setTestDrive(p => ({ ...p, customerName: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                    <Field label="Customer NIC No" required error={errors.testDriveCustomerNIC}>
+                      <input type="text" value={testDrive.customerNIC} onChange={(e) => setTestDrive(p => ({ ...p, customerNIC: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveCustomerNIC ? "#f87171" : "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                    <Field label="Contact Number" required error={errors.testDriveCustomerContact}>
+                      <input type="text" value={testDrive.customerContact} onChange={(e) => setTestDrive(p => ({ ...p, customerContact: e.target.value }))}
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveCustomerContact ? "#f87171" : "var(--border)", color: "var(--text)" }} />
+                    </Field>
+                  </div>
+                )}
+              </div>
+
+              {/* Mileage Details */}
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Mileage Details</SectionTitle>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="Mileage (Km) / Meter Reading (H)" required error={errors.testDriveMileage}>
+                    <TextInput value={testDrive.mileage} onChange={(v) => setTestDrive(p => ({ ...p, mileage: v }))} placeholder="Enter mileage or meter reading" numericOnly />
+                  </Field>
+                  <Field label="Insurance Arrangements" required error={errors.testDriveInsurance}>
+                    <TextInput value={testDrive.insurance} onChange={(v) => setTestDrive(p => ({ ...p, insurance: v }))} placeholder="Enter insurance arrangements" />
+                  </Field>
+                  <Field label="Garage Plate / Trade Plate Allocation" required error={errors.testDriveGaragePlate} className="md:col-span-2">
+                    <TextInput value={testDrive.garagePlate} onChange={(v) => setTestDrive(p => ({ ...p, garagePlate: v }))} placeholder="Enter garage plate or trade plate allocation" />
+                  </Field>
+                  <Field label="Remarks" error={errors.testDriveRemarks} className="md:col-span-2">
+                    <textarea
+                      value={testDrive.remarks}
+                      onChange={(e) => { setTestDrive(p => ({ ...p, remarks: e.target.value })); setErrors(prev => { const n = { ...prev }; delete n.testDriveRemarks; return n; }); }}
+                      placeholder="Enter remarks"
+                      rows={3}
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                      style={{ background: "var(--surface2)", borderColor: errors.testDriveRemarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-between pb-6">
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => router.push("/gate-pass")}
+                  className="px-6 py-3 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: "#ef4444" }}
+                >
+                  Cancel
+                </motion.button>
+                <motion.button
+                  type="submit"
+                  disabled={loading}
+                  whileHover={{ scale: loading ? 1 : 1.02 }}
+                  whileTap={{ scale: loading ? 1 : 0.97 }}
+                  className="px-8 py-3 rounded-xl text-sm font-semibold text-white shadow-lg disabled:opacity-70 flex items-center gap-2"
+                  style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}
+                >
+                  {loading && (
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  )}
+                  {loading ? "Submitting..." : "Submit"}
+                </motion.button>
+              </div>
+            </motion.div>
+          ) : isSr ? (
             <motion.div key="sr" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
 
               {/* SR Mode toggle — AREA_SALES_OFFICER only sees "Vehicle Move" (out) */}
@@ -2939,6 +3524,20 @@ export default function CreateGatePassPage() {
                     <TimePicker value={sr.arrivalTime} onChange={(v) => setS("arrivalTime", v)} error={errors.arrivalTime} date={sr.arrivalDate} />
                   </Field>
                 </div>
+              </div>
+
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Additional Details</SectionTitle>
+                <Field label="Remarks" error={errors.remarks}>
+                  <textarea
+                    value={sr.remarks}
+                    onChange={(e) => { setS("remarks", e.target.value); setErrors(prev => { const n = { ...prev }; delete n.remarks; return n; }); }}
+                    placeholder="Enter remarks"
+                    rows={3}
+                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                    style={{ background: "var(--surface2)", borderColor: errors.remarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+                  />
+                </Field>
               </div>
 
               </>
@@ -3537,6 +4136,18 @@ export default function CreateGatePassPage() {
                                 <TimePicker value={cd.departureTime} onChange={(v) => setC("departureTime", v)} error={errors.departureTime} date={cd.departureDate} />
                               </Field>
                             </div>
+                            <div className="mt-4">
+                              <Field label="Remarks" error={errors.remarks}>
+                                <textarea
+                                  value={sr.remarks}
+                                  onChange={(e) => { setS("remarks", e.target.value); setErrors(prev => { const n = { ...prev }; delete n.remarks; return n; }); }}
+                                  placeholder="Enter remarks"
+                                  rows={3}
+                                  className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                                  style={{ background: "var(--surface2)", borderColor: errors.remarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+                                />
+                              </Field>
+                            </div>
                           </motion.div>
                         );
                       })()}
@@ -3563,6 +4174,30 @@ export default function CreateGatePassPage() {
             </motion.div>
           ) : isLtLike ? (
             <motion.div key="lt" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.2 }}>
+
+              {/* Location Transfer Type — additive only; "Normal" (default) leaves everything below untouched */}
+              {!isDraftMode && !isRejectEditMode && (
+              <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                <SectionTitle>Location Transfer Type</SectionTitle>
+                <div className="flex gap-6">
+                  {([
+                    { value: "NORMAL" as const, label: "Normal Gate Pass" },
+                    { value: "RETURN" as const, label: "Return Gate Pass" },
+                  ]).map(({ value: v, label }) => (
+                    <label key={v} className="flex items-center gap-2 cursor-pointer">
+                      <div
+                        onClick={() => setLtType(v)}
+                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                        style={{ borderColor: ltType === v ? "#2563eb" : "var(--border)" }}
+                      >
+                        {ltType === v && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                      </div>
+                      <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              )}
 
               {/* Vehicle Selection — shown first so To Location can be filtered by Matnr */}
               <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
@@ -4511,7 +5146,7 @@ export default function CreateGatePassPage() {
         </AnimatePresence>
 
         {/* Transportation Details + Additional Details */}
-        {!(isSr && srMode === "out" && asSubType === "MAIN_OUT") && (
+        {!isTestDrive && !(isSr && srMode === "out" && asSubType === "MAIN_OUT") && (
         <>
             <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           <SectionTitle>Transportation Details</SectionTitle>
@@ -4542,7 +5177,7 @@ export default function CreateGatePassPage() {
                     <div className="flex items-center gap-2">
                       {(carrierFields.companyName || carrierFields.carrierRegNo) && (
                         <button type="button"
-                          onClick={clearCarrierDetails}
+                          onClick={() => { clearCarrierDetails(); clearDriverDetails(); setNoDriversForCarrier(false); setLookupOptions((prev) => ({ ...prev, driverNIC: [], driverName: [] })); }}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
                           style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -4597,6 +5232,8 @@ export default function CreateGatePassPage() {
                               }
                               setCarrier("companyName", newCarrierName.trim());
                               if (newCarrierReg.trim()) setCarrier("carrierRegNo", newCarrierReg.trim());
+                              clearDriverDetails();
+                              if (newCarrierReg.trim()) void refreshDriverOptionsForCarrier(newCarrierReg.trim());
                               setShowAddCarrier(false); setNewCarrierName(""); setNewCarrierReg("");
                             }}
                             className="px-4 py-1.5 rounded-lg text-sm text-white font-semibold"
@@ -4611,7 +5248,12 @@ export default function CreateGatePassPage() {
                         value={carrierFields.companyName}
                         onChange={(v) => { setCarrier("companyName", v); void fetchLookup("companyName", v); }}
                         onFocus={() => void fetchLookup("companyName", carrierFields.companyName)}
-                        onSelect={(o) => { setCarrier("companyName", o.value); if (o.registrationNo) setCarrier("carrierRegNo", o.registrationNo); }}
+                        onSelect={(o) => {
+                          setCarrier("companyName", o.value);
+                          if (o.registrationNo) setCarrier("carrierRegNo", o.registrationNo);
+                          clearDriverDetails();
+                          if (o.registrationNo) void refreshDriverOptionsForCarrier(o.registrationNo);
+                        }}
                         placeholder="Search company name"
                         error={errors.companyName}
                         options={lookupOptions.companyName}
@@ -4622,7 +5264,12 @@ export default function CreateGatePassPage() {
                         value={carrierFields.carrierRegNo}
                         onChange={(v) => { setCarrier("carrierRegNo", v); void fetchLookup("carrierRegNo", v); }}
                         onFocus={() => void fetchLookup("carrierRegNo", carrierFields.carrierRegNo)}
-                        onSelect={(o) => { setCarrier("carrierRegNo", o.value); if (o.companyName) setCarrier("companyName", o.companyName); }}
+                        onSelect={(o) => {
+                          setCarrier("carrierRegNo", o.value);
+                          if (o.companyName) setCarrier("companyName", o.companyName);
+                          clearDriverDetails();
+                          void refreshDriverOptionsForCarrier(o.value);
+                        }}
                         placeholder="Search carrier registration no"
                         error={errors.carrierRegNo}
                         options={lookupOptions.carrierRegNo}
@@ -4637,16 +5284,80 @@ export default function CreateGatePassPage() {
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>Driver Details</p>
-                    {(carrierFields.driverNIC || carrierFields.driverName || carrierFields.contactNo) && (
-                      <button type="button"
-                        onClick={clearDriverDetails}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
-                        style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
-                        Clear
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(carrierFields.driverNIC || carrierFields.driverName || carrierFields.contactNo) && (
+                        <button type="button"
+                          onClick={clearDriverDetails}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold"
+                          style={{ borderColor: "var(--border)", color: "#dc2626", background: "var(--surface2)" }}>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          Clear
+                        </button>
+                      )}
+                      {transportMode === "CARRIER" && (
+                        <button type="button"
+                          onClick={() => setShowAddDriverInline(s => !s)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-semibold"
+                          style={{ background: "#5a9216" }}>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                          Add New Driver
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  {transportMode === "CARRIER" && noDriversForCarrier && (
+                    <div className="mb-4 px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "#fffbeb", color: "#92400e" }}>
+                      No drivers are available for the selected carrier. Please add a new driver.
+                    </div>
+                  )}
+                  {/* Inline add driver form — Carrier mode only, saved against the current Carrier */}
+                  <AnimatePresence>
+                    {transportMode === "CARRIER" && showAddDriverInline && (
+                      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                        className="mb-4 rounded-xl border p-4 grid grid-cols-1 md:grid-cols-2 gap-3"
+                        style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1" style={{ color: "#166534" }}>Driver Name</label>
+                          <input type="text" value={newDriverInline.name} onChange={(e) => setNewDriverInline(p => ({ ...p, name: e.target.value }))}
+                            placeholder="Enter driver name"
+                            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                            style={{ borderColor: "#86efac", background: "#fff", color: "var(--text)" }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1" style={{ color: "#166534" }}>NIC</label>
+                          <input type="text" value={newDriverInline.nic} onChange={(e) => setNewDriverInline(p => ({ ...p, nic: e.target.value }))}
+                            placeholder="e.g. 901234567V"
+                            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                            style={{ borderColor: "#86efac", background: "#fff", color: "var(--text)" }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1" style={{ color: "#166534" }}>Driving Licence No.</label>
+                          <input type="text" value={newDriverInline.licenceNo} onChange={(e) => setNewDriverInline(p => ({ ...p, licenceNo: e.target.value }))}
+                            placeholder="e.g. B1234567"
+                            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                            style={{ borderColor: "#86efac", background: "#fff", color: "var(--text)" }} />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1" style={{ color: "#166534" }}>Contact No. (optional)</label>
+                          <input type="text" value={newDriverInline.contact} onChange={(e) => setNewDriverInline(p => ({ ...p, contact: e.target.value }))}
+                            placeholder="e.g. 0771234567"
+                            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-300"
+                            style={{ borderColor: "#86efac", background: "#fff", color: "var(--text)" }} />
+                        </div>
+                        {newDriverInlineError && (
+                          <p className="md:col-span-2 text-xs font-semibold" style={{ color: "#dc2626" }}>{newDriverInlineError}</p>
+                        )}
+                        <div className="md:col-span-2 flex gap-2 justify-end">
+                          <button type="button" onClick={() => { setShowAddDriverInline(false); setNewDriverInline({ name: "", nic: "", licenceNo: "", contact: "" }); setNewDriverInlineError(""); }}
+                            className="px-4 py-1.5 rounded-lg text-sm border font-medium"
+                            style={{ color: "var(--text)", borderColor: "var(--border)", background: "var(--surface)" }}>Cancel</button>
+                          <button type="button" onClick={() => void submitNewDriverInline()}
+                            className="px-4 py-1.5 rounded-lg text-sm text-white font-semibold"
+                            style={{ background: "#16a34a" }}>Save Driver</button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="DL / NIC No" required error={errors.driverNIC}>
                       <SearchInput
@@ -4707,8 +5418,83 @@ export default function CreateGatePassPage() {
           </AnimatePresence>
             </div>
 
-            {/* Mileage / Additional Details — hidden for After Sales IN (srMode "in") */}
-            {!(isSr && srMode === "in") && (
+            {/* Return Journey Details — LT Return Gate Pass only; additive, mirrors the original
+                Gate Out / Gate In / Transportation Details sections for the return leg. */}
+            {isLtLike && ltType === "RETURN" && !isDraftMode && !isRejectEditMode && (
+            <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+              <SectionTitle>Return Journey Details</SectionTitle>
+
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Gate Out — Schedule Departure</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                <Field label="Estimated Departure Date" required error={errors.ltReturnDepartureDate}>
+                  <DatePicker value={ltReturn.departureDate} onChange={(v) => setLtReturn(p => ({ ...p, departureDate: v }))} min={today} error={errors.ltReturnDepartureDate} placeholder="Pick departure date" />
+                </Field>
+                <Field label="Estimated Departure Time" required error={errors.ltReturnDepartureTime}>
+                  <TimePicker value={ltReturn.departureTime} onChange={(v) => setLtReturn(p => ({ ...p, departureTime: v }))} error={errors.ltReturnDepartureTime} date={ltReturn.departureDate} />
+                </Field>
+              </div>
+
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Gate In — Expected Arrival</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                <Field label="Expected Arrival Date" required error={errors.ltReturnArrivalDate}>
+                  <DatePicker value={ltReturn.arrivalDate} onChange={(v) => setLtReturn(p => ({ ...p, arrivalDate: v }))} min={ltReturn.departureDate || today} placeholder="Pick arrival date" error={errors.ltReturnArrivalDate} />
+                </Field>
+                <Field label="Expected Arrival Time" error={errors.ltReturnArrivalTime}>
+                  <TimePicker value={ltReturn.arrivalTime} onChange={(v) => setLtReturn(p => ({ ...p, arrivalTime: v }))} date={ltReturn.arrivalDate} error={errors.ltReturnArrivalTime} />
+                </Field>
+              </div>
+
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Transportation Details</p>
+              <div className="flex items-center gap-6 mb-4">
+                {(["CARRIER", "OTHER"] as const).map((m) => (
+                  <label key={m} className="flex items-center gap-2 cursor-pointer">
+                    <div
+                      onClick={() => setLtReturn(p => ({ ...p, transportMode: m }))}
+                      className="w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all"
+                      style={{ borderColor: ltReturn.transportMode === m ? "#2563eb" : "var(--border)" }}
+                    >
+                      {ltReturn.transportMode === m && <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />}
+                    </div>
+                    <span className="text-sm font-medium" style={{ color: "var(--text)" }}>{m === "CARRIER" ? "Carrier" : "Other"}</span>
+                  </label>
+                ))}
+              </div>
+              {ltReturn.transportMode === "CARRIER" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <Field label="Company Name" required error={errors.ltReturnCompanyName}>
+                    <TextInput value={ltReturn.companyName} onChange={(v) => setLtReturn(p => ({ ...p, companyName: v }))} placeholder="Enter carrier company name" error={errors.ltReturnCompanyName} />
+                  </Field>
+                  <Field label="Carrier Registration No" required error={errors.ltReturnCarrierRegNo}>
+                    <TextInput value={ltReturn.carrierRegNo} onChange={(v) => setLtReturn(p => ({ ...p, carrierRegNo: v }))} placeholder="Enter carrier registration no" error={errors.ltReturnCarrierRegNo} />
+                  </Field>
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="DL / NIC No" required error={errors.ltReturnDriverNIC}>
+                  <TextInput value={ltReturn.driverNIC} onChange={(v) => setLtReturn(p => ({ ...p, driverNIC: v }))} placeholder="Enter NIC / DL no" error={errors.ltReturnDriverNIC} />
+                </Field>
+                <Field label="Driver Name" required error={errors.ltReturnDriverName}>
+                  <TextInput value={ltReturn.driverName} onChange={(v) => setLtReturn(p => ({ ...p, driverName: v }))} placeholder="Enter driver name" error={errors.ltReturnDriverName} />
+                </Field>
+                <Field label="Contact No" required error={errors.ltReturnContactNo}>
+                  <TextInput value={ltReturn.contactNo} onChange={(v) => setLtReturn(p => ({ ...p, contactNo: v }))} placeholder="Enter driver contact no" numericOnly maxLength={10} error={errors.ltReturnContactNo} />
+                </Field>
+                <Field label="Remarks" error={errors.ltReturnRemarks} className="md:col-span-2">
+                  <textarea
+                    value={ltReturn.remarks}
+                    onChange={(e) => { setLtReturn(p => ({ ...p, remarks: e.target.value })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnRemarks; return n; }); }}
+                    placeholder="Enter remarks"
+                    rows={3}
+                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                    style={{ background: "var(--surface2)", borderColor: errors.ltReturnRemarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+                  />
+                </Field>
+              </div>
+            </div>
+            )}
+
+            {/* Mileage / Additional Details — hidden for After Sales IN (srMode "in") and Test Drive (has its own) */}
+            {!isTestDrive && !(isSr && srMode === "in") && (
             <div className={sectionCard} style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
           <SectionTitle>{isLtLike ? "Mileage Details" : "Additional Details"}</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4720,6 +5506,16 @@ export default function CreateGatePassPage() {
             </Field>
             <Field label="Garage Plate / Trade Plate Allocation" className="md:col-span-2">
               <TextInput value={mileageFields.garagePlate} onChange={(v) => setMileage("garagePlate", v)} placeholder="Enter garage plate or trade plate allocation" />
+            </Field>
+            <Field label="Remarks" error={errors.remarks} className="md:col-span-2">
+              <textarea
+                value={sharedRemarks}
+                onChange={(e) => { setMileage("remarks", e.target.value); setErrors(prev => { const n = { ...prev }; delete n.remarks; return n; }); }}
+                placeholder="Enter remarks"
+                rows={3}
+                className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+                style={{ background: "var(--surface2)", borderColor: errors.remarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
+              />
             </Field>
           </div>
             </div>
@@ -4779,6 +5575,7 @@ export default function CreateGatePassPage() {
         )}
 
         {/* Actions */}
+        {!isTestDrive && (
         <div className="flex items-center justify-between pb-6">
           <motion.button
             type="button"
@@ -4807,6 +5604,7 @@ export default function CreateGatePassPage() {
             {loading ? "Submitting..." : isRejectEditMode ? "Resubmit for Approval" : "Submit"}
           </motion.button>
         </div>
+        )}
       </form>
     </motion.div>
   );

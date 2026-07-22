@@ -51,6 +51,17 @@ function PassTypeBadge({ passType, passSubType }: { passType: string; passSubTyp
       </span>
     );
   }
+  if (passType === "TEST_DRIVE") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+        style={{ background: "#fef3c7", color: "#92400e" }}>
+        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8l-4 4m0 0l4 4m-4-4h18" />
+        </svg>
+        Test Drive
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
       style={{ background: "#d1fae5", color: "#065f46" }}>
@@ -67,6 +78,7 @@ export default function ReceivePage() {
   const { data: session, status } = useSession();
   const [ltPending, setLtPending] = useState<GatePass[]>([]);
   const [asPending, setAsPending] = useState<GatePass[]>([]);
+  const [tdPending, setTdPending] = useState<GatePass[]>([]);
   const [completed, setCompleted] = useState<GatePass[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatedChassis, setUpdatedChassis] = useState<Record<string, string>>({});
@@ -96,6 +108,8 @@ export default function ReceivePage() {
       const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT",  limit: "50",  locationView: "true" });
       const ltCompParams  = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "COMPLETED", limit: "20",  locationView: "true" });
       const asCompParams  = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "COMPLETED", limit: "20",  locationView: "true" });
+      const tdParams      = new URLSearchParams({ passType: "TEST_DRIVE", status: "GATE_OUT",  limit: "50",  locationView: "true" });
+      const tdCompParams  = new URLSearchParams({ passType: "TEST_DRIVE", status: "COMPLETED", limit: "20",  locationView: "true" });
 
       // Sequential fetches — connection pool limit is 1 on Supabase free tier
       const ltRes         = await fetch(`/api/gate-pass?${ltParams}${toLocQ}`);
@@ -106,6 +120,10 @@ export default function ReceivePage() {
       const ltCompData    = ltCompRes.ok ? await ltCompRes.json() : { passes: [] };
       const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}${toLocQ}`);
       const asCompData    = asCompRes.ok ? await asCompRes.json() : { passes: [] };
+      const tdRes         = await fetch(`/api/gate-pass?${tdParams}${toLocQ}`);
+      const tdData        = tdRes.ok ? await tdRes.json() : { passes: [] };
+      const tdCompRes     = await fetch(`/api/gate-pass?${tdCompParams}${toLocQ}`);
+      const tdCompData    = tdCompRes.ok ? await tdCompRes.json() : { passes: [] };
 
       // Client-side secondary check: plant-level prefix match (consistent with server filter)
       const myPlantLower = myPlant?.toLowerCase() ?? null;
@@ -119,9 +137,11 @@ export default function ReceivePage() {
 
       setLtPending((ltData.passes ?? []).filter(locationMatch));
       setAsPending((asGateOutData.passes ?? []).filter(locationMatch));
+      setTdPending((tdData.passes ?? []).filter(locationMatch));
       setCompleted([
         ...(asCompData.passes ?? []).filter(locationMatch),
         ...(ltCompData.passes ?? []).filter(locationMatch),
+        ...(tdCompData.passes ?? []).filter(locationMatch),
       ]);
     } finally {
       setLoading(false);
@@ -159,7 +179,7 @@ export default function ReceivePage() {
 
   if (status === "loading") return null;
 
-  const totalPending = ltPending.length + asPending.length;
+  const totalPending = ltPending.length + asPending.length + tdPending.length;
 
   const handleAcknowledge = async (id: string) => {
     setAcknowledging(id);
@@ -175,9 +195,11 @@ export default function ReceivePage() {
       if (res.ok) {
         const movedLt = ltPending.find(p => p.id === id);
         const movedAs = asPending.find(p => p.id === id);
-        const moved = movedLt || movedAs;
+        const movedTd = tdPending.find(p => p.id === id);
+        const moved = movedLt || movedAs || movedTd;
         if (movedLt) setLtPending(prev => prev.filter(p => p.id !== id));
         if (movedAs) setAsPending(prev => prev.filter(p => p.id !== id));
+        if (movedTd) setTdPending(prev => prev.filter(p => p.id !== id));
         if (moved) setCompleted(prev => [{ ...moved, status: "COMPLETED" }, ...prev]);
         setUpdatedChassis(prev => { const n = { ...prev }; delete n[id]; return n; });
       }
@@ -186,7 +208,7 @@ export default function ReceivePage() {
     }
   };
 
-  const allPending = [...asPending, ...ltPending]; // After Sales first
+  const allPending = [...asPending, ...ltPending, ...tdPending]; // After Sales first
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

@@ -24,6 +24,7 @@ enum PassType {
   LOCATION_TRANSFER
   CUSTOMER_DELIVERY
   AFTER_SALES
+  TEST_DRIVE
 }
 
 enum GatePassStatus {
@@ -62,6 +63,7 @@ model User {
   initiatedPasses  GatePass[]     @relation("InitiatedBy")
   approvedPasses   GatePass[]     @relation("ApprovedBy")
   notifications    Notification[]
+  gatePassChanges  GatePassChangeLog[]
 }
 
 model GatePass {
@@ -97,10 +99,21 @@ model GatePass {
   driverName     String?
   driverNIC      String?
   driverContact  String?
+  driverLicenceNo String? // set only via the post-print "Change Driver" feature; null for passes created before it existed
 
   mileage        String?
   insurance      String?
   garagePlate    String?
+  remarks        String? // user-entered remarks, required on submission for every pass type; shown on the printed gate pass
+
+  // Test Drive fields
+  returnDate      String?   // scheduled return date (locked = departureDate)
+  returnTime      String?   // scheduled return time (max departureTime + 1hr)
+  returnMileage   String?
+  customerName    String?
+  customerNIC     String?
+  customerContact String?
+  reminderSentAt  DateTime? // set once the overdue reminder email has been sent (send-once)
   comments        String?
   rejectionReason String?
   resubmitCount   Int     @default(0)
@@ -127,6 +140,7 @@ model GatePass {
   parentPassId      String?
   parentPass     GatePass?  @relation("SubPasses", fields: [parentPassId], references: [id])
   subPasses      GatePass[] @relation("SubPasses")
+  returnPassLocked Boolean  @default(false) // LT Return Gate Pass: locked until the original (parent) pass completes
   fromLocation        String?
   fromPlantCode       String?
   fromStorageLocation String?
@@ -144,6 +158,7 @@ model GatePass {
 
   notifications  Notification[]
   serviceOrders  ServiceOrder[]
+  changeLogs     GatePassChangeLog[]
 
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -226,7 +241,10 @@ model DriverOption {
   id        String   @id @default(cuid())
   name      String
   nic       String   @unique
+  licenceNo String?  @unique // Driving Licence No. — nullable only for legacy rows created before this field existed; required for every new driver
   contact   String?
+  carrierId String?
+  carrier   CarrierOption? @relation(fields: [carrierId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -235,8 +253,23 @@ model CarrierOption {
   id             String   @id @default(cuid())
   companyName    String
   registrationNo String   @unique
+  drivers        DriverOption[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// Audit trail for the post-print "Change Driver" feature (and any future post-approval field changes).
+model GatePassChangeLog {
+  id          String   @id @default(cuid())
+  gatePassId  String
+  gatePass    GatePass @relation(fields: [gatePassId], references: [id])
+  changeType  String   // e.g. "DRIVER_UPDATE"
+  previousData Json
+  newData     Json
+  reason      String?
+  changedById String
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  createdAt   DateTime @default(now())
 }
 
 model LocationBrandMapping {

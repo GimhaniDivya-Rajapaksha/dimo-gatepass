@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 type Tab = "carrier" | "driver" | "outReason" | "brand";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
-type DriverRecord  = { id: string; name: string; nic: string; contact: string | null; createdAt: string };
+type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
 type OutReasonRecord = { id: string; value: string; createdAt: string };
 type BrandRecord = { id: string; name: string; createdAt: string };
 
@@ -21,6 +21,14 @@ type ModalState =
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Same format rules already enforced on the Gate Pass creation form's driver fields.
+function isValidNIC(v: string) {
+  return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+}
+function isValidPhone(v: string) {
+  return /^[0-9+\-\s]{7,15}$/.test(v.trim());
 }
 
 // ── Main Page ──────────────────────────────────────────────────────────────
@@ -43,9 +51,19 @@ export default function MasterDataPage() {
 
   // Form state
   const [formCarrier,   setFormCarrier]   = useState({ companyName: "", registrationNo: "" });
-  const [formDriver,    setFormDriver]    = useState({ name: "", nic: "", contact: "" });
+  const [formDriver,    setFormDriver]    = useState({ name: "", nic: "", licenceNo: "", contact: "", carrierId: "" });
   const [formOutReason, setFormOutReason] = useState({ value: "" });
   const [formBrand,     setFormBrand]     = useState({ name: "" });
+
+  // Carrier options for the Driver form's mandatory Carrier Company selector —
+  // loaded independently of the active tab so it's always ready when the Driver modal opens.
+  const [allCarriers, setAllCarriers] = useState<CarrierRecord[]>([]);
+  useEffect(() => {
+    fetch("/api/admin/master-data?type=carrier&q=")
+      .then(r => r.json())
+      .then(json => setAllCarriers(json.data ?? []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (status === "unauthenticated") { router.replace("/login"); return; }
@@ -82,7 +100,7 @@ export default function MasterDataPage() {
   function openAdd(t: Tab) {
     setError(""); setSuccess("");
     if (t === "carrier")   setFormCarrier({ companyName: "", registrationNo: "" });
-    if (t === "driver")    setFormDriver({ name: "", nic: "", contact: "" });
+    if (t === "driver")    setFormDriver({ name: "", nic: "", licenceNo: "", contact: "", carrierId: "" });
     if (t === "outReason") setFormOutReason({ value: "" });
     if (t === "brand")     setFormBrand({ name: "" });
     setModal({ open: true, mode: "add", type: t } as ModalState);
@@ -96,7 +114,7 @@ export default function MasterDataPage() {
       setModal({ open: true, mode: "edit", type: "carrier", data: r });
     } else if (t === "driver") {
       const r = record as DriverRecord;
-      setFormDriver({ name: r.name, nic: r.nic, contact: r.contact ?? "" });
+      setFormDriver({ name: r.name, nic: r.nic, licenceNo: r.licenceNo ?? "", contact: r.contact ?? "", carrierId: r.carrierId ?? "" });
       setModal({ open: true, mode: "edit", type: "driver", data: r });
     } else if (t === "outReason") {
       const r = record as OutReasonRecord;
@@ -111,6 +129,18 @@ export default function MasterDataPage() {
 
   async function handleSave() {
     if (!modal.open) return;
+    if (modal.type === "driver" && !formDriver.carrierId) {
+      setError("Please select a Carrier Company — a driver must be assigned to one.");
+      return;
+    }
+    if (modal.type === "driver" && !isValidNIC(formDriver.nic)) {
+      setError("Invalid NIC format (e.g. 123456789V or 200012345678).");
+      return;
+    }
+    if (modal.type === "driver" && formDriver.contact && !isValidPhone(formDriver.contact)) {
+      setError("Invalid contact number format.");
+      return;
+    }
     setSaving(true); setError("");
     try {
       let body: Record<string, string> = { type: modal.type };
@@ -133,6 +163,9 @@ export default function MasterDataPage() {
       setSuccess(isEdit ? "Updated successfully" : "Added successfully");
       setModal({ open: false });
       load(tab, search);
+      if (modal.type === "carrier") {
+        fetch("/api/admin/master-data?type=carrier&q=").then(r => r.json()).then(j => setAllCarriers(j.data ?? [])).catch(() => {});
+      }
     } finally {
       setSaving(false);
     }
@@ -252,7 +285,7 @@ export default function MasterDataPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
-                    {["Driver Name", "NIC / License", "Contact", "Added On", ""].map((h, i) => (
+                    {["Driver Name", "NIC", "Licence No.", "Carrier Company", "Contact", "Added On", ""].map((h, i) => (
                       <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
                         style={{ color: "var(--text-muted)" }}>{h}</th>
                     ))}
@@ -260,11 +293,13 @@ export default function MasterDataPage() {
                 </thead>
                 <tbody>
                   {drivers.length === 0 ? (
-                    <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No drivers found</td></tr>
+                    <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No drivers found</td></tr>
                   ) : drivers.map(r => (
                     <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
                       <td className="px-4 py-3 font-medium" style={{ color: "var(--text)" }}>{r.name}</td>
                       <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{r.nic}</td>
+                      <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--text-muted)" }}>{r.licenceNo ?? "—"}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{r.carrier?.companyName ?? "—"}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{r.contact ?? "—"}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
@@ -371,6 +406,20 @@ export default function MasterDataPage() {
             {/* Driver form */}
             {modal.type === "driver" && (
               <div className="space-y-4">
+                <Field label="Carrier Company *">
+                  <select value={formDriver.carrierId}
+                    onChange={e => setFormDriver(p => ({ ...p, carrierId: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
+                    <option value="">Select a carrier…</option>
+                    {allCarriers.map(c => (
+                      <option key={c.id} value={c.id}>{c.companyName} — {c.registrationNo}</option>
+                    ))}
+                  </select>
+                  {allCarriers.length === 0 && (
+                    <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>No carriers exist yet — add one under Carrier Details first.</p>
+                  )}
+                </Field>
                 <Field label="Driver Name *">
                   <input type="text" value={formDriver.name}
                     onChange={e => setFormDriver(p => ({ ...p, name: e.target.value }))}
@@ -378,10 +427,17 @@ export default function MasterDataPage() {
                     className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                     style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
                 </Field>
-                <Field label="NIC / License No. *">
+                <Field label="NIC *">
                   <input type="text" value={formDriver.nic}
                     onChange={e => setFormDriver(p => ({ ...p, nic: e.target.value }))}
                     placeholder="e.g. 901234567V"
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                </Field>
+                <Field label="Driving Licence No. *">
+                  <input type="text" value={formDriver.licenceNo}
+                    onChange={e => setFormDriver(p => ({ ...p, licenceNo: e.target.value }))}
+                    placeholder="e.g. B1234567"
                     className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                     style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
                 </Field>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendApprovalRequestEmail, sendRequestedByNotificationEmail } from "@/lib/email";
+import { sendApprovalRequestEmail, sendRequestedByNotificationEmail, sendTestDriveReturnTimeExceededEmail } from "@/lib/email";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 
 function ciEquals(value: string | null | undefined) {
@@ -390,13 +390,15 @@ export async function POST(req: NextRequest) {
   // - All other pass types → PENDING_APPROVAL (normal approval flow)
   const isAfterSalesMainOut = body.passType === "AFTER_SALES" && body.passSubType === "MAIN_OUT";
   const isAfterSalesSubPass = body.passType === "AFTER_SALES" && ["MAIN_IN", "SUB_IN", "SUB_OUT", "SUB_OUT_IN"].includes(body.passSubType);
+  // Test Drive: no approval workflow at all — goes straight to Security Gate Out, same as an already-approved pass.
+  const isTestDrive = body.passType === "TEST_DRIVE";
 
   // Use max existing number (not count) to avoid collisions after deletions
   const lastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
   const lastNum = lastPass ? parseInt(lastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
   const gatePassNumber = `GP-${String(lastNum + 1).padStart(4, "0")}`;
 
-  const initialStatus = isAfterSalesSubPass ? "APPROVED" : "PENDING_APPROVAL";
+  const initialStatus = (isAfterSalesSubPass || isTestDrive) ? "APPROVED" : "PENDING_APPROVAL";
 
   const createData: Record<string, unknown> = {
     gatePassNumber,
@@ -429,18 +431,28 @@ export async function POST(req: NextRequest) {
     mileage: body.mileage || null,
     insurance: body.insurance || null,
     garagePlate: body.garagePlate || null,
+    remarks: body.remarks || null,
     comments: body.comments || null,
     passSubType: body.passSubType || null,
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
+    returnPassLocked: body.returnPassLocked || false,
     fromLocation: body.fromLocation || null,
     fromPlantCode: body.fromPlantCode || null,
     fromStorageLocation: body.fromStorageLocation || null,
     sapVehicleId: body.sapVehicleId || null,
     asoCreated: session.user.role === "AREA_SALES_OFFICER" && body.passType === "LOCATION_TRANSFER",
     createdById: session.user.id,
-    // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
-    ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
+    // Auto-approved After Sales sub-passes / Test Drive: set approvedAt so gate_out check works
+    ...((isAfterSalesSubPass || isTestDrive) ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
+    // Test Drive only — no other pass type sends these
+    ...(isTestDrive ? {
+      returnDate: body.returnDate || null,
+      returnTime: body.returnTime || null,
+      customerName: body.customerName || null,
+      customerNIC: body.customerNIC || null,
+      customerContact: body.customerContact || null,
+    } : {}),
   };
 
   // Only include serviceJobNo for After Sales passes (field added via db push, stale client)
@@ -473,155 +485,113 @@ export async function POST(req: NextRequest) {
     ).catch((e: unknown) => console.error("[email] requestedBy notification failed:", e));
   }
 
-  // CUSTOMER_DELIVERY: route based on SAP isHappyPath (FS §2.4)
-  // Happy path (hstat=H070, fkart=ZSF2|ZVVO, zterm=ZC01, !cancelled) → ALL orders happy → Cashier
-  // Any non-happy order, or no orders → Approver (PENDING_APPROVAL)
-  // SAP fetch error → show error notification to initiator, route to Approver
-  if (body.passType === "CUSTOMER_DELIVERY") {
-    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
-    const approverLocation = (createData.fromLocation as string | null) ?? null;
-    const creatorName = session.user.name || "Unknown";
-
-    // Helper: route to Approver with correct payment type labels derived from actual zterm values
-    async function routeToApprover(
-      message: string,
-      opts: { hasImmediate?: boolean; hasCredit?: boolean; paymentType?: string } = {}
-    ) {
-      const ptImmediate = opts.hasImmediate ?? false;
-      const ptCredit    = opts.hasCredit    ?? true;
-      const ptType      = opts.paymentType  ?? "CREDIT";
-      await prisma.gatePass.update({
-        where: { id: gatePass.id },
-        data: {
-          status: "PENDING_APPROVAL",
-          paymentType: ptType,
-          hasImmediate: ptImmediate,
-          hasCredit: ptCredit,
-          creditApproved: false,
-        },
+  // Test Drive: Return Time selected beyond the 1-hour cap is allowed (not blocked),
+  // but the Initiator and their Reporting Manager get notified in-app + by email.
+  if (isTestDrive && body.returnTimeExceeded) {
+    try {
+      const initiator = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { id: true, name: true, email: true, approver: { select: { id: true, name: true, email: true } } },
       });
-      gatePass.status = "PENDING_APPROVAL";
-      let cdApprovers = selectedApproverName
-        ? await prisma.user.findMany({ where: { role: "APPROVER", name: { equals: selectedApproverName, mode: "insensitive" } } })
-        : await prisma.user.findMany({ where: { role: "APPROVER" } });
-      if (selectedApproverName && cdApprovers.length === 0) {
-        cdApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-      }
-      if (cdApprovers.length > 0) {
+      const recipients = [initiator, initiator?.approver].filter(
+        (u): u is { id: string; name: string; email: string } => !!u
+      );
+      if (recipients.length > 0) {
         await prisma.notification.createMany({
-          data: cdApprovers.map((a) => ({
-            userId: a.id,
-            type: "GATE_PASS_SUBMITTED",
-            title: "Customer Delivery Approval Required",
-            message,
-            gatePassId: gatePass.id,
-          })),
-        });
-        await sendApprovalEmailsToApprovers(cdApprovers, gatePass, creatorName);
-      }
-      const cdAdmins = await prisma.user.findMany({ where: { role: "ADMIN" } });
-      if (cdAdmins.length > 0) {
-        await prisma.notification.createMany({
-          data: cdAdmins.map((a) => ({
-            userId: a.id,
-            type: "GATE_PASS_SUBMITTED",
-            title: "New Customer Delivery Submitted",
-            message: `${creatorName} submitted ${gatePass.gatePassNumber} for approval.`,
+          data: recipients.map((u) => ({
+            userId: u.id,
+            type: "TEST_DRIVE_RETURN_TIME_EXCEEDED",
+            title: "Test Drive Return Time Exceeds 1 Hour",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) has a scheduled Return Time beyond the 1-hour Test Drive limit.`,
             gatePassId: gatePass.id,
           })),
         });
       }
+      for (const u of recipients) {
+        sendTestDriveReturnTimeExceededEmail(u.email, u.name, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          departureDate: gatePass.departureDate,
+          departureTime: gatePass.departureTime,
+          returnTime: gatePass.returnTime,
+        }).catch((e: unknown) => console.error("[email] Test Drive return-time-exceeded notification failed:", e));
+      }
+    } catch (e) {
+      console.error("[TEST_DRIVE] return-time-exceeded notification failed:", e);
     }
+  }
+
+  // CUSTOMER_DELIVERY: no Approver, no Cashier — every CD pass is auto-approved immediately
+  // and goes straight to Security (or the Initiator's own print) for Gate Out, regardless of
+  // happy path / unhappy path / immediate / credit. SAP order data (ServiceOrder rows,
+  // hasCredit/hasImmediate/paymentType) is still fetched and stored for record-keeping and
+  // later reconciliation — it just no longer decides the pass's status or who reviews it.
+  if (body.passType === "CUSTOMER_DELIVERY") {
+    const approverLocation = (createData.fromLocation as string | null) ?? null;
+
+    await prisma.gatePass.update({
+      where: { id: gatePass.id },
+      data: { status: "APPROVED", approvedAt: new Date(), approvedById: session.user.id },
+    });
+    gatePass.status = "APPROVED";
 
     try {
       const { fetchSapOrders } = await import("@/lib/sap");
       const chassisNo = (createData.chassis as string | null) ?? "";
       const plateNo   = (createData.vehicle as string) ?? "";
       const sapOrders = await fetchSapOrders(chassisNo, plateNo);
-      // Include all non-cancelled orders with an orderId
       const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
 
-      if (active.length === 0) {
-        // No SAP orders → route to Approver (no zterm data, default CREDIT)
-        await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`);
-        return NextResponse.json({ gatePass }, { status: 201 });
-      }
+      if (active.length > 0) {
+        await prisma.serviceOrder.createMany({
+          data: active.map((o) => ({
+            gatePassId:      gatePass.id,
+            orderId:         o.orderId,
+            orderStatus:     o.orderStatus || o.orderStatusCode || "—",
+            orderStatusCode: o.orderStatusCode,
+            billingType:     o.billingType,
+            payTermCode:     o.payTermCode,
+            payTerm:         o.payTerm,
+            cancelled:       o.cancelled,
+            isHappyPath:     o.isHappyPath,
+            isAssigned:      false,
+          })),
+        });
 
-      // Store all orders with proper fields (no more HSTAT-format string)
-      await prisma.serviceOrder.createMany({
-        data: active.map((o) => ({
-          gatePassId:      gatePass.id,
-          orderId:         o.orderId,
-          orderStatus:     o.orderStatus || o.orderStatusCode || "—",
-          orderStatusCode: o.orderStatusCode,
-          billingType:     o.billingType,
-          payTermCode:     o.payTermCode,
-          payTerm:         o.payTerm,
-          cancelled:       o.cancelled,
-          isHappyPath:     o.isHappyPath,
-          isAssigned:      false,
-        })),
-      });
-
-      // Routing: ALL orders must be happy path for Immediate → Cashier
-      // Any non-happy-path order → Approver (no Mixed path)
-      const allImmediate = active.every((o) => o.isHappyPath);
-
-      // Payment type label is based on zterm alone (ZC01 = Immediate), independent of routing
-      const ztermHasImmediate = active.some((o) => o.payTermCode === "ZC01");
-      const ztermHasCredit    = active.some((o) => o.payTermCode !== "ZC01");
-      const ztermPaymentType  = ztermHasImmediate && ztermHasCredit ? "MIXED"
-                              : ztermHasImmediate ? "IMMEDIATE"
-                              : "CREDIT";
-
-      if (allImmediate) {
-        // All happy path → Cashier
+        // Payment type label recorded for reporting/reconciliation only — does not affect routing.
+        const ztermHasImmediate = active.some((o) => o.payTermCode === "ZC01");
+        const ztermHasCredit    = active.some((o) => o.payTermCode !== "ZC01");
+        const ztermPaymentType  = ztermHasImmediate && ztermHasCredit ? "MIXED"
+                                : ztermHasImmediate ? "IMMEDIATE"
+                                : "CREDIT";
         await prisma.gatePass.update({
           where: { id: gatePass.id },
-          data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
+          data: { paymentType: ztermPaymentType, hasImmediate: ztermHasImmediate, hasCredit: ztermHasCredit },
         });
-        gatePass.status = "CASHIER_REVIEW";
-        const cashiers = await getCashiersForLocation(approverLocation);
-        if (cashiers.length > 0) {
-          await prisma.notification.createMany({
-            data: cashiers.map((c) => ({
-              userId: c.id,
-              type: "CASHIER_REVIEW_REQUIRED",
-              title: "CD Payment Clearance Required",
-              message: `${gatePassNumber} (${gatePass.vehicle}) — Customer Delivery, immediate payment. Please confirm payment clearance.`,
-              gatePassId: gatePass.id,
-            })),
-          });
-        }
-        return NextResponse.json({ gatePass }, { status: 201 });
-      } else {
-        // One or more non-happy-path orders → Approver
-        // Label reflects actual zterm (ZC01 = Immediate, other = Credit)
-        const approverMsg = ztermHasImmediate && !ztermHasCredit
-          ? `${gatePassNumber} (${gatePass.vehicle}) — immediate payment order not yet fully invoiced (billing pending). Please review and approve.`
-          : `${gatePassNumber} (${gatePass.vehicle}) — credit payment terms detected. Please review and approve.`;
-        await routeToApprover(approverMsg, {
-          hasImmediate: ztermHasImmediate,
-          hasCredit:    ztermHasCredit,
-          paymentType:  ztermPaymentType,
-        });
-        return NextResponse.json({ gatePass }, { status: 201 });
       }
     } catch (err) {
-      // SAP fetch failed — notify initiator and route to Approver as safe default
-      console.error("[CD] SAP fetch error:", err);
-      await prisma.notification.create({
-        data: {
-          userId: gatePass.createdById,
-          type: "GATE_PASS_SUBMITTED",
-          title: "SAP Order Lookup Failed",
-          message: `Gate pass ${gatePassNumber} was created but SAP order data could not be retrieved. The pass has been sent to an approver for manual review.`,
-          gatePassId: gatePass.id,
-        },
-      });
-      await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — SAP order lookup failed. Please review manually.`);
-      return NextResponse.json({ gatePass }, { status: 201 });
+      // Record-keeping only — a SAP lookup failure never blocks or reroutes the pass.
+      console.error("[CD] SAP order lookup failed (record-keeping only; pass proceeds to Security):", err);
     }
+
+    const secWhere = approverLocation
+      ? { role: "SECURITY_OFFICER" as any, defaultLocation: approverLocation }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    if (secOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Customer Delivery Approved — Confirm Gate OUT",
+          message: `${gatePassNumber} (${gatePass.vehicle}) — customer delivery approved. Please confirm Gate OUT.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    return NextResponse.json({ gatePass }, { status: 201 });
   }
 
   // MAIN_IN created: notify Security Officers at fromLocation (initiator's DIMO location — vehicle arriving for service)

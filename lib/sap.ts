@@ -160,7 +160,7 @@ function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
  */
 export async function fetchSapVehicles(
   q: string,
-  passType: "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "both" = "both"
+  passType: "LOCATION_TRANSFER" | "CUSTOMER_DELIVERY" | "TEST_DRIVE" | "both" = "both"
 ): Promise<SapVehicle[]> {
 
   // Send chassis filter to SAP when query is >= 3 chars — reduces payload.
@@ -179,7 +179,8 @@ export async function fetchSapVehicles(
 
   let raw: SapVehicle[];
 
-  if (passType === "LOCATION_TRANSFER") {
+  if (passType === "LOCATION_TRANSFER" || passType === "TEST_DRIVE") {
+    // Test Drive reuses the exact same vehicle search/filter as Location Transfer.
     raw = await fetchIN();
   } else if (passType === "CUSTOMER_DELIVERY") {
     raw = await fetchOUT();
