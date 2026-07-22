@@ -939,6 +939,8 @@ export default function VehicleReportPage() {
 
                                       </div>
 
+                                      <DriverChangeHistoryPanel passId={p.id} />
+
                                       {/* Timestamps + parent pass link */}
                                       <div className="mt-3 pt-3 flex items-center gap-6 flex-wrap" style={{ borderTop: "1px solid var(--border)" }}>
                                         <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
@@ -1067,6 +1069,57 @@ function DetailGroup({ title, children }: { title: string; children: React.React
         {title}
       </p>
       <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+// Fetches and shows Driver/Carrier change history for a single pass — lazily, only while
+// its row is expanded (this component only mounts inside the isExpanded block below).
+function DriverChangeHistoryPanel({ passId }: { passId: string }) {
+  const [logs, setLogs] = useState<{
+    id: string;
+    previousData: { driverName: string | null; driverNIC: string | null; companyName?: string | null };
+    newData: { driverName: string | null; driverNIC: string | null; companyName?: string | null };
+    changedByName: string;
+    createdAt: string;
+    reason: string | null;
+  }[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/gate-pass/${passId}/driver-update`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(json => { if (json?.changeLogs) setLogs(json.changeLogs); })
+      .catch(() => {});
+  }, [passId]);
+
+  if (logs.length === 0) return null;
+
+  return (
+    <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "var(--text-muted)" }}>
+        Driver / Carrier Change History
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {logs.map(log => {
+          const carrierChanged = (log.previousData.companyName ?? null) !== (log.newData.companyName ?? null) &&
+            (log.newData.companyName || log.previousData.companyName);
+          return (
+            <div key={log.id} className="text-xs">
+              <span style={{ color: "var(--text)" }}>
+                {log.previousData.driverName ?? "—"} ({log.previousData.driverNIC ?? "—"}) &rarr; {log.newData.driverName ?? "—"} ({log.newData.driverNIC ?? "—"})
+              </span>
+              {carrierChanged && (
+                <span style={{ color: "var(--text)" }}> · Carrier: {log.previousData.companyName ?? "—"} &rarr; {log.newData.companyName ?? "—"}</span>
+              )}
+              <br />
+              <span style={{ color: "var(--text-muted)" }}>
+                Changed by {log.changedByName} on {new Date(log.createdAt).toLocaleString()}
+                {log.reason ? ` — ${log.reason}` : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

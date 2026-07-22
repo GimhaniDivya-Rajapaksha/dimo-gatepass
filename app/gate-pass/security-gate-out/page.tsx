@@ -123,6 +123,7 @@ function PassCard({ p, mode, onConfirmed }: {
 
   const passTypeLabel = p.passType === "LOCATION_TRANSFER" ? "Location Transfer"
     : p.passType === "CUSTOMER_DELIVERY" ? "Customer Delivery"
+    : p.passType === "TEST_DRIVE" ? "Test Drive"
     : p.passSubType ? p.passSubType.replace(/_/g, " ") : "After Sales";
 
   const payLabel = p.paymentType === "CREDIT" ? "Credit"
@@ -596,7 +597,8 @@ export default function SecurityGateDashboard() {
         ...allGateOut.filter((p) =>
           (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN" || p.passSubType === "SUB_OUT")) ||
           p.passType === "LOCATION_TRANSFER" ||
-          p.passType === "CUSTOMER_DELIVERY"
+          p.passType === "CUSTOMER_DELIVERY" ||
+          p.passType === "TEST_DRIVE"
         ),
       ].sort(sortNewestFirst));
 

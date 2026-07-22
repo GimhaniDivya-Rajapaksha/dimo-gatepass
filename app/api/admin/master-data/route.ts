@@ -8,6 +8,14 @@ function isAdmin(session: any) {
   return session?.user?.role === "ADMIN";
 }
 
+// Same format rules already enforced on the Gate Pass creation form's driver fields.
+function isValidNIC(v: string) {
+  return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+}
+function isValidPhone(v: string) {
+  return /^[0-9+\-\s]{7,15}$/.test(v.trim());
+}
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!isAdmin(session)) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
@@ -30,13 +38,14 @@ export async function GET(req: NextRequest) {
   }
 
   if (type === "driver") {
-    const data = await prisma.driverOption.findMany({
+    const data = await (prisma.driverOption as any).findMany({
       where: q ? {
         OR: [
           { name: { contains: q, mode: "insensitive" } },
           { nic: { contains: q, mode: "insensitive" } },
         ],
       } : undefined,
+      include: { carrier: { select: { id: true, companyName: true, registrationNo: true } } },
       orderBy: { name: "asc" },
     });
     return NextResponse.json({ data });
@@ -96,16 +105,33 @@ export async function POST(req: NextRequest) {
   }
 
   if (type === "driver") {
-    const { name, nic, contact } = body;
-    if (!name?.trim() || !nic?.trim())
-      return NextResponse.json({ error: "Name and NIC are required" }, { status: 400 });
+    const { name, nic, licenceNo, contact, carrierId } = body;
+    if (!name?.trim() || !nic?.trim() || !licenceNo?.trim())
+      return NextResponse.json({ error: "Name, NIC, and Driving Licence No. are required" }, { status: 400 });
+    if (!carrierId)
+      return NextResponse.json({ error: "A driver must be assigned to a Carrier Company" }, { status: 400 });
+    if (!isValidNIC(nic))
+      return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)" }, { status: 400 });
+    if (contact?.trim() && !isValidPhone(contact))
+      return NextResponse.json({ error: "Invalid contact number format" }, { status: 400 });
+    const [existingByNic, existingByLicence] = await Promise.all([
+      (prisma.driverOption as any).findUnique({ where: { nic: nic.trim() } }),
+      (prisma.driverOption as any).findUnique({ where: { licenceNo: licenceNo.trim() } }),
+    ]);
+    if (existingByNic || existingByLicence) {
+      return NextResponse.json({
+        error: existingByNic
+          ? `A driver with NIC ${nic.trim()} already exists (${existingByNic.name})`
+          : `A driver with Driving Licence No. ${licenceNo.trim()} already exists (${existingByLicence.name})`,
+      }, { status: 409 });
+    }
     try {
-      const record = await prisma.driverOption.create({
-        data: { name: name.trim(), nic: nic.trim(), contact: contact?.trim() || null },
+      const record = await (prisma.driverOption as any).create({
+        data: { name: name.trim(), nic: nic.trim(), licenceNo: licenceNo.trim(), contact: contact?.trim() || null, carrierId },
       });
       return NextResponse.json({ record });
     } catch {
-      return NextResponse.json({ error: "NIC already exists" }, { status: 409 });
+      return NextResponse.json({ error: "Failed to save driver" }, { status: 409 });
     }
   }
 
@@ -162,17 +188,34 @@ export async function PUT(req: NextRequest) {
   }
 
   if (type === "driver") {
-    const { name, nic, contact } = body;
-    if (!name?.trim() || !nic?.trim())
-      return NextResponse.json({ error: "Name and NIC are required" }, { status: 400 });
+    const { name, nic, licenceNo, contact, carrierId } = body;
+    if (!name?.trim() || !nic?.trim() || !licenceNo?.trim())
+      return NextResponse.json({ error: "Name, NIC, and Driving Licence No. are required" }, { status: 400 });
+    if (!carrierId)
+      return NextResponse.json({ error: "A driver must be assigned to a Carrier Company" }, { status: 400 });
+    if (!isValidNIC(nic))
+      return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)" }, { status: 400 });
+    if (contact?.trim() && !isValidPhone(contact))
+      return NextResponse.json({ error: "Invalid contact number format" }, { status: 400 });
+    const [existingByNic, existingByLicence] = await Promise.all([
+      (prisma.driverOption as any).findUnique({ where: { nic: nic.trim() } }),
+      (prisma.driverOption as any).findUnique({ where: { licenceNo: licenceNo.trim() } }),
+    ]);
+    if ((existingByNic && existingByNic.id !== id) || (existingByLicence && existingByLicence.id !== id)) {
+      return NextResponse.json({
+        error: (existingByNic && existingByNic.id !== id)
+          ? `A driver with NIC ${nic.trim()} already exists (${existingByNic.name})`
+          : `A driver with Driving Licence No. ${licenceNo.trim()} already exists (${existingByLicence.name})`,
+      }, { status: 409 });
+    }
     try {
-      const record = await prisma.driverOption.update({
+      const record = await (prisma.driverOption as any).update({
         where: { id },
-        data: { name: name.trim(), nic: nic.trim(), contact: contact?.trim() || null },
+        data: { name: name.trim(), nic: nic.trim(), licenceNo: licenceNo.trim(), contact: contact?.trim() || null, carrierId },
       });
       return NextResponse.json({ record });
     } catch {
-      return NextResponse.json({ error: "NIC already exists" }, { status: 409 });
+      return NextResponse.json({ error: "Failed to save driver" }, { status: 409 });
     }
   }
 

@@ -64,6 +64,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const gatePass = await (prisma.gatePass as any).findUnique({ where: { id } });
   if (!gatePass) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // LT Return Gate Pass: locked until the original (parent) transfer completes.
+  // returnPassLocked defaults to false for every other pass, so this never affects anything else.
+  if (gatePass.returnPassLocked) {
+    return NextResponse.json({ error: "This Return Gate Pass is locked until the original Location Transfer is completed." }, { status: 400 });
+  }
+
   // APPROVER: approve credit portion of MAIN_OUT (parallel with cashier)
   if (action === "credit_approve") {
     if (session.user.role !== "APPROVER" && session.user.role !== "ADMIN") {
@@ -483,15 +489,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const isSubOutIn = gatePass.passSubType === "SUB_OUT_IN";
     const isSubIn    = gatePass.passSubType === "SUB_IN";
     const isLT       = gatePass.passType === "LOCATION_TRANSFER";
+    const isTestDrive = gatePass.passType === "TEST_DRIVE";
 
     // SUB_IN: confirmed at APPROVED (Security B confirms vehicle entered ASO compound)
     // MAIN_IN: confirmed at APPROVED directly (no initiator step) or INITIATOR_IN (legacy) or GATE_OUT (legacy)
     // SUB_OUT: destination Security confirms Gate IN at GATE_OUT or INITIATOR_OUT status
     //   (INITIATOR_OUT = Initiator confirmed departure but no source SO processed Gate OUT)
+    // Test Drive: same-plant return, confirmed at GATE_OUT (same as LT)
     // Others: confirmed at GATE_OUT
     const validSubIn          = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
     const validApprovedMainIn = isMainIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
-    const validGateOut        = gatePass.status === "GATE_OUT" && (isMainIn || isSubOut || isSubOutIn || isLT);
+    const validGateOut        = gatePass.status === "GATE_OUT" && (isMainIn || isSubOut || isSubOutIn || isLT || isTestDrive);
     const validInitiatorIn    = gatePass.status === "INITIATOR_IN" && isMainIn;
     if (!validSubIn && !validApprovedMainIn && !validGateOut && !validInitiatorIn) {
       return NextResponse.json({ error: "Not eligible for Security Gate IN confirmation" }, { status: 400 });
@@ -509,6 +517,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(body.mismatchNote ? { comments: `[MISMATCH] ${body.mismatchNote}` } : {}),
       },
     });
+
+    // LT Return Gate Pass: unlock the linked return pass now that the original has completed.
+    if (isLT) {
+      await prisma.gatePass.updateMany({
+        where: { parentPassId: gatePass.id, returnPassLocked: true },
+        data: { returnPassLocked: false },
+      });
+    }
 
     const targetLabel = gatePass.toLocation as string | null;
     if ((isSubOut || isSubOutIn || validApprovedMainIn || validSubIn) && targetLabel) {
@@ -866,6 +882,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers
+    // and Initiators at the same plant that the vehicle is out and awaiting return confirmation.
+    if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
+      const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+      const [tdSecurity, tdInitiators] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...plantWhere } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...plantWhere } }),
+      ]);
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators].map((u) => [u.id, u])).values()];
+      if (tdRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: tdRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_RECEIVED",
+            title: "Test Drive Vehicle Out — Awaiting Return",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle left for a Test Drive. Check Vehicle Arrivals to confirm when it returns.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
     // For After Sales MAIN_OUT: notify RECIPIENTs
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") {
       const recipients = await prisma.user.findMany({ where: { role: "RECIPIENT" } });
@@ -943,8 +981,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!["APPROVED", "GATE_OUT", "COMPLETED"].includes(gatePass.status)) {
       return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
     }
-    if (gatePass.passType !== "LOCATION_TRANSFER" && gatePass.passType !== "CUSTOMER_DELIVERY") {
-      return NextResponse.json({ error: "Print Gate OUT is only available for Location Transfer and Customer Delivery" }, { status: 400 });
+    if (gatePass.passType !== "LOCATION_TRANSFER" && gatePass.passType !== "CUSTOMER_DELIVERY" && gatePass.passType !== "TEST_DRIVE") {
+      return NextResponse.json({ error: "Print Gate OUT is only available for Location Transfer, Customer Delivery, and Test Drive" }, { status: 400 });
     }
 
     // Already past APPROVED — just return, status is fine
@@ -1113,6 +1151,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           printLiveUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
           console.error("[print_gate_out] SAP location update failed:", error);
         }
+      }
+    }
+
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers
+    // and Initiators at the same plant that the vehicle is out and awaiting return confirmation.
+    if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
+      const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+      const [tdSecurity, tdInitiators] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...plantWhere } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", ...plantWhere } }),
+      ]);
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators].map((u) => [u.id, u])).values()];
+      if (tdRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: tdRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_RECEIVED",
+            title: "Test Drive Vehicle Out — Awaiting Return",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle left for a Test Drive. Check Vehicle Arrivals to confirm when it returns.`,
+            gatePassId: gatePass.id,
+          })),
+        });
       }
     }
 
@@ -1445,9 +1505,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const recipientAllowed = session.user.role === "RECIPIENT"
       && (gatePass.passType !== "AFTER_SALES"
           || ["MAIN_IN", "MAIN_OUT", "SUB_OUT"].includes(gatePass.passSubType ?? ""));
-    // INITIATOR can confirm gate_in for LT passes heading to their location, and AFTER_SALES
+    // INITIATOR can confirm gate_in for LT passes heading to their location, AFTER_SALES, and TEST_DRIVE
     const initiatorAllowed = session.user.role === "INITIATOR"
-      && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES");
+      && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES" || gatePass.passType === "TEST_DRIVE");
     const asoAllowed = session.user.role === "AREA_SALES_OFFICER"
       && (gatePass.passType === "AFTER_SALES" || gatePass.passType === "LOCATION_TRANSFER");
     const canGateIn = recipientAllowed
@@ -1476,6 +1536,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(mismatchNote ? { comments: `[MISMATCH] ${mismatchNote}` } : {}),
       },
     });
+
+    // LT Return Gate Pass: unlock the linked return pass now that the original has completed.
+    if (gatePass.passType === "LOCATION_TRANSFER") {
+      await prisma.gatePass.updateMany({
+        where: { parentPassId: gatePass.id, returnPassLocked: true },
+        data: { returnPassLocked: false },
+      });
+    }
 
     await prisma.notification.create({
       data: {
@@ -1568,6 +1636,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       transportMode, carrierName, carrierRegNo, companyName,
       driverName, driverNIC, driverContact,
       mileage, insurance, garagePlate,
+      remarks,
       requestedBy,
     } = body;
 
@@ -1601,6 +1670,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(mileage        !== undefined ? { mileage }        : {}),
         ...(insurance      !== undefined ? { insurance }      : {}),
         ...(garagePlate    !== undefined ? { garagePlate }    : {}),
+        ...(remarks        !== undefined ? { remarks }        : {}),
         ...(requestedBy    !== undefined ? { requestedBy }    : {}),
         ...(approver !== undefined ? { intendedApprover: (typeof approver === "string" ? approver.trim() || null : null) } : {}),
       },
@@ -1688,8 +1758,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const isCdCashierReview = gatePass.passType === "CUSTOMER_DELIVERY" && gatePass.status === "CASHIER_REVIEW";
-    if (gatePass.status !== "PENDING_APPROVAL" && !isCdCashierReview) {
-      return NextResponse.json({ error: "Only pending passes can be cancelled" }, { status: 400 });
+    // Cancellable up until the vehicle actually leaves: PENDING_APPROVAL, APPROVED (before
+    // Security Gate Out / print), or the existing CD CASHIER_REVIEW exception.
+    const cancellableStatuses = ["PENDING_APPROVAL", "APPROVED"];
+    if (!cancellableStatuses.includes(gatePass.status) && !isCdCashierReview) {
+      return NextResponse.json({ error: "This gate pass can no longer be cancelled — it has already been gated out." }, { status: 400 });
     }
 
     const updated = await prisma.gatePass.update({
@@ -1697,6 +1770,55 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { status: "CANCELLED" as any },
     });
+
+    // Notify + email the approver and the creator that this pass was cancelled.
+    try {
+      const creator = await prisma.user.findUnique({
+        where: { id: gatePass.createdById },
+        select: { id: true, name: true, email: true },
+      });
+      let approverUser: { id: string; name: string; email: string } | null = null;
+      if (gatePass.approvedById) {
+        approverUser = await prisma.user.findUnique({
+          where: { id: gatePass.approvedById },
+          select: { id: true, name: true, email: true },
+        });
+      } else if (gatePass.intendedApprover) {
+        approverUser = await prisma.user.findFirst({
+          where: { name: { equals: gatePass.intendedApprover, mode: "insensitive" } },
+          select: { id: true, name: true, email: true },
+        });
+      }
+
+      const recipients = [creator, approverUser].filter(
+        (u): u is { id: string; name: string; email: string } => !!u
+      );
+      const uniqueRecipients = [...new Map(recipients.map((u) => [u.id, u])).values()];
+
+      if (uniqueRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: uniqueRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_REJECTED",
+            title: "Gate Pass Cancelled",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) was cancelled by ${session.user.name ?? "the initiator"}.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+
+      const { sendGatePassCancelledEmail } = await import("@/lib/email");
+      for (const u of uniqueRecipients) {
+        sendGatePassCancelledEmail(u.email, u.name, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          cancelledByName: session.user.name ?? "the initiator",
+        }).catch((e: unknown) => console.error("[email] Gate Pass Cancelled notification failed:", e));
+      }
+    } catch (e) {
+      console.error("[cancel] notify approver/creator failed:", e);
+    }
 
     // Notify cashiers when a CD pass in CASHIER_REVIEW is cancelled
     if (isCdCashierReview) {

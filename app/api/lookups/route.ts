@@ -11,6 +11,14 @@ function normalize(text: string) {
   return text.trim();
 }
 
+// Same format rules already enforced on the Gate Pass creation form's driver fields.
+function isValidNIC(v: string) {
+  return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+}
+function isValidPhone(v: string) {
+  return /^[0-9+\-\s]{7,15}$/.test(v.trim());
+}
+
 function inferLocationType(loc: { storageLocation: string; storageDescription: string }): string {
   if (loc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
   const desc = loc.storageDescription.trim().toLowerCase();
@@ -505,31 +513,34 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    if (field === "driverNIC") {
-      const drivers = await (prisma as any).driverOption.findMany({
-        where: q ? { OR: [{ nic: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : undefined,
-        orderBy: { nic: "asc" },
-        take,
-      });
-      return NextResponse.json({
-        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
-          id: d.id, value: d.nic, label: `${d.nic} — ${d.name}`,
-          driverName: d.name, driverContact: d.contact ?? "",
-        })),
-      });
-    }
+    if (field === "driverNIC" || field === "driverName") {
+      // Filters the driver list to whichever Carrier is currently selected on the form —
+      // resolved either from an already-known CarrierOption id (the post-approval
+      // Change Driver / Carrier screen) or from a raw registration no. string (the LT/CD/
+      // After Sales creation forms, which only hold free-text Carrier fields in state).
+      // Falls back to the full unfiltered list when the carrier isn't resolvable, so an
+      // unmapped/new carrier never results in a dead-end empty dropdown.
+      let carrierIdFilter = searchParams.get("carrierId") ?? undefined;
+      const carrierRegNoParam = searchParams.get("carrierRegNo") ?? undefined;
+      if (!carrierIdFilter && carrierRegNoParam) {
+        const resolvedCarrier = await prisma.carrierOption.findUnique({ where: { registrationNo: carrierRegNoParam } });
+        if (resolvedCarrier) carrierIdFilter = resolvedCarrier.id;
+      }
 
-    if (field === "driverName") {
       const drivers = await (prisma as any).driverOption.findMany({
-        where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nic: { contains: q, mode: "insensitive" } }] } : undefined,
-        orderBy: { name: "asc" },
+        where: {
+          ...(q ? { OR: [{ nic: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : {}),
+          ...(carrierIdFilter ? { carrierId: carrierIdFilter } : {}),
+        },
+        orderBy: field === "driverNIC" ? { nic: "asc" } : { name: "asc" },
         take,
       });
       return NextResponse.json({
-        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
-          id: d.id, value: d.name, label: `${d.name} (${d.nic})`,
-          driverNIC: d.nic, driverContact: d.contact ?? "",
-        })),
+        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null; licenceNo: string | null }) =>
+          field === "driverNIC"
+            ? { id: d.id, value: d.nic, label: `${d.nic} — ${d.name}`, driverName: d.name, driverContact: d.contact ?? "", driverLicenceNo: d.licenceNo ?? "" }
+            : { id: d.id, value: d.name, label: `${d.name} (${d.nic})`, driverNIC: d.nic, driverContact: d.contact ?? "", driverLicenceNo: d.licenceNo ?? "" }
+        ),
       });
     }
 
@@ -641,15 +652,37 @@ export async function POST(req: NextRequest) {
   if (field === "driver") {
     const name = normalize(body.name ?? "");
     const nic  = normalize(body.nic  ?? "");
+    const licenceNo = normalize(body.licenceNo ?? "");
     const contact = normalize(body.contact ?? "") || null;
-    if (!name || !nic) return NextResponse.json({ error: "name and nic are required" }, { status: 400 });
+    const carrierId = normalize(body.carrierId ?? "") || null;
+    if (!name || !nic || !licenceNo) {
+      return NextResponse.json({ error: "Name, NIC, and Driving Licence No. are all required." }, { status: 400 });
+    }
+    if (!carrierId) {
+      return NextResponse.json({ error: "A driver must be assigned to a Carrier Company." }, { status: 400 });
+    }
+    if (!isValidNIC(nic)) {
+      return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+    }
+    if (contact && !isValidPhone(contact)) {
+      return NextResponse.json({ error: "Invalid contact number format." }, { status: 400 });
+    }
     try {
-      const created = await (prisma as any).driverOption.upsert({
-        where: { nic },
-        update: { name, contact },
-        create: { name, nic, contact },
+      const [existingByNic, existingByLicence] = await Promise.all([
+        (prisma as any).driverOption.findUnique({ where: { nic } }),
+        (prisma as any).driverOption.findUnique({ where: { licenceNo } }),
+      ]);
+      if (existingByNic || existingByLicence) {
+        return NextResponse.json({
+          error: existingByNic
+            ? `A driver with NIC ${nic} already exists (${existingByNic.name}).`
+            : `A driver with Driving Licence No. ${licenceNo} already exists (${existingByLicence.name}).`,
+        }, { status: 409 });
+      }
+      const created = await (prisma as any).driverOption.create({
+        data: { name, nic, licenceNo, contact, carrierId },
       });
-      return NextResponse.json({ option: { id: created.id, name: created.name, nic: created.nic, contact: created.contact } });
+      return NextResponse.json({ option: { id: created.id, name: created.name, nic: created.nic, licenceNo: created.licenceNo, contact: created.contact, carrierId: created.carrierId } });
     } catch (e) {
       console.error("Driver save error:", e);
       return NextResponse.json({ error: "Failed to save driver." }, { status: 500 });
