@@ -415,8 +415,7 @@ function InitiatorGatePassDetailPageInner() {
     } catch { /* non-critical */ }
   }
 
-  async function searchCarriers(q: string) {
-    setCarrierSearchQuery(q);
+  async function loadCarrierOptions(q: string) {
     try {
       const res = await fetch(`/api/lookups?field=companyName&q=${encodeURIComponent(q)}&limit=50`);
       if (res.ok) {
@@ -424,6 +423,11 @@ function InitiatorGatePassDetailPageInner() {
         setCarrierSearchResults(json.options ?? []);
       }
     } catch { /* non-critical */ }
+  }
+
+  async function searchCarriers(q: string) {
+    setCarrierSearchQuery(q);
+    void loadCarrierOptions(q);
   }
 
   function pickCarrier(o: CarrierOptionResult) {
@@ -466,6 +470,8 @@ function InitiatorGatePassDetailPageInner() {
     // Preload the full driver list (from master data, filtered to this carrier when resolved)
     // so the picker behaves as a browsable dropdown, not just a type-to-search box.
     void loadDriverOptions("", resolvedCarrierId);
+    // Same for Carrier Company — browsable on open instead of requiring the user to type first.
+    void loadCarrierOptions("");
   }
 
   async function searchDrivers(q: string) {
