@@ -779,6 +779,13 @@ export default function CreateGatePassPage() {
     companyName: "", carrierRegNo: "",
     driverNIC: "", driverName: "", contactNo: "", remarks: "",
   });
+  // LT Return's own Carrier/Driver dropdown options — deliberately separate from the
+  // outbound leg's `lookupOptions` above so typing in this section never clobbers the
+  // outbound Transportation Details dropdowns (and vice versa).
+  const [ltReturnLookupOptions, setLtReturnLookupOptions] = useState<{
+    companyName: LookupOption[]; carrierRegNo: LookupOption[]; driverNIC: LookupOption[]; driverName: LookupOption[];
+  }>({ companyName: [], carrierRegNo: [], driverNIC: [], driverName: [] });
+  const [noDriversForLtReturnCarrier, setNoDriversForLtReturnCarrier] = useState(false);
 
   // Customer Delivery fields
   const [cd, setCd] = useState({
@@ -1260,6 +1267,37 @@ export default function CreateGatePassPage() {
       const options = data.options ?? [];
       setLookupOptions((prev) => ({ ...prev, driverNIC: options, driverName: [] }));
       setNoDriversForCarrier(options.length === 0);
+    } catch { /* non-critical */ }
+  };
+
+  // LT Return Gate Pass — dedicated Carrier/Driver lookup fetchers for the Return Journey
+  // Details section only. Kept fully separate from fetchLookup/refreshDriverOptionsForCarrier
+  // above so the outbound leg's Transportation Details fields and behavior are untouched.
+  const fetchLtReturnLookup = async (field: "companyName" | "carrierRegNo" | "driverNIC" | "driverName", q = "") => {
+    try {
+      const params = new URLSearchParams({ field, q, limit: "40" });
+      if ((field === "driverNIC" || field === "driverName") && ltReturn.carrierRegNo) {
+        params.set("carrierRegNo", ltReturn.carrierRegNo);
+      }
+      const res = await fetch(`/api/lookups?${params.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { options?: LookupOption[] };
+      setLtReturnLookupOptions((prev) => ({ ...prev, [field]: data.options ?? [] }));
+    } catch {
+      // silently keep existing options
+    }
+  };
+
+  const refreshLtReturnDriverOptionsForCarrier = async (carrierRegNo: string) => {
+    if (!carrierRegNo) { setNoDriversForLtReturnCarrier(false); return; }
+    try {
+      const params = new URLSearchParams({ field: "driverNIC", q: "", limit: "40", carrierRegNo });
+      const res = await fetch(`/api/lookups?${params.toString()}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { options?: LookupOption[] };
+      const options = data.options ?? [];
+      setLtReturnLookupOptions((prev) => ({ ...prev, driverNIC: options, driverName: [] }));
+      setNoDriversForLtReturnCarrier(options.length === 0);
     } catch { /* non-critical */ }
   };
 
@@ -5463,19 +5501,62 @@ export default function CreateGatePassPage() {
               {ltReturn.transportMode === "CARRIER" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <Field label="Company Name" required error={errors.ltReturnCompanyName}>
-                    <TextInput value={ltReturn.companyName} onChange={(v) => setLtReturn(p => ({ ...p, companyName: v }))} placeholder="Enter carrier company name" error={errors.ltReturnCompanyName} />
+                    <SearchInput
+                      value={ltReturn.companyName}
+                      onChange={(v) => { setLtReturn(p => ({ ...p, companyName: v })); void fetchLtReturnLookup("companyName", v); }}
+                      onFocus={() => void fetchLtReturnLookup("companyName", ltReturn.companyName)}
+                      onSelect={(o) => {
+                        setLtReturn(p => ({ ...p, companyName: o.value, carrierRegNo: o.registrationNo ?? p.carrierRegNo, driverNIC: "", driverName: "", contactNo: "" }));
+                        if (o.registrationNo) void refreshLtReturnDriverOptionsForCarrier(o.registrationNo);
+                      }}
+                      placeholder="Search carrier company name"
+                      error={errors.ltReturnCompanyName}
+                      options={ltReturnLookupOptions.companyName}
+                    />
                   </Field>
                   <Field label="Carrier Registration No" required error={errors.ltReturnCarrierRegNo}>
-                    <TextInput value={ltReturn.carrierRegNo} onChange={(v) => setLtReturn(p => ({ ...p, carrierRegNo: v }))} placeholder="Enter carrier registration no" error={errors.ltReturnCarrierRegNo} />
+                    <SearchInput
+                      value={ltReturn.carrierRegNo}
+                      onChange={(v) => { setLtReturn(p => ({ ...p, carrierRegNo: v })); void fetchLtReturnLookup("carrierRegNo", v); }}
+                      onFocus={() => void fetchLtReturnLookup("carrierRegNo", ltReturn.carrierRegNo)}
+                      onSelect={(o) => {
+                        setLtReturn(p => ({ ...p, carrierRegNo: o.value, companyName: o.companyName ?? p.companyName, driverNIC: "", driverName: "", contactNo: "" }));
+                        void refreshLtReturnDriverOptionsForCarrier(o.value);
+                      }}
+                      placeholder="Search carrier registration no"
+                      error={errors.ltReturnCarrierRegNo}
+                      options={ltReturnLookupOptions.carrierRegNo}
+                    />
                   </Field>
+                </div>
+              )}
+              {ltReturn.transportMode === "CARRIER" && noDriversForLtReturnCarrier && (
+                <div className="mb-4 px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "#fffbeb", color: "#92400e" }}>
+                  No drivers are available for the selected carrier.
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="DL / NIC No" required error={errors.ltReturnDriverNIC}>
-                  <TextInput value={ltReturn.driverNIC} onChange={(v) => setLtReturn(p => ({ ...p, driverNIC: v }))} placeholder="Enter NIC / DL no" error={errors.ltReturnDriverNIC} />
+                  <SearchInput
+                    value={ltReturn.driverNIC}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, driverNIC: v })); void fetchLtReturnLookup("driverNIC", v); }}
+                    onFocus={() => void fetchLtReturnLookup("driverNIC", ltReturn.driverNIC)}
+                    onSelect={(o) => setLtReturn(p => ({ ...p, driverNIC: o.value, driverName: o.driverName ?? p.driverName, contactNo: o.driverContact ?? p.contactNo }))}
+                    placeholder="Search NIC / DL no..."
+                    error={errors.ltReturnDriverNIC}
+                    options={ltReturnLookupOptions.driverNIC}
+                  />
                 </Field>
                 <Field label="Driver Name" required error={errors.ltReturnDriverName}>
-                  <TextInput value={ltReturn.driverName} onChange={(v) => setLtReturn(p => ({ ...p, driverName: v }))} placeholder="Enter driver name" error={errors.ltReturnDriverName} />
+                  <SearchInput
+                    value={ltReturn.driverName}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, driverName: v })); void fetchLtReturnLookup("driverName", v); }}
+                    onFocus={() => void fetchLtReturnLookup("driverName", ltReturn.driverName)}
+                    onSelect={(o) => setLtReturn(p => ({ ...p, driverName: o.value, driverNIC: o.driverNIC ?? p.driverNIC, contactNo: o.driverContact ?? p.contactNo }))}
+                    placeholder="Search driver name..."
+                    error={errors.ltReturnDriverName}
+                    options={ltReturnLookupOptions.driverName}
+                  />
                 </Field>
                 <Field label="Contact No" required error={errors.ltReturnContactNo}>
                   <TextInput value={ltReturn.contactNo} onChange={(v) => setLtReturn(p => ({ ...p, contactNo: v }))} placeholder="Enter driver contact no" numericOnly maxLength={10} error={errors.ltReturnContactNo} />
