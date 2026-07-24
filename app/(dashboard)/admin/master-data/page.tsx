@@ -27,6 +27,10 @@ function fmtDate(iso: string) {
 function isValidNIC(v: string) {
   return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
 }
+// Sri Lankan driving licence number: 1 letter followed by 7 digits (e.g. B1234567).
+function isValidLicenceNo(v: string) {
+  return /^[A-Za-z][0-9]{7}$/.test(v.trim());
+}
 function isValidPhone(v: string) {
   return /^[0-9+\-\s]{7,15}$/.test(v.trim());
 }
@@ -135,6 +139,10 @@ export default function MasterDataPage() {
     }
     if (modal.type === "driver" && !isValidNIC(formDriver.nic)) {
       setError("Invalid NIC format (e.g. 123456789V or 200012345678).");
+      return;
+    }
+    if (modal.type === "driver" && !isValidLicenceNo(formDriver.licenceNo)) {
+      setError("Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits).");
       return;
     }
     if (modal.type === "driver" && formDriver.contact && !isValidPhone(formDriver.contact)) {

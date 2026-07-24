@@ -15,6 +15,10 @@ function isValidNIC(v: string) {
 function isValidPhone(v: string) {
   return /^[0-9+\-\s]{7,15}$/.test(v.trim());
 }
+// Sri Lankan driving licence number: 1 letter followed by 7 digits (e.g. B1234567).
+function isValidLicenceNo(v: string) {
+  return /^[A-Za-z][0-9]{7}$/.test(v.trim());
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -112,6 +116,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A driver must be assigned to a Carrier Company" }, { status: 400 });
     if (!isValidNIC(nic))
       return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)" }, { status: 400 });
+    if (!isValidLicenceNo(licenceNo))
+      return NextResponse.json({ error: "Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits)" }, { status: 400 });
     if (contact?.trim() && !isValidPhone(contact))
       return NextResponse.json({ error: "Invalid contact number format" }, { status: 400 });
     const [existingByNic, existingByLicence] = await Promise.all([
@@ -195,6 +201,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "A driver must be assigned to a Carrier Company" }, { status: 400 });
     if (!isValidNIC(nic))
       return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)" }, { status: 400 });
+    if (!isValidLicenceNo(licenceNo))
+      return NextResponse.json({ error: "Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits)" }, { status: 400 });
     if (contact?.trim() && !isValidPhone(contact))
       return NextResponse.json({ error: "Invalid contact number format" }, { status: 400 });
     const [existingByNic, existingByLicence] = await Promise.all([
