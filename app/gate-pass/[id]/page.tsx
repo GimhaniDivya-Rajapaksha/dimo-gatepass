@@ -1249,8 +1249,8 @@ function InitiatorGatePassDetailPageInner() {
                 <button
                   type="button"
                   onClick={() => void openDriverChangeModal()}
-                  className="text-xs font-bold px-3.5 py-2 rounded-lg border transition-all hover:opacity-80"
-                  style={{ borderColor: "var(--border)", color: "var(--text)", background: "var(--surface2)" }}
+                  className="text-xs font-bold px-3.5 py-2 rounded-lg border transition-all hover:opacity-90"
+                  style={{ borderColor: "#2563eb", color: "#fff", background: "#2563eb" }}
                 >
                   Change Driver / Carrier
                 </button>
