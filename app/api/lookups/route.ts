@@ -18,6 +18,10 @@ function isValidNIC(v: string) {
 function isValidPhone(v: string) {
   return /^[0-9+\-\s]{7,15}$/.test(v.trim());
 }
+// Sri Lankan driving licence number: 1 letter followed by 7 digits (e.g. B1234567).
+function isValidLicenceNo(v: string) {
+  return /^[A-Za-z][0-9]{7}$/.test(v.trim());
+}
 
 function inferLocationType(loc: { storageLocation: string; storageDescription: string }): string {
   if (loc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
@@ -663,6 +667,9 @@ export async function POST(req: NextRequest) {
     }
     if (!isValidNIC(nic)) {
       return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+    }
+    if (!isValidLicenceNo(licenceNo)) {
+      return NextResponse.json({ error: "Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits)." }, { status: 400 });
     }
     if (contact && !isValidPhone(contact)) {
       return NextResponse.json({ error: "Invalid contact number format." }, { status: 400 });
