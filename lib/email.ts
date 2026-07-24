@@ -255,7 +255,7 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
   <table width="100%" class="desktop-hd" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
     <tr>
       <td width="80" style="padding:18px 14px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:80px">
-        <img src="cid:logo@dimo" alt="DIMO" style="width:72px;height:auto;display:block;margin:0 auto">
+        <img src="cid:logo@dimo" alt="DIMO" width="72" height="72" style="width:72px;height:72px;display:block;margin:0 auto">
       </td>
       <td style="padding:18px 16px;vertical-align:middle">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
@@ -273,7 +273,7 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
       <tr>
         <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
-          <img src="cid:logo@dimo" alt="DIMO" style="width:64px;height:auto;display:block">
+          <img src="cid:logo@dimo" alt="DIMO" width="64" height="64" style="width:64px;height:64px;display:block">
         </td>
         <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
           <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Gate Pass No.</div>
