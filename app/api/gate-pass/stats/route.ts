@@ -43,8 +43,12 @@ export async function GET() {
         { parentPass: { createdById: userId } },
       ],
     };
+  } else if (role === "APPROVER") {
+    // Test Drive is auto-approved with no Approver workflow — must never count
+    // toward or appear in an Approver's stats (e.g. the Approved card).
+    scopeWhere = { passType: { not: "TEST_DRIVE" } };
   }
-  // APPROVER, CASHIER, SECURITY_OFFICER, ADMIN → all passes for Approved/Rejected/Completed
+  // CASHIER, SECURITY_OFFICER, ADMIN → all passes for Approved/Rejected/Completed
 
   try {
     const all = await prisma.gatePass.findMany({

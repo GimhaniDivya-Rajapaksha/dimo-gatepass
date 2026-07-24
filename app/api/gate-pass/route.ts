@@ -296,6 +296,13 @@ export async function GET(req: NextRequest) {
     (where as any).updatedAt = { gte: new Date(updatedAfter) };
   }
 
+  // Test Drive has no Approver workflow at all — Approvers must never see Test Drive
+  // passes in any list (pending queue, approved history, or "All" tab), regardless of status.
+  if (role === "APPROVER") {
+    const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    (where as any).AND = [...existingAnd, { passType: { not: "TEST_DRIVE" } }];
+  }
+
   try {
     // Run these sequentially to avoid exhausting tiny pooled connection limits
     // during dev and high-concurrency dashboard loads.
@@ -742,30 +749,35 @@ export async function POST(req: NextRequest) {
   }
 
   // Notify selected approver if provided; otherwise notify all APPROVERs.
-  const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
-  let approvers = selectedApproverName
-    ? await prisma.user.findMany({
-        where: {
-          role: "APPROVER",
-          name: { equals: selectedApproverName, mode: "insensitive" },
-        },
-      })
-    : await prisma.user.findMany({ where: { role: "APPROVER" } });
+  // Test Drive has no approval workflow at all (see isTestDrive above, which auto-approves
+  // it at creation) — it must never notify, email, or otherwise involve any Approver.
+  let approvers: { id: string; email: string; name: string }[] = [];
+  if (!isTestDrive) {
+    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
+    approvers = selectedApproverName
+      ? await prisma.user.findMany({
+          where: {
+            role: "APPROVER",
+            name: { equals: selectedApproverName, mode: "insensitive" },
+          },
+        })
+      : await prisma.user.findMany({ where: { role: "APPROVER" } });
 
-  if (selectedApproverName && approvers.length === 0) {
-    approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-  }
+    if (selectedApproverName && approvers.length === 0) {
+      approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+    }
 
-  if (approvers.length > 0) {
-    await prisma.notification.createMany({
-      data: approvers.map((a) => ({
-        userId: a.id,
-        type: "GATE_PASS_SUBMITTED",
-        title: "New Gate Pass Submitted",
-        message: `${session.user.name} submitted ${gatePassNumber} for approval.`,
-        gatePassId: gatePass.id,
-      })),
-    });
+    if (approvers.length > 0) {
+      await prisma.notification.createMany({
+        data: approvers.map((a) => ({
+          userId: a.id,
+          type: "GATE_PASS_SUBMITTED",
+          title: "New Gate Pass Submitted",
+          message: `${session.user.name} submitted ${gatePassNumber} for approval.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
   }
 
   // Notify ADMIN users so the dot indicator appears on their dashboard
