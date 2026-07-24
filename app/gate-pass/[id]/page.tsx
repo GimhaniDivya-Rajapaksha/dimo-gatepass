@@ -1041,10 +1041,15 @@ function InitiatorGatePassDetailPageInner() {
           .print-doc .p-3  { padding: 4px 8px !important; }
           .print-doc .p-4  { padding: 5px 10px !important; }
           .print-doc .p-5  { padding: 6px 12px !important; }
+          .print-doc .py-2 { padding-top: 2px !important; padding-bottom: 2px !important; }
           .print-doc .py-3 { padding-top: 3px !important; padding-bottom: 3px !important; }
+          .print-doc .py-4 { padding-top: 4px !important; padding-bottom: 4px !important; }
           .print-doc .px-6 { padding-left: 10px !important; padding-right: 10px !important; }
           .print-doc .gap-3 { gap: 4px !important; }
           .print-doc .gap-4 { gap: 5px !important; }
+          .print-doc .mt-6 { margin-top: 6px !important; }
+          .print-doc .mt-4 { margin-top: 4px !important; }
+          .print-doc .pt-4 { padding-top: 4px !important; }
 
           /* Signature row */
           .print-sig { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #d1d5db !important; }
