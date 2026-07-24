@@ -373,6 +373,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Carrier mode: the driver must already exist in Driver Master Data and be mapped to the
+  // selected carrier — free-typed driver details are never accepted here. Enforced server-side
+  // so the UI's dropdown-only picker can never be bypassed by calling this API directly.
+  // Test Drive is unaffected — its own transportMode is always "DRIVER"/"CUSTOMER", never "CARRIER".
+  if (body.transportMode === "CARRIER") {
+    const carrierRegNo = typeof body.carrierRegNo === "string" ? body.carrierRegNo.trim() : "";
+    const driverNIC = typeof body.driverNIC === "string" ? body.driverNIC.trim() : "";
+    const invalidDriverError = "Please select a valid driver mapped to the selected carrier. Manually entered driver details are not allowed.";
+    if (!carrierRegNo || !driverNIC) {
+      return NextResponse.json({ error: invalidDriverError }, { status: 400 });
+    }
+    const carrier = await prisma.carrierOption.findFirst({ where: { registrationNo: { equals: carrierRegNo, mode: "insensitive" } } });
+    const driver = carrier ? await (prisma.driverOption as any).findFirst({ where: { nic: { equals: driverNIC, mode: "insensitive" } } }) : null;
+    if (!carrier || !driver || driver.carrierId !== carrier.id) {
+      return NextResponse.json({ error: invalidDriverError }, { status: 400 });
+    }
+    // Authoritative values from Master Data — never trust client-sent name/contact.
+    body.driverName = driver.name;
+    body.driverNIC = driver.nic;
+    body.driverContact = driver.contact ?? body.driverContact ?? null;
+  }
+
   // Block duplicate active gate passes for the same chassis within the same pass type.
   // LT and CD are independent workflows — an active LT does not block a new CD and vice versa.
   // Sub-passes (parentPassId set) are part of an existing journey — skip the check for those.
