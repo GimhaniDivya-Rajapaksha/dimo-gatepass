@@ -753,6 +753,13 @@ export default function CreateGatePassPage() {
   // True once a Carrier has been picked and its mapped-driver list came back empty —
   // prompts the user to add a new driver rather than leaving a silent empty dropdown.
   const [noDriversForCarrier, setNoDriversForCarrier] = useState(false);
+  // Carrier mode only: true only when the current driverNIC/driverName came from an actual
+  // Master Data selection (dropdown pick or a just-created "Add New Driver" record) — never
+  // from free-typed text. Reset on any manual edit so stale confirmations can't slip through.
+  const [driverMasterSelected, setDriverMasterSelected] = useState(false);
+  // Switching pass type or transport mode always invalidates whatever driver was confirmed
+  // for the previously-active section — never let a stale "confirmed" flag carry over.
+  useEffect(() => { setDriverMasterSelected(false); }, [passType, transportMode]);
 
   const today = currentDateValue(); // "YYYY-MM-DD" for min date constraint
 
@@ -1337,6 +1344,7 @@ export default function CreateGatePassPage() {
       setCarrier("driverNIC", json.option.nic);
       setCarrier("driverName", json.option.name);
       if (json.option.contact) setCarrier("contactNo", json.option.contact);
+      setDriverMasterSelected(true);
       void refreshDriverOptionsForCarrier(carrierFields.carrierRegNo);
       setShowAddDriverInline(false);
       setNewDriverInline({ name: "", nic: "", licenceNo: "", contact: "" });
@@ -1612,6 +1620,7 @@ export default function CreateGatePassPage() {
     setCarrier("driverNIC", "");
     setCarrier("driverName", "");
     setCarrier("contactNo", "");
+    setDriverMasterSelected(false);
   };
 
   const updateLtBulkVehicle = (vehicle: string, patch: Partial<(typeof ltBulkVehicles)[number]>) => {
@@ -1998,6 +2007,11 @@ export default function CreateGatePassPage() {
       if (!src.driverName) e.driverName = "Driver name is required";
       if (!src.contactNo) e.contactNo = "Driver contact number is required";
       else if (!validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
+      // Carrier mode: the driver must be a Master Data record mapped to the selected carrier,
+      // picked from the search dropdown (or just created via Add New Driver) — never free-typed.
+      if (transportMode === "CARRIER" && !e.driverNIC && !e.driverName && !driverMasterSelected) {
+        e.driverNIC = "Please select a valid driver mapped to the selected carrier. Manually entered driver details are not allowed.";
+      }
     }
 
     if (needsTransportDetails && transportMode === "CUSTOMER") {
@@ -5398,23 +5412,31 @@ export default function CreateGatePassPage() {
                     )}
                   </AnimatePresence>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="DL / NIC No" required error={errors.driverNIC}>
+                    <Field
+                      label="DL / NIC No"
+                      required
+                      error={errors.driverNIC || (transportMode === "CARRIER" && carrierFields.driverNIC && !driverMasterSelected ? "Select a driver from the search results" : undefined)}
+                    >
                       <SearchInput
                         value={carrierFields.driverNIC}
-                        onChange={(v) => { setCarrier("driverNIC", v); void fetchLookup("driverNIC" as LookupField, v); }}
+                        onChange={(v) => { setCarrier("driverNIC", v); setDriverMasterSelected(false); void fetchLookup("driverNIC" as LookupField, v); }}
                         onFocus={() => void fetchLookup("driverNIC" as LookupField, carrierFields.driverNIC)}
-                        onSelect={(o) => { setCarrier("driverNIC", o.value); if (o.driverName) setCarrier("driverName", o.driverName); if (o.driverContact) setCarrier("contactNo", o.driverContact); }}
+                        onSelect={(o) => { setCarrier("driverNIC", o.value); if (o.driverName) setCarrier("driverName", o.driverName); if (o.driverContact) setCarrier("contactNo", o.driverContact); setDriverMasterSelected(true); }}
                         placeholder="Search NIC / DL no..."
                         error={errors.driverNIC}
                         options={lookupOptions["driverNIC" as LookupField] ?? []}
                       />
                     </Field>
-                    <Field label="Driver Name" required error={errors.driverName}>
+                    <Field
+                      label="Driver Name"
+                      required
+                      error={errors.driverName || (transportMode === "CARRIER" && carrierFields.driverName && !driverMasterSelected ? "Select a driver from the search results" : undefined)}
+                    >
                       <SearchInput
                         value={carrierFields.driverName}
-                        onChange={(v) => { setCarrier("driverName", v); void fetchLookup("driverName" as LookupField, v); }}
+                        onChange={(v) => { setCarrier("driverName", v); setDriverMasterSelected(false); void fetchLookup("driverName" as LookupField, v); }}
                         onFocus={() => void fetchLookup("driverName" as LookupField, carrierFields.driverName)}
-                        onSelect={(o) => { setCarrier("driverName", o.value); if (o.driverNIC) setCarrier("driverNIC", o.driverNIC); if (o.driverContact) setCarrier("contactNo", o.driverContact); }}
+                        onSelect={(o) => { setCarrier("driverName", o.value); if (o.driverNIC) setCarrier("driverNIC", o.driverNIC); if (o.driverContact) setCarrier("contactNo", o.driverContact); setDriverMasterSelected(true); }}
                         placeholder="Search driver name..."
                         error={errors.driverName}
                         options={lookupOptions["driverName" as LookupField] ?? []}
