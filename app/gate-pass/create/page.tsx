@@ -2382,7 +2382,9 @@ export default function CreateGatePassPage() {
       return h * 60 + m;
     };
     const diff = toMinutes(returnTime) - toMinutes(departureTime);
-    return diff <= 0 || diff > 60;
+    // Return-before/at-departure is its own hard-blocking validation (see handleTestDriveSubmit) —
+    // this warning is only for a return that's genuinely more than 1 hour after departure.
+    return diff > 60;
   }
 
   const handleTestDriveSubmit = async (e: React.FormEvent) => {
@@ -2392,6 +2394,13 @@ export default function CreateGatePassPage() {
     if (!testDrive.departureDate) errs.testDriveDepartureDate = "Gate Out Date is required";
     if (!testDrive.departureTime) errs.testDriveDepartureTime = "Gate Out Time is required";
     if (!testDrive.returnTime) errs.testDriveReturnTime = "Return Time is required";
+    else if (testDrive.departureDate && testDrive.departureTime && testDrive.returnDate) {
+      const departureDT = new Date(`${testDrive.departureDate}T${testDrive.departureTime}:00`);
+      const returnDT = new Date(`${testDrive.returnDate}T${testDrive.returnTime}:00`);
+      if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(returnDT.getTime()) && returnDT.getTime() <= departureDT.getTime()) {
+        errs.testDriveReturnTime = "Return Date & Time must be later than the Gate Out Date & Time.";
+      }
+    }
     const testDriveValidNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
     const testDriveValidLicenceNo = (v: string) => /^[A-Za-z][0-9]{7}$/.test(v.trim());
     const testDriveValidPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
@@ -2873,7 +2882,10 @@ export default function CreateGatePassPage() {
                   <Field label="Gate Out Date" required>
                     <DatePicker
                       value={testDrive.departureDate}
-                      onChange={(v) => setTestDrive(p => ({ ...p, departureDate: v, returnDate: v }))}
+                      onChange={(v) => {
+                        setTestDrive(p => ({ ...p, departureDate: v, returnDate: v }));
+                        setErrors(prev => { const n = { ...prev }; delete n.testDriveReturnTime; return n; });
+                      }}
                     />
                   </Field>
                   <Field label="Gate Out Time" required>
@@ -2882,6 +2894,7 @@ export default function CreateGatePassPage() {
                       onChange={(v) => {
                         setTestDrive(p => ({ ...p, departureTime: v }));
                         setTestDriveReturnTimeExceeded(false);
+                        setErrors(prev => { const n = { ...prev }; delete n.testDriveReturnTime; return n; });
                       }}
                     />
                   </Field>
@@ -2908,6 +2921,7 @@ export default function CreateGatePassPage() {
                         setTestDrive(p => ({ ...p, returnTime: v }));
                         const exceeded = isTestDriveReturnTimeOverCap(testDrive.departureTime, v);
                         setTestDriveReturnTimeExceeded(exceeded);
+                        setErrors(prev => { const n = { ...prev }; delete n.testDriveReturnTime; return n; });
                       }}
                     />
                   </Field>
