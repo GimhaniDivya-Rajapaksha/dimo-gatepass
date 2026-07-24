@@ -447,6 +447,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid customer contact number format." }, { status: 400 });
       }
     }
+    // Return Date & Time must always be strictly later than Gate Out Date & Time.
+    if (body.departureDate && body.departureTime && body.returnDate && body.returnTime) {
+      const departureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+      const returnDT = new Date(`${body.returnDate}T${body.returnTime}:00`);
+      if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(returnDT.getTime()) && returnDT.getTime() <= departureDT.getTime()) {
+        return NextResponse.json({ error: "Return Date & Time must be later than the Gate Out Date & Time." }, { status: 400 });
+      }
+    }
   }
 
   // Use max existing number (not count) to avoid collisions after deletions
