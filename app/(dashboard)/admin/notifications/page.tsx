@@ -13,7 +13,7 @@ type NotificationRow = {
   read: boolean;
   createdAt: string;
   user: { id: string; name: string; email: string; role: string | null; defaultLocation: string | null } | null;
-  gatePass: { id: string; gatePassNumber: string; passType: string; status: string } | null;
+  gatePass: { id: string; gatePassNumber: string; passType: string; status: string; chassis: string | null } | null;
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export default function AdminNotificationsPage() {
       <div className="rounded-2xl border overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
           <input
-            type="text" placeholder="Search by title, message, recipient, or GP number…"
+            type="text" placeholder="Search by title, message, recipient, GP number, or chassis no…"
             value={q} onChange={(e) => setQ(e.target.value)}
             className="flex-1 min-w-[220px] px-3 py-2 rounded-lg text-sm border outline-none"
             style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
@@ -137,7 +137,7 @@ export default function AdminNotificationsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
-                  {["Type", "Title / Message", "Recipient", "Plant", "Gate Pass", "Read", "Created"].map((h) => (
+                  {["Type", "Title / Message", "Recipient", "Plant", "Gate Pass", "Chassis No.", "Read", "Created"].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
                       style={{ color: "var(--text-muted)" }}>{h}</th>
                   ))}
@@ -145,7 +145,7 @@ export default function AdminNotificationsPage() {
               </thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No notifications found</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No notifications found</td></tr>
                 ) : rows.map((n) => {
                   const cfg = cfgFor(n.type);
                   return (
@@ -176,6 +176,7 @@ export default function AdminNotificationsPage() {
                           </Link>
                         ) : "—"}
                       </td>
+                      <td className="px-4 py-3 text-xs font-mono" style={{ color: "var(--text-muted)" }}>{n.gatePass?.chassis ?? "—"}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
                           style={{ background: n.read ? "#f3f4f6" : "#fef9c3", color: n.read ? "#6b7280" : "#854d0e" }}>

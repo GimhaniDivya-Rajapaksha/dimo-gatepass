@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       { message: { contains: q, mode: "insensitive" } },
       { user: { name: { contains: q, mode: "insensitive" } } },
       { gatePass: { gatePassNumber: { contains: q, mode: "insensitive" } } },
+      { gatePass: { chassis: { contains: q, mode: "insensitive" } } },
     ];
   }
 
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
         where,
         include: {
           user: { select: { id: true, name: true, email: true, role: true, defaultLocation: true } },
-          gatePass: { select: { id: true, gatePassNumber: true, passType: true, status: true } },
+          gatePass: { select: { id: true, gatePassNumber: true, passType: true, status: true, chassis: true } },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * limit,
