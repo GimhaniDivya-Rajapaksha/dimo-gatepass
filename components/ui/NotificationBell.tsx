@@ -17,6 +17,7 @@ const typeConfig: Record<string, { icon: string; bg: string; color: string; labe
   GATE_PASS_SUBMITTED:      { icon: "📋", bg: "#eff6ff", color: "#1d4ed8", label: "New Request",     labelBg: "#eff6ff", labelColor: "#1d4ed8" },
   GATE_PASS_APPROVED:       { icon: "✅", bg: "#f0fdf4", color: "#15803d", label: "Approved",         labelBg: "#f0fdf4", labelColor: "#15803d" },
   GATE_PASS_REJECTED:       { icon: "❌", bg: "#fef2f2", color: "#dc2626", label: "Rejected",         labelBg: "#fef2f2", labelColor: "#dc2626" },
+  GATE_PASS_CANCELLED:      { icon: "🚫", bg: "#f3f4f6", color: "#6b7280", label: "Cancelled",        labelBg: "#f3f4f6", labelColor: "#6b7280" },
   GATE_PASS_RECEIVED:       { icon: "🚗", bg: "#f5f3ff", color: "#5b21b6", label: "Gate Out",         labelBg: "#f5f3ff", labelColor: "#5b21b6" },
   GATE_PASS_RESUBMITTED:    { icon: "🔄", bg: "#fff7ed", color: "#c2410c", label: "Resubmitted",      labelBg: "#fff7ed", labelColor: "#c2410c" },
   CASHIER_REVIEW_REQUIRED:  { icon: "💰", bg: "#fffbeb", color: "#b45309", label: "Payment Review",   labelBg: "#fffbeb", labelColor: "#b45309" },
