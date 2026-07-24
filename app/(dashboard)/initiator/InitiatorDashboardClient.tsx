@@ -68,6 +68,7 @@ const statusCfg: Record<string, { label: string; bg: string; color: string }> = 
   GATE_OUT:         { label: "Gate Out",           bg: "rgba(59,130,246,0.12)", color: "#3b82f6" },
   COMPLETED:        { label: "Completed",          bg: "rgba(139,92,246,0.12)", color: "#8b5cf6" },
   CASHIER_REVIEW:   { label: "Cashier Review",      bg: "rgba(245,158,11,0.12)",  color: "#b45309" },
+  CANCELLED:        { label: "Cancelled",           bg: "rgba(107,114,128,0.12)", color: "#6b7280" },
 };
 
 function AnimatedNumber({ value }: { value: number }) {
