@@ -5526,7 +5526,13 @@ export default function CreateGatePassPage() {
                   <DatePicker value={ltReturn.arrivalDate} onChange={(v) => setLtReturn(p => ({ ...p, arrivalDate: v }))} min={ltReturn.departureDate || today} placeholder="Pick arrival date" error={errors.ltReturnArrivalDate} />
                 </Field>
                 <Field label="Expected Arrival Time" error={errors.ltReturnArrivalTime}>
-                  <TimePicker value={ltReturn.arrivalTime} onChange={(v) => setLtReturn(p => ({ ...p, arrivalTime: v }))} date={ltReturn.arrivalDate} error={errors.ltReturnArrivalTime} />
+                  <TimePicker
+                    value={ltReturn.arrivalTime}
+                    onChange={(v) => setLtReturn(p => ({ ...p, arrivalTime: v }))}
+                    date={ltReturn.arrivalDate}
+                    error={errors.ltReturnArrivalTime}
+                    minTime={ltReturn.arrivalDate && ltReturn.arrivalDate === ltReturn.departureDate ? ltReturn.departureTime : undefined}
+                  />
                 </Field>
               </div>
 
