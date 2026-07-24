@@ -446,10 +446,19 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   onCreated: (u: User) => void;
   approvers: User[];
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
+  const [form, setForm] = useState({ name: "", email: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
+
+  // Active Directory user picker — replaces manual Name/Email/Password entry. The
+  // selected AD user's name/email are stored straight into `form`; no password is
+  // collected since these accounts sign in via Microsoft SSO (see lib/auth.ts ensureAzureUser).
+  const [adQuery, setAdQuery] = useState("");
+  const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [adLoading, setAdLoading] = useState(false);
+  const [adOpen, setAdOpen] = useState(false);
+  const adBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/locations")
@@ -462,10 +471,35 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   const selectedRole = form.role;
   const fields = ROLE_ATTRS[selectedRole] ?? [];
 
+  function searchAd(q: string) {
+    setAdQuery(q);
+    setAdOpen(true);
+    if (!q.trim()) { setAdOptions([]); return; }
+    setAdLoading(true);
+    fetch(`/api/ad-users?q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then((d: { users?: { id: string; name: string; email: string }[] }) => setAdOptions(d.users ?? []))
+      .catch(() => setAdOptions([]))
+      .finally(() => setAdLoading(false));
+  }
+
+  function selectAdUser(u: { id: string; name: string; email: string }) {
+    setForm(p => ({ ...p, name: u.name, email: u.email }));
+    setAdQuery("");
+    setAdOptions([]);
+    setAdOpen(false);
+  }
+
+  function clearAdSelection() {
+    setForm(p => ({ ...p, name: "", email: "" }));
+    setAdQuery("");
+    setAdOptions([]);
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
-      setError("Name, email and password are required"); return;
+    if (!form.name.trim() || !form.email.trim()) {
+      setError("Search and select a user from Active Directory first"); return;
     }
     if (fields.includes("location") && !form.defaultLocation.trim()) {
       setError(`Location is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
@@ -546,22 +580,62 @@ function AddUserModal({ onClose, onCreated, approvers }: {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Full Name <span className="text-red-500">*</span></label>
-            <input value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Malmi Perera"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Email Address <span className="text-red-500">*</span></label>
-            <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="e.g. malmi@dimo.lk"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Password <span className="text-red-500">*</span></label>
-            <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+              Active Directory User <span className="text-red-500">*</span>
+            </label>
+            {form.email ? (
+              <div className="flex items-center justify-between rounded-xl border px-4 py-2.5"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{form.name}</p>
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{form.email}</p>
+                </div>
+                <button type="button" onClick={clearAdSelection} className="text-xs font-semibold" style={{ color: "#dc2626" }}>
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  value={adQuery}
+                  onChange={e => searchAd(e.target.value)}
+                  onFocus={() => { if (adBlurTimer.current) clearTimeout(adBlurTimer.current); setAdOpen(true); }}
+                  onBlur={() => { adBlurTimer.current = setTimeout(() => setAdOpen(false), 200); }}
+                  placeholder="Search by name or email..."
+                  className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                />
+                {adOpen && (
+                  <div className="absolute z-50 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                    {adLoading ? (
+                      <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        Searching…
+                      </p>
+                    ) : adQuery.trim() && adOptions.length === 0 ? (
+                      <p className="px-3 py-2.5 text-sm" style={{ color: "var(--text-muted)" }}>No matching AD user found</p>
+                    ) : (
+                      adOptions.map(u => (
+                        <button key={u.id} type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-blue-500/10"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectAdUser(u)}>
+                          <p className="font-medium" style={{ color: "var(--text)" }}>{u.name}</p>
+                          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{u.email}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Name and email are loaded from Active Directory — the user signs in with Microsoft, no password needed.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
