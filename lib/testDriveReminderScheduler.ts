@@ -1,11 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { sendTestDriveOverdueInitiatorEmail, sendTestDriveOverdueManagerEmail } from "@/lib/email";
 
-// Test Drive only — checks for overdue vehicles and sends a one-time reminder
-// email to the Initiator and their Reporting Manager. Runs in-process inside
+// Test Drive only — checks for vehicles overdue on return and sends a one-time
+// overdue email once neither the Initiator's "Arrived" action nor Security's
+// "Gate In" action has happened within 60 minutes of the Expected Arrival Time
+// (both actions move the pass off GATE_OUT, so this query naturally stops
+// matching a pass the moment either one completes it). Runs in-process inside
 // the same long-lived server (started once via instrumentation.ts), so it
 // requires no external cron / Windows Task Scheduler setup.
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const OVERDUE_GRACE_MS = 60 * 60 * 1000; // 60 minutes past Expected Arrival Time
 
 async function checkOverdueTestDrives() {
   try {
@@ -26,6 +30,8 @@ async function checkOverdueTestDrives() {
         driverName: true,
         returnDate: true,
         returnTime: true,
+        requestedBy: true,
+        requestedByEmail: true,
         createdBy: {
           select: {
             name: true,
@@ -39,10 +45,11 @@ async function checkOverdueTestDrives() {
     for (const pass of candidates) {
       if (!pass.returnDate || !pass.returnTime) continue;
       const scheduledReturn = new Date(`${pass.returnDate}T${pass.returnTime}:00`);
-      if (Number.isNaN(scheduledReturn.getTime()) || scheduledReturn > now) continue;
+      if (Number.isNaN(scheduledReturn.getTime())) continue;
+      if (now.getTime() < scheduledReturn.getTime() + OVERDUE_GRACE_MS) continue; // not yet 60 min overdue
 
       const initiator = pass.createdBy;
-      const manager = initiator.approver;
+      const approver1 = initiator.approver;
       const details = {
         gatePassNumber: pass.gatePassNumber,
         passId: pass.id,
@@ -53,19 +60,28 @@ async function checkOverdueTestDrives() {
         returnTime: pass.returnTime,
       };
 
-      try {
-        await sendTestDriveOverdueInitiatorEmail(initiator.email, initiator.name, details);
-      } catch (e) {
-        console.error("[TestDriveReminder] initiator email failed:", e);
-      }
-
-      if (manager) {
+      // Send once per unique email address — Requested By is very often the
+      // Initiator themselves, and should not receive a duplicate copy.
+      const sentTo = new Set<string>();
+      const sendOnce = async (
+        email: string | null | undefined,
+        name: string | null | undefined,
+        send: (toEmail: string, toName: string, pass: typeof details) => Promise<void>,
+        label: string
+      ) => {
+        const key = email?.trim().toLowerCase();
+        if (!key || sentTo.has(key)) return;
+        sentTo.add(key);
         try {
-          await sendTestDriveOverdueManagerEmail(manager.email, manager.name, details);
+          await send(email!.trim(), name?.trim() || "Team", details);
         } catch (e) {
-          console.error("[TestDriveReminder] manager email failed:", e);
+          console.error(`[TestDriveReminder] ${label} email failed:`, e);
         }
-      }
+      };
+
+      await sendOnce(initiator.email, initiator.name, sendTestDriveOverdueInitiatorEmail, "initiator");
+      if (approver1) await sendOnce(approver1.email, approver1.name, sendTestDriveOverdueManagerEmail, "approver1");
+      if (pass.requestedByEmail) await sendOnce(pass.requestedByEmail, pass.requestedBy, sendTestDriveOverdueManagerEmail, "requestedBy");
 
       // Send-once: stamp reminderSentAt so this pass is never re-checked/re-sent.
       await prisma.gatePass.update({
