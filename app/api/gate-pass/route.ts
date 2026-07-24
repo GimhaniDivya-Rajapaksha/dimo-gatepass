@@ -395,6 +395,19 @@ export async function POST(req: NextRequest) {
     body.driverContact = driver.contact ?? body.driverContact ?? null;
   }
 
+  // LT Return Gate Pass leg only (identified by returnPassLocked, set only by that flow):
+  // its own Expected Arrival Date & Time must be strictly later than its own Estimated
+  // Departure Date & Time. Does not affect the original/outbound LT leg's own fields.
+  if (body.passType === "LOCATION_TRANSFER" && body.returnPassLocked === true) {
+    if (body.departureDate && body.departureTime && body.arrivalDate && body.arrivalTime) {
+      const departureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+      const arrivalDT = new Date(`${body.arrivalDate}T${body.arrivalTime}:00`);
+      if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(arrivalDT.getTime()) && arrivalDT.getTime() <= departureDT.getTime()) {
+        return NextResponse.json({ error: "Expected Arrival Date & Time must be later than the Estimated Departure Date & Time." }, { status: 400 });
+      }
+    }
+  }
+
   // Block duplicate active gate passes for the same chassis within the same pass type.
   // LT and CD are independent workflows — an active LT does not block a new CD and vice versa.
   // Sub-passes (parentPassId set) are part of an existing journey — skip the check for those.
