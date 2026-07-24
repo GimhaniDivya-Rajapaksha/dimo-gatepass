@@ -1059,13 +1059,13 @@ function InitiatorGatePassDetailPageInner() {
         {/* Print-only header */}
         <div className="hidden print:block mb-5">
           <div className="flex items-start justify-between pb-2 mb-3" style={{ borderBottom: "2px solid #0d1b3e" }}>
-            <div>
+            <div style={{ minWidth: 0, flex: "1 1 auto", paddingRight: "10px" }}>
               <p style={{ color: "#0d1b3e", fontSize: "7.5pt", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase" }}>DIMO Gate Pass System</p>
-              <h1 style={{ color: "#0d1b3e", fontSize: "15pt", fontWeight: 700, marginTop: "1px" }}>
+              <h1 style={{ color: "#0d1b3e", fontSize: "15pt", fontWeight: 700, marginTop: "1px", wordBreak: "break-word" }}>
                 {data.passType === "TEST_DRIVE" ? "Gate Pass for Test Drive" : `${isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"} — Gate Pass`}
               </h1>
             </div>
-            <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt" }}>
+            <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt", flexShrink: 0, whiteSpace: "nowrap" }}>
               <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{data.parentPass?.gatePassNumber ?? data.gatePassNumber}</p>
               <p>Status: {sc.label}</p>
               <p>Printed: {new Date().toLocaleString()}</p>
