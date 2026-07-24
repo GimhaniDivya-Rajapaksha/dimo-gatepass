@@ -6,12 +6,13 @@ import { sendDriverChangedEmail } from "@/lib/email";
 
 // "Change Driver / Carrier" feature — fully isolated from the LT/CD/Test Drive creation,
 // approval, and SAP-integration code paths. It only ever touches driverName/driverNIC/
-// driverLicenceNo/driverContact/companyName/carrierRegNo, available from Approved onward
-// (through Gate Out and Completed), and logs every change. Not available while still
-// Pending Approval — that stage already has its own edit/resubmit path. Every other field
-// (vehicle, destination, approver, etc.) stays completely untouched by this route.
+// driverLicenceNo/driverContact/companyName/carrierRegNo, available from Approved through
+// Gate Out, and logs every change. Not available while still Pending Approval — that stage
+// already has its own edit/resubmit path — and no longer available once Completed, since
+// the journey is finished by then. Every other field (vehicle, destination, approver, etc.)
+// stays completely untouched by this route.
 const IN_SCOPE_PASS_TYPES = ["LOCATION_TRANSFER", "CUSTOMER_DELIVERY", "TEST_DRIVE"];
-const INELIGIBLE_STATUSES = ["PENDING_APPROVAL", "CANCELLED", "REJECTED", "DRAFT"];
+const INELIGIBLE_STATUSES = ["PENDING_APPROVAL", "CANCELLED", "REJECTED", "DRAFT", "COMPLETED"];
 
 function normalize(v: unknown) {
   return typeof v === "string" ? v.trim() : "";
