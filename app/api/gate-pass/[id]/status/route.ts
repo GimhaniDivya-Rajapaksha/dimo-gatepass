@@ -1799,7 +1799,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         await prisma.notification.createMany({
           data: uniqueRecipients.map((u) => ({
             userId: u.id,
-            type: "GATE_PASS_REJECTED",
+            type: "GATE_PASS_CANCELLED",
             title: "Gate Pass Cancelled",
             message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) was cancelled by ${session.user.name ?? "the initiator"}.`,
             gatePassId: gatePass.id,
