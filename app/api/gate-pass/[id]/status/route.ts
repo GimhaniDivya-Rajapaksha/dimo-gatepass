@@ -882,15 +882,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    // Test Drive: no SAP write, no destination transfer — just notify Security Officers
-    // and Initiators at the same plant that the vehicle is out and awaiting return confirmation.
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers,
+    // Initiators, and Area Sales Officers at the same plant that the vehicle is out and
+    // awaiting return confirmation. ASO plants typically have no Security/Initiator users,
+    // so including AREA_SALES_OFFICER here is what actually reaches anyone at those plants.
     if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
       const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
-      const [tdSecurity, tdInitiators] = await Promise.all([
+      const [tdSecurity, tdInitiators, tdAsos] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...plantWhere } }),
         prisma.user.findMany({ where: { role: "INITIATOR", ...plantWhere } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, ...plantWhere } }),
       ]);
-      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators].map((u) => [u.id, u])).values()];
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators, ...tdAsos].map((u) => [u.id, u])).values()];
       if (tdRecipients.length > 0) {
         await prisma.notification.createMany({
           data: tdRecipients.map((u) => ({
@@ -1154,15 +1157,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    // Test Drive: no SAP write, no destination transfer — just notify Security Officers
-    // and Initiators at the same plant that the vehicle is out and awaiting return confirmation.
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers,
+    // Initiators, and Area Sales Officers at the same plant that the vehicle is out and
+    // awaiting return confirmation. ASO plants typically have no Security/Initiator users,
+    // so including AREA_SALES_OFFICER here is what actually reaches anyone at those plants.
     if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
       const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
-      const [tdSecurity, tdInitiators] = await Promise.all([
+      const [tdSecurity, tdInitiators, tdAsos] = await Promise.all([
         prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...plantWhere } }),
         prisma.user.findMany({ where: { role: "INITIATOR", ...plantWhere } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, ...plantWhere } }),
       ]);
-      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators].map((u) => [u.id, u])).values()];
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators, ...tdAsos].map((u) => [u.id, u])).values()];
       if (tdRecipients.length > 0) {
         await prisma.notification.createMany({
           data: tdRecipients.map((u) => ({
@@ -1509,7 +1515,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const initiatorAllowed = session.user.role === "INITIATOR"
       && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES" || gatePass.passType === "TEST_DRIVE");
     const asoAllowed = session.user.role === "AREA_SALES_OFFICER"
-      && (gatePass.passType === "AFTER_SALES" || gatePass.passType === "LOCATION_TRANSFER");
+      && (gatePass.passType === "AFTER_SALES" || gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "TEST_DRIVE");
     const canGateIn = recipientAllowed
       || initiatorAllowed
       || asoAllowed;

@@ -366,7 +366,9 @@ export async function POST(req: NextRequest) {
       if (!["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
         return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
       }
-    } else {
+    } else if (body.passType !== "TEST_DRIVE") {
+      // Test Drive has no approver workflow for anyone (see isTestDrive below) — ASO can
+      // create it exactly like an Initiator does, no extra checks needed.
       return NextResponse.json({ error: "Unauthorized pass type for ASO" }, { status: 403 });
     }
   }
