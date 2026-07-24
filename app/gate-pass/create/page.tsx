@@ -5561,16 +5561,6 @@ export default function CreateGatePassPage() {
                 <Field label="Contact No" required error={errors.ltReturnContactNo}>
                   <TextInput value={ltReturn.contactNo} onChange={(v) => setLtReturn(p => ({ ...p, contactNo: v }))} placeholder="Enter driver contact no" numericOnly maxLength={10} error={errors.ltReturnContactNo} />
                 </Field>
-                <Field label="Remarks" error={errors.ltReturnRemarks} className="md:col-span-2">
-                  <textarea
-                    value={ltReturn.remarks}
-                    onChange={(e) => { setLtReturn(p => ({ ...p, remarks: e.target.value })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnRemarks; return n; }); }}
-                    placeholder="Enter remarks"
-                    rows={3}
-                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
-                    style={{ background: "var(--surface2)", borderColor: errors.ltReturnRemarks ? "#ef4444" : "var(--border)", color: "var(--text)" }}
-                  />
-                </Field>
               </div>
             </div>
             )}
