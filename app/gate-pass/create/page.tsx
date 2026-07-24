@@ -2392,12 +2392,23 @@ export default function CreateGatePassPage() {
     if (!testDrive.departureDate) errs.testDriveDepartureDate = "Gate Out Date is required";
     if (!testDrive.departureTime) errs.testDriveDepartureTime = "Gate Out Time is required";
     if (!testDrive.returnTime) errs.testDriveReturnTime = "Return Time is required";
+    const testDriveValidNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+    const testDriveValidLicenceNo = (v: string) => /^[A-Za-z][0-9]{7}$/.test(v.trim());
+    const testDriveValidPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
     if (testDrive.transportType === "DRIVER") {
       if (!testDrive.driverName) errs.testDriveDriverName = "Driver Name is required";
       if (!testDrive.driverNIC) errs.testDriveDriverNIC = "Driving License / NIC No is required";
+      else if (!testDriveValidNIC(testDrive.driverNIC) && !testDriveValidLicenceNo(testDrive.driverNIC)) {
+        errs.testDriveDriverNIC = "Invalid format — enter a valid NIC (e.g. 123456789V) or Driving Licence No. (e.g. B1234567)";
+      }
+      if (testDrive.driverContact && !testDriveValidPhone(testDrive.driverContact)) {
+        errs.testDriveDriverContact = "Invalid contact number format";
+      }
     } else {
       if (!testDrive.customerNIC) errs.testDriveCustomerNIC = "Customer NIC No is required";
+      else if (!testDriveValidNIC(testDrive.customerNIC)) errs.testDriveCustomerNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
       if (!testDrive.customerContact) errs.testDriveCustomerContact = "Contact Number is required";
+      else if (!testDriveValidPhone(testDrive.customerContact)) errs.testDriveCustomerContact = "Invalid contact number format";
     }
     if (!testDrive.mileage) errs.testDriveMileage = "Mileage / Meter Reading is required";
     if (!testDrive.insurance) errs.testDriveInsurance = "Insurance Arrangements is required";
@@ -2941,9 +2952,9 @@ export default function CreateGatePassPage() {
                       <input type="text" value={testDrive.driverNIC} onChange={(e) => setTestDrive(p => ({ ...p, driverNIC: e.target.value }))}
                         className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveDriverNIC ? "#f87171" : "var(--border)", color: "var(--text)" }} />
                     </Field>
-                    <Field label="Contact Number">
+                    <Field label="Contact Number" error={errors.testDriveDriverContact}>
                       <input type="text" value={testDrive.driverContact} onChange={(e) => setTestDrive(p => ({ ...p, driverContact: e.target.value }))}
-                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                        className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: errors.testDriveDriverContact ? "#f87171" : "var(--border)", color: "var(--text)" }} />
                     </Field>
                   </div>
                 ) : (

@@ -424,6 +424,31 @@ export async function POST(req: NextRequest) {
   // Test Drive: no approval workflow at all — goes straight to Security Gate Out, same as an already-approved pass.
   const isTestDrive = body.passType === "TEST_DRIVE";
 
+  // Test Drive's own Driver/Customer fields are plain free-text inputs on the create form —
+  // enforce the same NIC/licence/phone format rules server-side so they can't be bypassed.
+  if (isTestDrive) {
+    const validNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+    const validLicenceNo = (v: string) => /^[A-Za-z][0-9]{7}$/.test(v.trim());
+    const validPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
+    if (body.transportMode === "DRIVER") {
+      const driverNIC = typeof body.driverNIC === "string" ? body.driverNIC.trim() : "";
+      if (!driverNIC || (!validNIC(driverNIC) && !validLicenceNo(driverNIC))) {
+        return NextResponse.json({ error: "Invalid Driving Licence No. / NIC format for the Test Drive driver (e.g. 123456789V or B1234567)." }, { status: 400 });
+      }
+      if (body.driverContact && !validPhone(body.driverContact)) {
+        return NextResponse.json({ error: "Invalid driver contact number format." }, { status: 400 });
+      }
+    } else if (body.transportMode === "CUSTOMER") {
+      const customerNIC = typeof body.customerNIC === "string" ? body.customerNIC.trim() : "";
+      if (!customerNIC || !validNIC(customerNIC)) {
+        return NextResponse.json({ error: "Invalid Customer NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+      }
+      if (!body.customerContact || !validPhone(body.customerContact)) {
+        return NextResponse.json({ error: "Invalid customer contact number format." }, { status: 400 });
+      }
+    }
+  }
+
   // Use max existing number (not count) to avoid collisions after deletions
   const lastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
   const lastNum = lastPass ? parseInt(lastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;

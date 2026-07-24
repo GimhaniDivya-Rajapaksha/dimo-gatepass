@@ -17,6 +17,13 @@ function normalize(v: unknown) {
   return typeof v === "string" ? v.trim() : "";
 }
 
+function isValidNIC(v: string) {
+  return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+}
+function isValidLicenceNo(v: string) {
+  return /^[A-Za-z][0-9]{7}$/.test(v.trim());
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -73,6 +80,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (!driverNIC || !driverName || !driverLicenceNo) {
     return NextResponse.json({ error: "Driver name, NIC, and Driving Licence No. are all required." }, { status: 400 });
+  }
+  if (!isValidNIC(driverNIC)) {
+    return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+  }
+  if (!isValidLicenceNo(driverLicenceNo)) {
+    return NextResponse.json({ error: "Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits)." }, { status: 400 });
   }
   if (!companyName || !carrierRegNo) {
     return NextResponse.json({ error: "Carrier Company is required." }, { status: 400 });
