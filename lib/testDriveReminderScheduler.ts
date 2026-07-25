@@ -3,13 +3,20 @@ import { sendTestDriveOverdueInitiatorEmail, sendTestDriveOverdueManagerEmail } 
 
 // Test Drive only — checks for vehicles overdue on return and sends a one-time
 // overdue email once neither the Initiator's "Arrived" action nor Security's
-// "Gate In" action has happened within 60 minutes of the Expected Arrival Time
+// "Gate In" action has happened within 60 minutes of the ACTUAL Gate Out time
 // (both actions move the pass off GATE_OUT, so this query naturally stops
 // matching a pass the moment either one completes it). Runs in-process inside
 // the same long-lived server (started once via instrumentation.ts), so it
 // requires no external cron / Windows Task Scheduler setup.
+//
+// The 60-minute window is measured from the actual Gate Out moment, never from
+// the Return Time / Expected Arrival Time entered on the create form. Every
+// action that puts a Test Drive pass into GATE_OUT (print_gate_out — the only
+// one Test Drive uses — see status/route.ts) overwrites departureDate/
+// departureTime with the real timestamp of that action, so those two fields
+// are exactly the "actual Gate Out time" once status is GATE_OUT.
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const OVERDUE_GRACE_MS = 60 * 60 * 1000; // 60 minutes past Expected Arrival Time
+const OVERDUE_GRACE_MS = 60 * 60 * 1000; // 60 minutes past actual Gate Out time
 
 async function checkOverdueTestDrives() {
   try {
@@ -19,8 +26,8 @@ async function checkOverdueTestDrives() {
         passType: "TEST_DRIVE",
         status: "GATE_OUT",
         reminderSentAt: null,
-        returnDate: { not: null },
-        returnTime: { not: null },
+        departureDate: { not: null },
+        departureTime: { not: null },
       },
       select: {
         id: true,
@@ -28,7 +35,8 @@ async function checkOverdueTestDrives() {
         vehicle: true,
         customerName: true,
         driverName: true,
-        returnDate: true,
+        departureDate: true,
+        departureTime: true,
         returnTime: true,
         requestedBy: true,
         requestedByEmail: true,
@@ -43,10 +51,10 @@ async function checkOverdueTestDrives() {
     });
 
     for (const pass of candidates) {
-      if (!pass.returnDate || !pass.returnTime) continue;
-      const scheduledReturn = new Date(`${pass.returnDate}T${pass.returnTime}:00`);
-      if (Number.isNaN(scheduledReturn.getTime())) continue;
-      if (now.getTime() < scheduledReturn.getTime() + OVERDUE_GRACE_MS) continue; // not yet 60 min overdue
+      if (!pass.departureDate || !pass.departureTime) continue;
+      const gateOutAt = new Date(`${pass.departureDate}T${pass.departureTime}:00`);
+      if (Number.isNaN(gateOutAt.getTime())) continue;
+      if (now.getTime() < gateOutAt.getTime() + OVERDUE_GRACE_MS) continue; // not yet 60 min since Gate Out
 
       const initiator = pass.createdBy;
       const approver1 = initiator.approver;
