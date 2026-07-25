@@ -127,15 +127,19 @@ export default function Sidebar({ user, role }: SidebarProps) {
 
       const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "1", locationView: "true" });
       const asParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "1", locationView: "true" });
+      const tdParams = new URLSearchParams({ passType: "TEST_DRIVE", status: "GATE_OUT", limit: "1", locationView: "true" });
       if (myPlant) {
         ltParams.set("toLocationPlant", myPlant);
         asParams.set("toLocationPlant", myPlant);
+        tdParams.set("toLocationPlant", myPlant);
       }
       const ltRes = await fetch(`/api/gate-pass?${ltParams}`).catch(() => null);
       const ltData = ltRes?.ok ? await ltRes.json() : { total: 0 };
       const asRes = await fetch(`/api/gate-pass?${asParams}`).catch(() => null);
       const asData = asRes?.ok ? await asRes.json() : { total: 0 };
-      setArrivalsCount((ltData.total ?? 0) + (asData.total ?? 0));
+      const tdRes = await fetch(`/api/gate-pass?${tdParams}`).catch(() => null);
+      const tdData = tdRes?.ok ? await tdRes.json() : { total: 0 };
+      setArrivalsCount((ltData.total ?? 0) + (asData.total ?? 0) + (tdData.total ?? 0));
     };
     void fetchArrivals();
     const id = setInterval(() => void fetchArrivals(), 60_000);
