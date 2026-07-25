@@ -56,21 +56,26 @@ export async function GET(req: NextRequest) {
       // toLocationCode filters server-side by the code part of the location string (after " - ").
       const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "1", locationView: "true" });
       const asParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "1", locationView: "true" });
+      const tdParams = new URLSearchParams({ passType: "TEST_DRIVE", status: "GATE_OUT", limit: "1", locationView: "true" });
       if (defaultLocation) {
         const myCode = defaultLocation.split(" - ").slice(1).join(" - ").trim();
         if (myCode) {
           ltParams.set("toLocationCode", myCode);
           asParams.set("toLocationCode", myCode);
+          tdParams.set("toLocationCode", myCode);
         } else if (plantPrefix) {
           ltParams.set("toLocationPlant", plantPrefix);
           asParams.set("toLocationPlant", plantPrefix);
+          tdParams.set("toLocationPlant", plantPrefix);
         }
       }
       const ltRes = await fetch(`${origin}/api/gate-pass?${ltParams}`, { headers: { cookie } });
       const ltData = ltRes.ok ? await ltRes.json() : { total: 0 };
       const asRes = await fetch(`${origin}/api/gate-pass?${asParams}`, { headers: { cookie } });
       const asData = asRes.ok ? await asRes.json() : { total: 0 };
-      arrivals = (ltData.total ?? 0) + (asData.total ?? 0);
+      const tdRes = await fetch(`${origin}/api/gate-pass?${tdParams}`, { headers: { cookie } });
+      const tdData = tdRes.ok ? await tdRes.json() : { total: 0 };
+      arrivals = (ltData.total ?? 0) + (asData.total ?? 0) + (tdData.total ?? 0);
 
     } else if (role === "AREA_SALES_OFFICER") {
       const orClauses: object[] = [
