@@ -1981,10 +1981,26 @@ export default function CreateGatePassPage() {
       else if (parseDate(ltReturn.departureDate) < today) e.ltReturnDepartureDate = "Departure date cannot be in the past";
       if (!ltReturn.departureTime) e.ltReturnDepartureTime = "Departure time is required";
       else if (!e.ltReturnDepartureDate && isPastDateTime(ltReturn.departureDate, ltReturn.departureTime)) e.ltReturnDepartureTime = "Departure time cannot be in the past";
+      else if (!e.ltReturnDepartureDate && lt.arrivalDate && lt.arrivalTime) {
+        // Return leg's own departure must be strictly after the FIRST/outbound journey's
+        // own Expected Arrival — same date is fine, but the combined date+time must be later.
+        const firstArrivalDT = new Date(`${lt.arrivalDate}T${lt.arrivalTime}:00`);
+        const returnDepartureDT = new Date(`${ltReturn.departureDate}T${ltReturn.departureTime}:00`);
+        if (!Number.isNaN(firstArrivalDT.getTime()) && !Number.isNaN(returnDepartureDT.getTime()) &&
+            returnDepartureDT.getTime() <= firstArrivalDT.getTime()) {
+          e.ltReturnDepartureTime = "Return journey departure must be after the first journey's expected arrival.";
+        }
+      }
       if (!ltReturn.arrivalDate) e.ltReturnArrivalDate = "Expected arrival date is required";
-      if (ltReturn.arrivalDate && ltReturn.arrivalTime && ltReturn.departureDate && ltReturn.departureTime &&
-          ltReturn.arrivalDate === ltReturn.departureDate && ltReturn.arrivalTime <= ltReturn.departureTime) {
-        e.ltReturnArrivalTime = "Arrival time must be after the departure time";
+      if (!e.ltReturnArrivalDate && ltReturn.arrivalTime && ltReturn.departureDate && ltReturn.departureTime) {
+        // Full date+time comparison (not just same-day time) — return arrival must be later
+        // than return departure, including when the arrival date itself is earlier.
+        const returnDepartureDT = new Date(`${ltReturn.departureDate}T${ltReturn.departureTime}:00`);
+        const returnArrivalDT = new Date(`${ltReturn.arrivalDate}T${ltReturn.arrivalTime}:00`);
+        if (!Number.isNaN(returnDepartureDT.getTime()) && !Number.isNaN(returnArrivalDT.getTime()) &&
+            returnArrivalDT.getTime() <= returnDepartureDT.getTime()) {
+          e.ltReturnArrivalTime = "Return journey expected arrival must be after the return journey departure.";
+        }
       }
       if (ltReturn.transportMode === "CARRIER") {
         if (!ltReturn.companyName) e.ltReturnCompanyName = "Carrier company name is required";
@@ -5513,22 +5529,40 @@ export default function CreateGatePassPage() {
               <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Gate Out — Schedule Departure</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
                 <Field label="Estimated Departure Date" required error={errors.ltReturnDepartureDate}>
-                  <DatePicker value={ltReturn.departureDate} onChange={(v) => setLtReturn(p => ({ ...p, departureDate: v }))} min={today} error={errors.ltReturnDepartureDate} placeholder="Pick departure date" />
+                  <DatePicker
+                    value={ltReturn.departureDate}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, departureDate: v })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnDepartureTime; delete n.ltReturnArrivalTime; return n; }); }}
+                    min={lt.arrivalDate && lt.arrivalDate > today ? lt.arrivalDate : today}
+                    error={errors.ltReturnDepartureDate}
+                    placeholder="Pick departure date"
+                  />
                 </Field>
                 <Field label="Estimated Departure Time" required error={errors.ltReturnDepartureTime}>
-                  <TimePicker value={ltReturn.departureTime} onChange={(v) => setLtReturn(p => ({ ...p, departureTime: v }))} error={errors.ltReturnDepartureTime} date={ltReturn.departureDate} />
+                  <TimePicker
+                    value={ltReturn.departureTime}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, departureTime: v })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnDepartureTime; delete n.ltReturnArrivalTime; return n; }); }}
+                    error={errors.ltReturnDepartureTime}
+                    date={ltReturn.departureDate}
+                    minTime={ltReturn.departureDate && ltReturn.departureDate === lt.arrivalDate ? lt.arrivalTime : undefined}
+                  />
                 </Field>
               </div>
 
               <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--text-muted)" }}>Gate In — Expected Arrival</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
                 <Field label="Expected Arrival Date" required error={errors.ltReturnArrivalDate}>
-                  <DatePicker value={ltReturn.arrivalDate} onChange={(v) => setLtReturn(p => ({ ...p, arrivalDate: v }))} min={ltReturn.departureDate || today} placeholder="Pick arrival date" error={errors.ltReturnArrivalDate} />
+                  <DatePicker
+                    value={ltReturn.arrivalDate}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, arrivalDate: v })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnArrivalTime; return n; }); }}
+                    min={ltReturn.departureDate || today}
+                    placeholder="Pick arrival date"
+                    error={errors.ltReturnArrivalDate}
+                  />
                 </Field>
                 <Field label="Expected Arrival Time" error={errors.ltReturnArrivalTime}>
                   <TimePicker
                     value={ltReturn.arrivalTime}
-                    onChange={(v) => setLtReturn(p => ({ ...p, arrivalTime: v }))}
+                    onChange={(v) => { setLtReturn(p => ({ ...p, arrivalTime: v })); setErrors(prev => { const n = { ...prev }; delete n.ltReturnArrivalTime; return n; }); }}
                     date={ltReturn.arrivalDate}
                     error={errors.ltReturnArrivalTime}
                     minTime={ltReturn.arrivalDate && ltReturn.arrivalDate === ltReturn.departureDate ? ltReturn.departureTime : undefined}

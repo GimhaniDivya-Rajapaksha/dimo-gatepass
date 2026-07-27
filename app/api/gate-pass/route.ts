@@ -397,13 +397,29 @@ export async function POST(req: NextRequest) {
 
   // LT Return Gate Pass leg only (identified by returnPassLocked, set only by that flow):
   // its own Expected Arrival Date & Time must be strictly later than its own Estimated
-  // Departure Date & Time. Does not affect the original/outbound LT leg's own fields.
+  // Departure Date & Time, AND that Estimated Departure must itself be strictly later than
+  // the first/outbound journey's own Expected Arrival (same date is fine, time must be later).
+  // Does not affect the original/outbound LT leg's own fields or validation.
   if (body.passType === "LOCATION_TRANSFER" && body.returnPassLocked === true) {
     if (body.departureDate && body.departureTime && body.arrivalDate && body.arrivalTime) {
       const departureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
       const arrivalDT = new Date(`${body.arrivalDate}T${body.arrivalTime}:00`);
       if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(arrivalDT.getTime()) && arrivalDT.getTime() <= departureDT.getTime()) {
-        return NextResponse.json({ error: "Expected Arrival Date & Time must be later than the Estimated Departure Date & Time." }, { status: 400 });
+        return NextResponse.json({ error: "Return journey expected arrival must be after the return journey departure." }, { status: 400 });
+      }
+    }
+    if (body.parentPassId && body.departureDate && body.departureTime) {
+      const parentPass = await prisma.gatePass.findUnique({
+        where: { id: body.parentPassId as string },
+        select: { arrivalDate: true, arrivalTime: true },
+      });
+      if (parentPass?.arrivalDate && parentPass.arrivalTime) {
+        const firstArrivalDT = new Date(`${parentPass.arrivalDate}T${parentPass.arrivalTime}:00`);
+        const returnDepartureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+        if (!Number.isNaN(firstArrivalDT.getTime()) && !Number.isNaN(returnDepartureDT.getTime()) &&
+            returnDepartureDT.getTime() <= firstArrivalDT.getTime()) {
+          return NextResponse.json({ error: "Return journey departure must be after the first journey's expected arrival." }, { status: 400 });
+        }
       }
     }
   }
