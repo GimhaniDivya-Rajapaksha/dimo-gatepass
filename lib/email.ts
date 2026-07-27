@@ -1766,7 +1766,7 @@ ${emailHeader("Gate Pass Cancelled", "Status Update", pass.gatePassNumber)}
   </div>
 </div>
 <div class="body">
-  <div class="greeting">
+  <div class="greeting" style="color:#1a1a1a">
     Dear <strong>${toName}</strong>,<br>
     Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was cancelled by <strong>${pass.cancelledByName}</strong>. No further action is required.
   </div>
