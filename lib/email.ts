@@ -445,14 +445,30 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
             <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
               <tr>
                 <td class="btn-cell-l" style="padding:0 16px 0 0">
+                  <!--[if mso]>
+                  <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+                  <td align="center" bgcolor="#4a8c1c" style="padding:16px 36px;background:#4a8c1c;border-radius:8px;mso-padding-alt:16px 36px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap">
+                  <a href="${approveUrl}" style="color:#ffffff;text-decoration:none;font-weight:700">Approve Gate Pass</a>
+                  </td></tr></table>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
                   <a href="${approveUrl}" class="btn-ok" style="display:inline-block;padding:16px 36px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
                     <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
                   </a>
+                  <!--<![endif]-->
                 </td>
                 <td class="btn-cell-r" style="padding:0 0 0 16px">
+                  <!--[if mso]>
+                  <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+                  <td align="center" bgcolor="#dc2626" style="padding:16px 36px;background:#dc2626;border-radius:8px;mso-padding-alt:16px 36px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap">
+                  <a href="${rejectUrl}" style="color:#ffffff;text-decoration:none;font-weight:700">Reject Gate Pass</a>
+                  </td></tr></table>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
                   <a href="${rejectUrl}" class="btn-no" style="display:inline-block;padding:16px 36px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
                     <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
                   </a>
+                  <!--<![endif]-->
                 </td>
               </tr>
             </table>
@@ -1721,6 +1737,7 @@ export async function sendGatePassCancelledEmail(
     passId?: string | null;
     vehicle: string;
     cancelledByName: string;
+    initiatedByName?: string | null;
     fromLocation?: string | null;
     toLocation?: string | null;
   }
@@ -1760,6 +1777,7 @@ ${emailHeader("Gate Pass Cancelled", "Status Update", pass.gatePassNumber)}
       <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
       ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
       ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+      ${pass.initiatedByName ? `<div class="ic"><div class="ic-lbl">Initiated By</div><div class="ic-val">${pass.initiatedByName}</div></div>` : ""}
       <div class="ic"><div class="ic-lbl">Cancelled By</div><div class="ic-val">${pass.cancelledByName}</div></div>
     </div>
   </div>
