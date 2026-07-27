@@ -204,8 +204,8 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .action-body{background:#f4f6fb;padding:16px 18px 18px}
 .action-desc{font-size:13px;font-weight:300;color:#555;line-height:1.6;margin-bottom:16px}
 .btn-row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;align-items:center;text-align:center}
-.btn-ok{display:inline-block;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
-.btn-no{display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
+.btn-ok{display:inline-block;padding:16px 36px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
+.btn-no{display:inline-block;padding:16px 36px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
 .expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:16px;font-size:11.5px;color:#92400e}
 .status-box{border:1px solid rgba(141,198,63,0.35);background:linear-gradient(180deg,#f6fbe9 0%,#edf7dd 100%);border-radius:4px;padding:16px 16px 14px;margin-bottom:22px}
@@ -238,6 +238,9 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .btn-row{flex-direction:column;gap:0}
   .btn-ok,.btn-no{width:100%;text-align:center;box-sizing:border-box;margin-right:0 !important}
   .btn-ok{margin-bottom:24px}
+  .btn-cell-l,.btn-cell-r{display:block !important;width:100% !important}
+  .btn-cell-l{padding:0 0 24px 0 !important}
+  .btn-cell-r{padding:0 !important}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
   .desktop-hd{display:none !important}
@@ -441,14 +444,14 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
           <td align="center" style="padding:0">
             <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
               <tr>
-                <td style="padding:0 16px 0 0">
-                  <a href="${approveUrl}" style="display:inline-block;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
+                <td class="btn-cell-l" style="padding:0 16px 0 0">
+                  <a href="${approveUrl}" class="btn-ok" style="display:inline-block;padding:16px 36px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
                   </a>
                 </td>
-                <td style="padding:0 0 0 16px">
-                  <a href="${rejectUrl}" style="display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
+                <td class="btn-cell-r" style="padding:0 0 0 16px">
+                  <a href="${rejectUrl}" class="btn-no" style="display:inline-block;padding:16px 36px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
                   </a>
                 </td>
               </tr>
