@@ -1822,6 +1822,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           passId: gatePass.id,
           vehicle: gatePass.vehicle,
           cancelledByName: session.user.name ?? "the initiator",
+          initiatedByName: creator?.name ?? null,
           fromLocation: gatePass.fromLocation,
           toLocation: gatePass.toLocation,
         }).catch((e: unknown) => console.error("[email] Gate Pass Cancelled notification failed:", e));
