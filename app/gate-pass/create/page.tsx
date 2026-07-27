@@ -2318,6 +2318,56 @@ export default function CreateGatePassPage() {
             body: JSON.stringify(item),
           });
           if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to submit bulk transfer"); }
+
+          // LT Return Gate Pass: same pairing single mode already does — each bulk vehicle
+          // also gets its own linked return leg, reusing the one Return Journey Details
+          // entered for the whole batch. Never runs unless "Return Gate Pass" is selected.
+          if (ltType === "RETURN") {
+            const created = await res.json().catch(() => ({}));
+            const gp1 = created.gatePass;
+            if (gp1?.id) {
+              const bulkItem = item as Record<string, unknown>;
+              const returnPayload = {
+                passType: "LOCATION_TRANSFER",
+                vehicle: bulkItem.vehicle,
+                chassis: bulkItem.chassis,
+                make: bulkItem.make,
+                vehicleColor: bulkItem.vehicleColor,
+                toLocation: bulkItem.fromLocation,
+                toPlantCode: bulkItem.fromPlantCode,
+                toStorageLocation: bulkItem.fromStorageLocation,
+                fromLocation: bulkItem.toLocation,
+                fromPlantCode: bulkItem.toPlantCode,
+                fromStorageLocation: bulkItem.toStorageLocation,
+                outReason: bulkItem.outReason,
+                approver: bulkItem.approver,
+                requestedBy: bulkItem.requestedBy,
+                requestedByEmail: bulkItem.requestedByEmail,
+                departureDate: ltReturn.departureDate,
+                departureTime: ltReturn.departureTime,
+                arrivalDate: ltReturn.arrivalDate || null,
+                arrivalTime: ltReturn.arrivalTime || null,
+                transportMode: ltReturn.transportMode,
+                companyName: ltReturn.transportMode === "CARRIER" ? ltReturn.companyName : null,
+                carrierRegNo: ltReturn.transportMode === "CARRIER" ? ltReturn.carrierRegNo : null,
+                driverNIC: ltReturn.driverNIC || null,
+                driverName: ltReturn.driverName || null,
+                driverContact: ltReturn.contactNo || null,
+                remarks: ltReturn.remarks || null,
+                parentPassId: gp1.id,
+                returnPassLocked: true,
+              };
+              const returnRes = await fetch("/api/gate-pass", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(returnPayload),
+              });
+              if (!returnRes.ok) {
+                const rd = await returnRes.json().catch(() => ({}));
+                console.error("[LT Return Gate Pass] bulk creation failed:", rd.error);
+              }
+            }
+          }
         }
       } else {
         const res = await fetch("/api/gate-pass", {
