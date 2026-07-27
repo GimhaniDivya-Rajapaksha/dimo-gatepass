@@ -1718,6 +1718,8 @@ export async function sendGatePassCancelledEmail(
     passId?: string | null;
     vehicle: string;
     cancelledByName: string;
+    fromLocation?: string | null;
+    toLocation?: string | null;
   }
 ): Promise<void> {
   const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -1747,6 +1749,16 @@ ${emailHeader("Gate Pass Cancelled", "Status Update", pass.gatePassNumber)}
   <div class="greeting">
     Dear <strong>${toName}</strong>,<br>
     Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was cancelled by <strong>${pass.cancelledByName}</strong>. No further action is required.
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Cancelled By</div><div class="ic-val">${pass.cancelledByName}</div></div>
+    </div>
   </div>
   <div style="margin-top:16px;text-align:center;">
     <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
