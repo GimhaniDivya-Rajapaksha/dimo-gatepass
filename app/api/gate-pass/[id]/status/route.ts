@@ -64,9 +64,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const gatePass = await (prisma.gatePass as any).findUnique({ where: { id } });
   if (!gatePass) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // LT Return Gate Pass: locked until the original (parent) transfer completes.
-  // returnPassLocked defaults to false for every other pass, so this never affects anything else.
-  if (gatePass.returnPassLocked) {
+  // LT Return Gate Pass: locked until the original (parent) transfer completes — but the
+  // Initiator must always be able to cancel a Return leg they no longer need, regardless of
+  // lock state, so "cancel" is exempt. returnPassLocked defaults to false for every other
+  // pass, so this never affects anything else.
+  if (gatePass.returnPassLocked && action !== "cancel") {
     return NextResponse.json({ error: "This Return Gate Pass is locked until the original Location Transfer is completed." }, { status: 400 });
   }
 
