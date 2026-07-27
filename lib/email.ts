@@ -397,10 +397,12 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar">
-        <span>Vehicle on this pass</span>
-        <span class="vtable-badge">1</span>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead>
           <tr>
@@ -434,14 +436,26 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
       <div class="action-desc">
         Approving authorises the departure of the listed vehicle. Rejecting will notify the requestor and place the gate pass on hold.
       </div>
-      <div class="btn-row" style="text-align:center">
-        <a href="${approveUrl}" class="btn-ok" style="display:inline-block;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);margin-right:24px;white-space:nowrap">
-          <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
-        </a>
-        <a href="${rejectUrl}" class="btn-no" style="display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
-          <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
-        </a>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+        <tr>
+          <td align="center" style="padding:0">
+            <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
+              <tr>
+                <td style="padding:0 16px 0 0">
+                  <a href="${approveUrl}" style="display:inline-block;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
+                  </a>
+                </td>
+                <td style="padding:0 0 0 16px">
+                  <a href="${rejectUrl}" style="display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <div class="expiry-note">
         &#x26A0; These links expire in <strong>48 hours</strong>. After expiry, please log in to the system to take action.
       </div>
@@ -535,10 +549,12 @@ ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Informat
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar">
-        <span>Vehicle on this pass</span>
-        <span class="vtable-badge">1</span>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead>
           <tr>
@@ -929,7 +945,12 @@ ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier E
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar"><span>Vehicle on this pass</span><span class="vtable-badge">1</span></div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead><tr><th>#</th><th>Vehicle No.</th>${pass.chassis ? "<th>Chassis No.</th>" : ""}<th>Location</th></tr></thead>
         <tbody>
