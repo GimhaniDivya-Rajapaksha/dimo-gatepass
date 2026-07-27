@@ -268,7 +268,13 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
       </td>
     </tr>
   </table>
-  <!-- Mobile: 2-row layout (hidden by default, shown on mobile via media query) -->
+  <!-- Mobile: 2-row layout (hidden by default, shown on mobile via media query). Outlook
+       desktop (Word rendering engine) doesn't reliably honor the display:none below, so it's
+       also wrapped in an Outlook-only conditional comment — Outlook (mso) always excludes
+       this block outright, guaranteeing it never renders alongside desktop-hd above. Every
+       other client (web/mobile mail apps) ignores the conditional syntax and falls back to
+       the existing CSS-driven responsive behavior, unchanged. -->
+  <!--[if !mso]><!-->
   <div class="mobile-hd" style="display:none;max-height:0;overflow:hidden;background:#1E4FA0">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
       <tr>
@@ -289,6 +295,7 @@ function emailHeader(title: string, subtitle: string, gpNumber: string): string 
       </tr>
     </table>
   </div>
+  <!--<![endif]-->
   <div style="height:4px;background:#8DC63F"></div>`;
 }
 
