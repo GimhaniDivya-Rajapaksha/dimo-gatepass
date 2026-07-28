@@ -85,6 +85,10 @@ export async function GET(req: NextRequest) {
   const locationType = searchParams.get("locationType") ?? undefined;
   const chassisNo = searchParams.get("chassisNo") ?? undefined;
 
+  // An Approver initiating their own gate pass must only ever find their mapped Special
+  // Approver here, never a normal Approver — every other creator role is unaffected.
+  const approverLookupRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+
   const fieldsParam = searchParams.get("fields");
   if (fieldsParam) {
     const fields = fieldsParam.split(",").map((f) => f.trim()) as LookupField[];
@@ -95,7 +99,7 @@ export async function GET(req: NextRequest) {
       const [apiLocations, outReasons, approvers, companies, carriers] = await Promise.all([
         fetchPlantLocationOptions().catch(() => []),
         fields.includes("outReason") ? prisma.outReasonOption.findMany({ orderBy: { value: "asc" }, take: 50 }) : Promise.resolve([]),
-        fields.includes("approver") ? prisma.user.findMany({ where: { role: "APPROVER" }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
+        fields.includes("approver") ? prisma.user.findMany({ where: { role: approverLookupRole as any }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("companyName") ? prisma.carrierOption.findMany({ orderBy: { companyName: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("carrierRegNo") ? prisma.carrierOption.findMany({ orderBy: { registrationNo: "asc" }, take: 50 }) : Promise.resolve([]),
       ]);
@@ -550,7 +554,7 @@ export async function GET(req: NextRequest) {
 
     const options = await prisma.user.findMany({
       where: {
-        role: "APPROVER",
+        role: approverLookupRole as any,
         ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
       },
       orderBy: { name: "asc" },
