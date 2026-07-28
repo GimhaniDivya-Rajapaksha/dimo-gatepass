@@ -885,15 +885,6 @@ export default function CreateGatePassPage() {
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
 
-  // An Approver initiating their own gate pass never sees Location Transfer / Customer
-  // Delivery (see the pass-type toggle filter below) — default them onto Service/Repair
-  // instead of landing on a hidden tab.
-  useEffect(() => {
-    if (status === "authenticated" && session?.user?.role === "APPROVER" && (passType === "LOCATION_TRANSFER" || passType === "CUSTOMER_DELIVERY")) {
-      setPassType("AFTER_SALES");
-    }
-  }, [status, session, passType]);
-
   // Auto-dismiss form-level error toast after 6 seconds
   useEffect(() => {
     if (!errors.form) return;
@@ -2778,16 +2769,8 @@ export default function CreateGatePassPage() {
             </svg>
           )},
         ] as { type: PassType; label: string; icon: React.ReactNode; asoHidden?: boolean }[])
-        // Service/Repair temporarily hidden pending future development — code preserved, see backup/service-repair-original.
-        // Exception: an Approver initiating their own gate pass (routed to a Special Approver,
-        // never LT/CD) sees Service/Repair instead of Location Transfer / Customer Delivery.
-        .filter(({ type: t, asoHidden }) => {
-          const isApproverInitiator = session?.user?.role === "APPROVER";
-          if (asoHidden && session?.user?.role === "AREA_SALES_OFFICER") return false;
-          if (t === "AFTER_SALES") return isApproverInitiator;
-          if (isApproverInitiator && (t === "LOCATION_TRANSFER" || t === "CUSTOMER_DELIVERY")) return false;
-          return true;
-        })
+        // Service/Repair temporarily hidden pending future development — code preserved, see backup/service-repair-original
+        .filter(({ type: t, asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER") && t !== "AFTER_SALES")
         .map(({ type: t, label, icon }) => (
           <motion.button
             key={t}
