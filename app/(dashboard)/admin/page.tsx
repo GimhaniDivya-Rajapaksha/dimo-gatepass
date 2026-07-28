@@ -46,50 +46,56 @@ type User = {
 const ROLES = [
   "INITIATOR", "APPROVER", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR",
-  "DELIVERY_COORDINATOR",
+  "DELIVERY_COORDINATOR", "SPECIAL_APPROVER",
 ];
 const ROLE_LABELS: Record<string, string> = {
   INITIATOR: "Initiator", APPROVER: "Approver",
   ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
   SECURITY_OFFICER: "Security Officer", SERVICE_ADVISOR: "Service Advisor",
-  DELIVERY_COORDINATOR: "Delivery Coordinator",
+  DELIVERY_COORDINATOR: "Delivery Coordinator", SPECIAL_APPROVER: "Special Approver",
 };
 const roleColors: Record<string, string> = {
   INITIATOR: "#2563eb", APPROVER: "#7c3aed",
   ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
   SECURITY_OFFICER: "#0f766e", SERVICE_ADVISOR: "#ea580c",
-  DELIVERY_COORDINATOR: "#0d9488",
+  DELIVERY_COORDINATOR: "#0d9488", SPECIAL_APPROVER: "#9333ea",
 };
 const roleBg: Record<string, string> = {
   INITIATOR: "#eff6ff", APPROVER: "#f5f3ff",
   ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
   SECURITY_OFFICER: "#f0fdfa", SERVICE_ADVISOR: "#fff7ed",
-  DELIVERY_COORDINATOR: "#f0fdfa",
+  DELIVERY_COORDINATOR: "#f0fdfa", SPECIAL_APPROVER: "#faf5ff",
 };
 
 // Which attributes each role needs
 const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
   INITIATOR:            ["location", "brand", "approver"],
   SECURITY_OFFICER:     ["location"],
-  APPROVER:             ["location", "brand"],
+  APPROVER:             ["location", "brand", "approver"],
   CASHIER:              ["location"],
   AREA_SALES_OFFICER:   ["location", "brand"],
   SERVICE_ADVISOR:      ["location", "brand"],
   DELIVERY_COORDINATOR: ["location"],
   ADMIN:                [],
+  SPECIAL_APPROVER:     [],
 };
 
 /* ─── Assign Attributes Modal ─────────────────────────────────────── */
 function AssignAttributesModal({
-  user, approvers, onClose, onSaved,
+  user, approvers, specialApprovers, onClose, onSaved,
 }: {
   user: User;
   approvers: User[];
+  specialApprovers: User[];
   onClose: () => void;
   onSaved: (updated: Partial<User>) => void;
 }) {
   const role = user.role ?? "";
   const fields = ROLE_ATTRS[role] ?? [];
+  // An Approver initiating their own gate pass must be routed to a Special Approver,
+  // never another normal Approver — so the pool this picker offers depends on whose
+  // attributes are being edited.
+  const approverOptions = role === "APPROVER" ? specialApprovers : approvers;
   const [location, setLocation] = useState(user.defaultLocation ?? "");
   const [brand, setBrand] = useState(user.brand ?? "");
   const [approverId, setApproverId] = useState(user.approverId ?? "");
@@ -163,11 +169,11 @@ function AssignAttributesModal({
         brand: fields.includes("brand") ? brand || null : user.brand,
         approverId: fields.includes("approver") ? approverId || null : user.approverId,
         approver: fields.includes("approver")
-          ? approverId ? (approvers.find(a => a.id === approverId) ? { id: approverId, name: approvers.find(a => a.id === approverId)!.name } : null) : null
+          ? approverId ? (approverOptions.find(a => a.id === approverId) ? { id: approverId, name: approverOptions.find(a => a.id === approverId)!.name } : null) : null
           : user.approver,
         backupApproverId: fields.includes("approver") ? backupApproverId || null : user.backupApproverId,
         backupApprover: fields.includes("approver")
-          ? backupApproverId ? (approvers.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approvers.find(a => a.id === backupApproverId)!.name } : null) : null
+          ? backupApproverId ? (approverOptions.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approverOptions.find(a => a.id === backupApproverId)!.name } : null) : null
           : user.backupApprover,
       });
       onClose();
@@ -374,7 +380,7 @@ function AssignAttributesModal({
           {fields.includes("approver") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                {role === "CASHIER" ? "Payment Override Approver" : "Approver"}{" "}
+                {role === "CASHIER" ? "Payment Override Approver" : role === "APPROVER" ? "Special Approver" : "Approver"}{" "}
                 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
               <select
@@ -382,8 +388,8 @@ function AssignAttributesModal({
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               >
-                <option value="">{approvers.length === 0 ? "No approvers yet" : "None"}</option>
-                {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <option value="">{approverOptions.length === 0 ? "No approvers yet" : "None"}</option>
+                {approverOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               {role === "CASHIER" && (
                 <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
@@ -403,7 +409,7 @@ function AssignAttributesModal({
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               >
                 <option value="">No Approver 2 assigned</option>
-                {approvers.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Initiators can select this approver if Approver 1 is unavailable.
@@ -441,10 +447,11 @@ function AssignAttributesModal({
 }
 
 /* ─── Add User Modal ──────────────────────────────────────────────── */
-function AddUserModal({ onClose, onCreated, approvers }: {
+function AddUserModal({ onClose, onCreated, approvers, specialApprovers }: {
   onClose: () => void;
   onCreated: (u: User) => void;
   approvers: User[];
+  specialApprovers: User[];
 }) {
   const [form, setForm] = useState({ name: "", email: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
@@ -470,6 +477,9 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
   const selectedRole = form.role;
   const fields = ROLE_ATTRS[selectedRole] ?? [];
+  // An Approver initiating their own gate pass must be routed to a Special Approver,
+  // never another normal Approver.
+  const approverOptions = selectedRole === "APPROVER" ? specialApprovers : approvers;
 
   function searchAd(q: string) {
     setAdQuery(q);
@@ -539,11 +549,11 @@ function AddUserModal({ onClose, onCreated, approvers }: {
         brand: form.brand || null,
         approverId: form.approverId || null,
         approver: form.approverId
-          ? (approvers.find(a => a.id === form.approverId) ?? null)
+          ? (approverOptions.find(a => a.id === form.approverId) ?? null)
           : null,
         backupApproverId: form.backupApproverId || null,
         backupApprover: form.backupApproverId
-          ? (approvers.find(a => a.id === form.backupApproverId) ?? null)
+          ? (approverOptions.find(a => a.id === form.backupApproverId) ?? null)
           : null,
       });
       onClose();
@@ -675,20 +685,20 @@ function AddUserModal({ onClose, onCreated, approvers }: {
               {!form.brand.trim() && <p className="text-red-500 text-xs mt-1">Required for {ROLE_LABELS[selectedRole] || selectedRole}</p>}
             </div>
           )}
-          {fields.includes("approver") && approvers.length > 0 && (
+          {fields.includes("approver") && approverOptions.length > 0 && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+                {selectedRole === "APPROVER" ? "Special Approver" : "Approver"} <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
               <select value={form.approverId} onChange={e => set("approverId", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No approver assigned</option>
-                {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           )}
-          {fields.includes("approver") && approvers.length > 0 && selectedRole !== "CASHIER" && (
+          {fields.includes("approver") && approverOptions.length > 0 && selectedRole !== "CASHIER" && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
@@ -697,7 +707,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No Approver 2 assigned</option>
-                {approvers.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           )}
@@ -776,6 +786,7 @@ export default function AdminPage() {
   }, []);
 
   const approvers = users.filter(u => u.role === "APPROVER");
+  const specialApprovers = users.filter(u => u.role === "SPECIAL_APPROVER");
 
   async function assignRole(userId: string, role: string) {
     setAssigning(userId);
@@ -815,6 +826,7 @@ export default function AdminPage() {
     { label: "Total Users",      value: users.filter(u => !!u.role).length,                        color: "#6366f1", bg: "#eef2ff" },
     { label: "Initiators",       value: users.filter(u => u.role === "INITIATOR").length,           color: "#2563eb", bg: "#eff6ff" },
     { label: "Approvers",        value: users.filter(u => u.role === "APPROVER").length,            color: "#7c3aed", bg: "#f5f3ff" },
+    { label: "Special Approvers", value: users.filter(u => u.role === "SPECIAL_APPROVER").length,   color: "#9333ea", bg: "#faf5ff" },
     { label: "Admins",           value: users.filter(u => u.role === "ADMIN").length,               color: "#dc2626", bg: "#fef2f2" },
     { label: "Cashiers",         value: users.filter(u => u.role === "CASHIER").length,             color: "#b45309", bg: "#fffbeb" },
     { label: "Area Sales",       value: users.filter(u => u.role === "AREA_SALES_OFFICER").length,  color: "#15803d", bg: "#f0fdf4" },
@@ -848,12 +860,13 @@ export default function AdminPage() {
 
       <AnimatePresence>
         {showAddUser && (
-          <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} />
+          <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} specialApprovers={specialApprovers} />
         )}
         {attrModal && (ROLE_ATTRS[attrModal.role ?? ""] ?? []).length > 0 && (
           <AssignAttributesModal
             user={attrModal}
             approvers={approvers}
+            specialApprovers={specialApprovers}
             onClose={() => setAttrModal(null)}
             onSaved={(updated) => {
               setUsers(prev => prev.map(u => u.id === attrModal.id ? { ...u, ...updated } : u));

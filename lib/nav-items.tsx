@@ -140,6 +140,7 @@ export const navItemsByRole: Record<string, NavItem[]> = {
   ],
   APPROVER: [
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
+    { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon />, showPendingBadge: true },
     {
       label: "Payment Overrides",
@@ -155,6 +156,12 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
     { label: "Orders Report", href: "/orders-report", icon: <OrdersReportIcon /> },
+  ],
+  SPECIAL_APPROVER: [
+    { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
+    { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon />, showPendingBadge: true },
+    { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
+    { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
   ],
   RECIPIENT: [
     { label: "Dashboard", href: "/recipient", icon: <DashboardIcon /> },

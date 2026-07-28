@@ -881,9 +881,18 @@ export default function CreateGatePassPage() {
   const [cdSapError, setCdSapError] = useState<string | null>(null);
 
   useEffect(() => {
-    const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
+    const allowed = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER", "APPROVER"];
     if (status === "authenticated" && !allowed.includes(session?.user?.role ?? "")) router.replace("/");
   }, [status, session, router]);
+
+  // An Approver initiating their own gate pass never sees Location Transfer / Customer
+  // Delivery (see the pass-type toggle filter below) — default them onto Service/Repair
+  // instead of landing on a hidden tab.
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.role === "APPROVER" && (passType === "LOCATION_TRANSFER" || passType === "CUSTOMER_DELIVERY")) {
+      setPassType("AFTER_SALES");
+    }
+  }, [status, session, passType]);
 
   // Auto-dismiss form-level error toast after 6 seconds
   useEffect(() => {
@@ -2769,7 +2778,14 @@ export default function CreateGatePassPage() {
             </svg>
           )},
         ] as { type: PassType; label: string; icon: React.ReactNode; asoHidden?: boolean }[])
-        .filter(({ asoHidden }) => !(asoHidden && session?.user?.role === "AREA_SALES_OFFICER"))
+        // An Approver initiating their own gate pass (routed to a Special Approver) never
+        // sees Location Transfer / Customer Delivery — every other role's visibility (incl.
+        // Service/Repair, already shown here) is unchanged.
+        .filter(({ type: t, asoHidden }) => {
+          if (asoHidden && session?.user?.role === "AREA_SALES_OFFICER") return false;
+          if (session?.user?.role === "APPROVER" && (t === "LOCATION_TRANSFER" || t === "CUSTOMER_DELIVERY")) return false;
+          return true;
+        })
         .map(({ type: t, label, icon }) => (
           <motion.button
             key={t}

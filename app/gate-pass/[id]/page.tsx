@@ -6,6 +6,7 @@ import TimePicker from "@/components/ui/TimePicker";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "next-auth/react";
+import { isApproverRole } from "@/lib/roles";
 
 type SubPassSummary = {
   id: string; gatePassNumber: string; passSubType: string | null; status: string;
@@ -926,7 +927,7 @@ function InitiatorGatePassDetailPageInner() {
     data.status === "PENDING_APPROVAL" ||
     (data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW")
   ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
-  const isApproverView = role === "APPROVER" || role === "ADMIN";
+  const isApproverView = isApproverRole(role) || role === "ADMIN";
   // True if this approver is specifically assigned to this gate pass.
   // null intendedApprover means old pass (no selection stored) — allow any approver.
   const isIntendedApprover = role === "ADMIN" || !data.intendedApprover ||
