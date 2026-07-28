@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
+import { isApproverRole } from "@/lib/roles";
 
 function ciLocation(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -225,10 +226,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // APPROVER: approve or reject
+  // APPROVER (or SPECIAL_APPROVER): approve or reject
   if (action === "approve" || action === "reject") {
-    if (session.user.role !== "APPROVER") {
+    if (!isApproverRole(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById === session.user.id) {
+      return NextResponse.json({ error: "You cannot approve or reject a gate pass you initiated yourself." }, { status: 403 });
     }
 
     // If the pass was originally created by a Security Officer, the vehicle is already

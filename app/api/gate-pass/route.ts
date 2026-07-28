@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail, sendRequestedByNotificationEmail, sendTestDriveReturnTimeExceededEmail } from "@/lib/email";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
+import { isApproverRole } from "@/lib/roles";
 
 function ciEquals(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -183,7 +184,7 @@ export async function GET(req: NextRequest) {
   // APPROVER: for PENDING_APPROVAL passes, only show ones explicitly assigned to them
   // (intendedApprover = their name). For null intendedApprover (old passes), still show all.
   // For other statuses (approved/rejected history), no restriction.
-  if (role === "APPROVER" && (!status || status === "PENDING_APPROVAL")) {
+  if (isApproverRole(role) && (!status || status === "PENDING_APPROVAL")) {
     const approverName = (session.user as { name?: string | null }).name ?? "";
     if (approverName) {
       const pendingFilter = { status: "PENDING_APPROVAL" as const };
@@ -245,7 +246,7 @@ export async function GET(req: NextRequest) {
   // Approver queue: when querying PENDING_APPROVAL, also surface CASHIER_REVIEW passes
   // that have a pending credit component (mixed payment). Applies to all pass types so
   // that CUSTOMER_DELIVERY mixed-payment passes are visible alongside After Sales ones.
-  if (role === "APPROVER" && status === "PENDING_APPROVAL") {
+  if (isApproverRole(role) && status === "PENDING_APPROVAL") {
     delete (where as any).status;
     const approverName = (session.user as { name?: string | null }).name ?? "";
     const approverMatchFilter = approverName
@@ -298,7 +299,7 @@ export async function GET(req: NextRequest) {
 
   // Test Drive has no Approver workflow at all — Approvers must never see Test Drive
   // passes in any list (pending queue, approved history, or "All" tab), regardless of status.
-  if (role === "APPROVER") {
+  if (isApproverRole(role)) {
     const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
     (where as any).AND = [...existingAnd, { passType: { not: "TEST_DRIVE" } }];
   }
@@ -350,7 +351,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
   const session = await getServerSession(authOptions);
-  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
+  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER", "APPROVER"];
   if (!session || !allowedRoles.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -840,17 +841,20 @@ export async function POST(req: NextRequest) {
   let approvers: { id: string; email: string; name: string }[] = [];
   if (!isTestDrive) {
     const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
+    // An Approver initiating their own gate pass must never route to (or notify) a normal
+    // Approver — it goes only to whichever Special Approver they're mapped to.
+    const approverRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
     approvers = selectedApproverName
       ? await prisma.user.findMany({
           where: {
-            role: "APPROVER",
+            role: approverRole as any,
             name: { equals: selectedApproverName, mode: "insensitive" },
           },
         })
-      : await prisma.user.findMany({ where: { role: "APPROVER" } });
+      : await prisma.user.findMany({ where: { role: approverRole as any } });
 
     if (selectedApproverName && approvers.length === 0) {
-      approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
+      approvers = await prisma.user.findMany({ where: { role: approverRole as any } });
     }
 
     if (approvers.length > 0) {

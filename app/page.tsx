@@ -10,7 +10,7 @@ export default async function RootPage() {
   if (!role) redirect("/pending");
   if (role === "ADMIN") redirect("/admin");
   if (role === "INITIATOR") redirect("/initiator");
-  if (role === "APPROVER") redirect("/approver");
+  if (role === "APPROVER" || role === "SPECIAL_APPROVER") redirect("/approver");
   if (role === "RECIPIENT") redirect("/recipient");
   if (role === "CASHIER") redirect("/cashier");
   if (role === "AREA_SALES_OFFICER") redirect("/aso");

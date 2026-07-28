@@ -95,7 +95,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   }, [role]);
 
   useEffect(() => {
-    const rolesWithCounts = ["INITIATOR", "AREA_SALES_OFFICER", "APPROVER", "DELIVERY_COORDINATOR", "SERVICE_ADVISOR", "CASHIER"];
+    const rolesWithCounts = ["INITIATOR", "AREA_SALES_OFFICER", "APPROVER", "SPECIAL_APPROVER", "DELIVERY_COORDINATOR", "SERVICE_ADVISOR", "CASHIER"];
     if (!role || !rolesWithCounts.includes(role)) return;
     const fetchCounts = () => {
       fetch("/api/sidebar-counts")

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
+import { isApproverRole } from "@/lib/roles";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -134,7 +135,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   // ── Approver edits transport details ────────────────────────────────────
-  if (session.user.role !== "APPROVER") {
+  if (!isApproverRole(session.user.role)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 

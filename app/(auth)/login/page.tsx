@@ -72,7 +72,7 @@ function LoginForm() {
 
     if (role === "ADMIN") router.push("/admin");
     else if (role === "INITIATOR") router.push("/initiator");
-    else if (role === "APPROVER") router.push("/approver");
+    else if (role === "APPROVER" || role === "SPECIAL_APPROVER") router.push("/approver");
     else if (role === "RECIPIENT") router.push("/recipient");
     else if (role === "CASHIER") router.push("/cashier");
     else if (role === "AREA_SALES_OFFICER") router.push("/aso");

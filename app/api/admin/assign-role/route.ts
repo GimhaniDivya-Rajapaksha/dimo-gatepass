@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 const VALID_ROLES = [
   "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER",
-  "SERVICE_ADVISOR", "DELIVERY_COORDINATOR",
+  "SERVICE_ADVISOR", "DELIVERY_COORDINATOR", "SPECIAL_APPROVER",
 ];
 
 export async function POST(req: NextRequest) {

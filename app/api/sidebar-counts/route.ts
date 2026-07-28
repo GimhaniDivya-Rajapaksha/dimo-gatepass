@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isApproverRole } from "@/lib/roles";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
       pending   = await prisma.gatePass.count({ where: { AND: [{ OR: orClauses }, { status: "PENDING_APPROVAL" }] } as any });
       completed = await prisma.gatePass.count({ where: { AND: [{ OR: orClauses }, { status: "COMPLETED"        }] } as any });
 
-    } else if (role === "APPROVER") {
+    } else if (isApproverRole(role)) {
       // Mirror APPROVER pending logic: assigned by name OR intendedApprover null + CASHIER_REVIEW credit passes
       const approverMatch = userName
         ? { OR: [

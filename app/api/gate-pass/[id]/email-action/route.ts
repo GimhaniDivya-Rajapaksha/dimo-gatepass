@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyApprovalToken, sendApprovalNotificationEmail, sendEscalationApprovedEmail, sendEscalationRejectedEmail, sendAsoArrivalEmail } from "@/lib/email";
 import { prisma } from "@/lib/prisma";
+import { APPROVER_ROLES } from "@/lib/roles";
 
 async function findTokenApprover(approverId?: string | null) {
   if (approverId) {
     const approver = await prisma.user.findFirst({
-      where: { id: approverId, role: "APPROVER" },
+      where: { id: approverId, role: { in: [...APPROVER_ROLES] } },
       select: { id: true, name: true, email: true },
     });
     if (approver) return approver;
   }
 
   return prisma.user.findFirst({
-    where: { role: "APPROVER" },
+    where: { role: { in: [...APPROVER_ROLES] } },
     select: { id: true, name: true, email: true },
   });
 }
