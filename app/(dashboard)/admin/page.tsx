@@ -8,13 +8,6 @@ const BRANDS = ["Mercedes-Benz", "TATA", "Jeep"];
 // Roles that can be assigned multiple brands (comma-separated in brand field)
 const MULTI_BRAND_ROLES = ["INITIATOR", "APPROVER"];
 
-// Plant-level prefix of a full "Plant - Sub Location" string (or the value itself if it
-// has no sub-location suffix) — same convention used server-side throughout the app.
-function plantPrefix(value: string | null | undefined): string {
-  const normalized = value?.trim();
-  return normalized ? normalized.split(" - ")[0].trim() : "";
-}
-
 function BrandSelector({ value, onChange, multi }: { value: string; onChange: (v: string) => void; multi: boolean }) {
   const selected = value ? value.split(",").map(s => s.trim()).filter(Boolean) : [];
   const toggle = (b: string) => {
@@ -105,9 +98,8 @@ function AssignAttributesModal({
   // never another normal Approver — so the pool this picker offers depends on whose
   // attributes are being edited.
   const approverOptions = role === "APPROVER" ? specialApprovers : approvers;
-  const primaryPlant = plantPrefix(user.defaultLocation);
   const [selectedLocations, setSelectedLocations] = useState<string[]>(
-    [...new Set([...(primaryPlant ? [primaryPlant] : []), ...(user.mappedPlants ?? [])])]
+    [...new Set([...(user.defaultLocation ? [user.defaultLocation] : []), ...(user.mappedPlants ?? [])])]
   );
   const [locationSearch, setLocationSearch] = useState("");
   const [locationOpen, setLocationOpen] = useState(false);
@@ -124,9 +116,12 @@ function AssignAttributesModal({
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
 
   useEffect(() => {
+    // The full, original location list (same one the old single "Location" field used) —
+    // every plant + sub-location combination, not the deduped plant-only list, so nothing
+    // that existed before is filtered, hidden, or collapsed.
     fetch("/api/admin/locations")
       .then(r => r.json())
-      .then(d => setLocationOptions(d.plants ?? []))
+      .then(d => setLocationOptions(d.locations ?? []))
       .catch(() => {});
   }, []);
 
@@ -170,7 +165,7 @@ function AssignAttributesModal({
       // stored as a full mapped-location row, so both the single-location checks and the
       // multi-location checks resolve to the exact same, complete set.
       const newDefaultLocation = fields.includes("location")
-        ? (selectedLocations.includes(primaryPlant) ? primaryPlant : selectedLocations[0] ?? null)
+        ? (user.defaultLocation && selectedLocations.includes(user.defaultLocation) ? user.defaultLocation : selectedLocations[0] ?? null)
         : null;
 
       const res = await fetch("/api/admin/assign-attributes", {
@@ -1146,7 +1141,7 @@ export default function AdminPage() {
                           <div className="min-w-0">
                             {(() => {
                               const allLocations = [...new Set([
-                                ...(plantPrefix(user.defaultLocation) ? [plantPrefix(user.defaultLocation)] : []),
+                                ...(user.defaultLocation ? [user.defaultLocation] : []),
                                 ...(user.mappedPlants ?? []),
                               ])];
                               return allLocations.length > 0 ? (
