@@ -8,6 +8,13 @@ const BRANDS = ["Mercedes-Benz", "TATA", "Jeep"];
 // Roles that can be assigned multiple brands (comma-separated in brand field)
 const MULTI_BRAND_ROLES = ["INITIATOR", "APPROVER"];
 
+// Plant-level prefix of a full "Plant - Sub Location" string (or the value itself if it
+// has no sub-location suffix) — same convention used server-side throughout the app.
+function plantPrefix(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized ? normalized.split(" - ")[0].trim() : "";
+}
+
 function BrandSelector({ value, onChange, multi }: { value: string; onChange: (v: string) => void; multi: boolean }) {
   const selected = value ? value.split(",").map(s => s.trim()).filter(Boolean) : [];
   const toggle = (b: string) => {
@@ -68,17 +75,16 @@ const roleBg: Record<string, string> = {
   DELIVERY_COORDINATOR: "#f0fdfa", SPECIAL_APPROVER: "#faf5ff",
 };
 
-// Which attributes each role needs. "plants" (additional mapped plants, on top of the
-// primary "location") is offered for every role that has "location" — a user keeps
-// exactly one role, but can now be mapped to more than one plant.
-const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver" | "plants")[]> = {
-  INITIATOR:            ["location", "brand", "approver", "plants"],
-  SECURITY_OFFICER:     ["location", "plants"],
-  APPROVER:             ["location", "brand", "approver", "plants"],
-  CASHIER:              ["location", "plants"],
-  AREA_SALES_OFFICER:   ["location", "brand", "plants"],
-  SERVICE_ADVISOR:      ["location", "brand", "plants"],
-  DELIVERY_COORDINATOR: ["location", "plants"],
+// Which attributes each role needs. "location" is a multi-select ("Select Locations") —
+// a user keeps exactly one role, but can be mapped to one or more locations/plants.
+const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
+  INITIATOR:            ["location", "brand", "approver"],
+  SECURITY_OFFICER:     ["location"],
+  APPROVER:             ["location", "brand", "approver"],
+  CASHIER:              ["location"],
+  AREA_SALES_OFFICER:   ["location", "brand"],
+  SERVICE_ADVISOR:      ["location", "brand"],
+  DELIVERY_COORDINATOR: ["location"],
   ADMIN:                [],
   SPECIAL_APPROVER:     [],
 };
@@ -99,28 +105,28 @@ function AssignAttributesModal({
   // never another normal Approver — so the pool this picker offers depends on whose
   // attributes are being edited.
   const approverOptions = role === "APPROVER" ? specialApprovers : approvers;
-  const [location, setLocation] = useState(user.defaultLocation ?? "");
-  const [brand, setBrand] = useState(user.brand ?? "");
-  const [approverId, setApproverId] = useState(user.approverId ?? "");
-  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
-  const [locations, setLocations] = useState<string[]>([]);
+  const primaryPlant = plantPrefix(user.defaultLocation);
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(
+    [...new Set([...(primaryPlant ? [primaryPlant] : []), ...(user.mappedPlants ?? [])])]
+  );
   const [locationSearch, setLocationSearch] = useState("");
   const [locationOpen, setLocationOpen] = useState(false);
   const locationRef = useRef<HTMLDivElement>(null);
+  const [brand, setBrand] = useState(user.brand ?? "");
+  const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
   const [brandList, setBrandList] = useState<string[]>([]);
   const [brandSearch, setBrandSearch] = useState("");
   const [brandOpen, setBrandOpen] = useState(false);
   const brandRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [plantOptions, setPlantOptions] = useState<string[]>([]);
-  const [selectedPlants, setSelectedPlants] = useState<string[]>(user.mappedPlants ?? []);
-  const [plantSearch, setPlantSearch] = useState("");
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
 
   useEffect(() => {
     fetch("/api/admin/locations")
       .then(r => r.json())
-      .then(d => { setLocations(d.locations ?? []); setPlantOptions(d.plants ?? []); })
+      .then(d => setLocationOptions(d.plants ?? []))
       .catch(() => {});
   }, []);
 
@@ -153,17 +159,26 @@ function AssignAttributesModal({
 
   const handleSave = async () => {
     // Validate mandatory fields per role
-    if (fields.includes("location") && !location.trim()) { setError("Location is required for this role."); return; }
+    if (fields.includes("location") && selectedLocations.length === 0) { setError("At least one location is required for this role."); return; }
     if (fields.includes("brand") && !brand.trim()) { setError("Brand is required for this role."); return; }
     if (approverId && backupApproverId && approverId === backupApproverId) { setError("Approver 1 and Approver 2 must be different."); return; }
     setLoading(true); setError("");
     try {
+      // A great many existing places across the app still read a single `defaultLocation`
+      // field — keep the current primary if it's still among the selections, otherwise
+      // fall back to the first one. Every selected location (including that one) is also
+      // stored as a full mapped-location row, so both the single-location checks and the
+      // multi-location checks resolve to the exact same, complete set.
+      const newDefaultLocation = fields.includes("location")
+        ? (selectedLocations.includes(primaryPlant) ? primaryPlant : selectedLocations[0] ?? null)
+        : null;
+
       const res = await fetch("/api/admin/assign-attributes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user.id,
-          ...(fields.includes("location") ? { defaultLocation: location } : {}),
+          ...(fields.includes("location") ? { defaultLocation: newDefaultLocation } : {}),
           ...(fields.includes("brand") ? { brand } : {}),
           ...(fields.includes("approver") ? { approverId } : {}),
           ...(fields.includes("approver") ? { backupApproverId } : {}),
@@ -171,10 +186,10 @@ function AssignAttributesModal({
       });
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
 
-      if (fields.includes("plants")) {
+      if (fields.includes("location")) {
         const before = user.mappedPlants ?? [];
-        const toAdd = selectedPlants.filter(p => !before.includes(p));
-        const toRemove = before.filter(p => !selectedPlants.includes(p));
+        const toAdd = selectedLocations.filter(p => !before.includes(p));
+        const toRemove = before.filter(p => !selectedLocations.includes(p));
         await Promise.all([
           ...toAdd.map(p => fetch("/api/admin/plant-mappings", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -188,7 +203,7 @@ function AssignAttributesModal({
       }
 
       onSaved({
-        defaultLocation: fields.includes("location") ? location || null : user.defaultLocation,
+        defaultLocation: fields.includes("location") ? newDefaultLocation : user.defaultLocation,
         brand: fields.includes("brand") ? brand || null : user.brand,
         approverId: fields.includes("approver") ? approverId || null : user.approverId,
         approver: fields.includes("approver")
@@ -198,7 +213,7 @@ function AssignAttributesModal({
         backupApprover: fields.includes("approver")
           ? backupApproverId ? (approverOptions.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approverOptions.find(a => a.id === backupApproverId)!.name } : null) : null
           : user.backupApprover,
-        mappedPlants: fields.includes("plants") ? selectedPlants : user.mappedPlants,
+        mappedPlants: fields.includes("location") ? selectedLocations : user.mappedPlants,
       });
       onClose();
     } catch {
@@ -238,17 +253,28 @@ function AssignAttributesModal({
           {fields.includes("location") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Location <span className="text-red-500">*</span>
+                Select Locations <span className="text-red-500">*</span>
               </label>
               <div ref={locationRef} className="relative">
                 <div
-                  className="w-full border rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 cursor-pointer"
-                  style={{ background: "var(--surface2)", borderColor: !location.trim() ? "#f87171" : locationOpen ? "#3b82f6" : "var(--border)", color: "var(--text)", boxShadow: locationOpen ? "0 0 0 2px #bfdbfe" : undefined }}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm flex items-center gap-2 cursor-pointer min-h-[42px] flex-wrap"
+                  style={{ background: "var(--surface2)", borderColor: selectedLocations.length === 0 ? "#f87171" : locationOpen ? "#3b82f6" : "var(--border)", boxShadow: locationOpen ? "0 0 0 2px #bfdbfe" : undefined }}
                   onClick={() => { setLocationOpen(o => !o); setLocationSearch(""); }}
                 >
-                  <span className="flex-1 truncate" style={{ color: location ? "var(--text)" : "var(--text-muted)" }}>
-                    {location || "— Select location —"}
-                  </span>
+                  {selectedLocations.length === 0 ? (
+                    <span className="flex-1 text-sm" style={{ color: "var(--text-muted)" }}>— Select locations —</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 flex-1">
+                      {selectedLocations.map(l => (
+                        <span key={l} className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold"
+                          style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}>
+                          {l}
+                          <button type="button" onClick={e => { e.stopPropagation(); setSelectedLocations(prev => prev.filter(x => x !== l)); setError(""); }}
+                            className="ml-0.5 hover:opacity-70">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <svg className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: "var(--text-muted)", transform: locationOpen ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -281,29 +307,39 @@ function AssignAttributesModal({
                       </div>
                     </div>
                     <ul className="max-h-52 overflow-y-auto py-1">
-                      {locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
+                      {locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
                         <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No locations found</li>
                       ) : (
-                        locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => (
-                          <li key={l}
-                            className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
-                            style={{ background: l === location ? "#eff6ff" : "transparent", color: l === location ? "#1d4ed8" : "var(--text)", fontWeight: l === location ? 600 : 400 }}
-                            onMouseDown={e => { e.preventDefault(); setLocation(l); setError(""); setLocationOpen(false); setLocationSearch(""); }}
-                          >
-                            {l === location && (
-                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                            <span className={l === location ? "" : "ml-5"}>{l}</span>
-                          </li>
-                        ))
+                        locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => {
+                          const checked = selectedLocations.includes(l);
+                          return (
+                            <li key={l}
+                              className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
+                              style={{ background: checked ? "#eff6ff" : "transparent", color: checked ? "#1d4ed8" : "var(--text)", fontWeight: checked ? 600 : 400 }}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                setSelectedLocations(prev => checked ? prev.filter(x => x !== l) : [...prev, l]);
+                                setError("");
+                              }}
+                            >
+                              {checked ? (
+                                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : <span className="w-3.5 h-3.5 flex-shrink-0" />}
+                              {l}
+                            </li>
+                          );
+                        })
                       )}
                     </ul>
                   </div>
                 )}
               </div>
-              {!location.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
+              {selectedLocations.length === 0 && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                This user will see and receive data only for the locations selected here.
+              </p>
             </div>
           )}
 
@@ -437,48 +473,6 @@ function AssignAttributesModal({
               </select>
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Initiators can select this approver if Approver 1 is unavailable.
-              </p>
-            </div>
-          )}
-
-          {fields.includes("plants") && (
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Mapped Plants <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional — in addition to Location above)</span>
-              </label>
-              <div className="rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
-                <div className="p-2 border-b" style={{ borderColor: "var(--border)" }}>
-                  <input
-                    type="text"
-                    value={plantSearch}
-                    onChange={e => setPlantSearch(e.target.value)}
-                    placeholder="Search plants..."
-                    className="w-full bg-transparent text-sm outline-none px-2 py-1.5"
-                    style={{ color: "var(--text)" }}
-                  />
-                </div>
-                <ul className="max-h-44 overflow-y-auto py-1">
-                  {plantOptions.filter(p => p.toLowerCase().includes(plantSearch.toLowerCase())).length === 0 ? (
-                    <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No plants found</li>
-                  ) : (
-                    plantOptions.filter(p => p.toLowerCase().includes(plantSearch.toLowerCase())).map(p => {
-                      const checked = selectedPlants.includes(p);
-                      return (
-                        <li key={p}
-                          className="flex items-center gap-2.5 px-4 py-2 text-sm cursor-pointer hover:opacity-80"
-                          style={{ color: "var(--text)" }}
-                          onClick={() => setSelectedPlants(prev => checked ? prev.filter(x => x !== p) : [...prev, p])}
-                        >
-                          <input type="checkbox" checked={checked} readOnly className="pointer-events-none" />
-                          {p}
-                        </li>
-                      );
-                    })
-                  )}
-                </ul>
-              </div>
-              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                This user will see and receive data for these plants in addition to their primary Location above. Role stays unchanged.
               </p>
             </div>
           )}
@@ -1150,13 +1144,23 @@ export default function AdminPage() {
                       {user.role && (ROLE_ATTRS[user.role] ?? []).length > 0 ? (
                         <div className="flex items-center gap-2">
                           <div className="min-w-0">
-                            {user.defaultLocation ? (
-                              <p className="text-xs font-medium truncate max-w-[140px]" style={{ color: "var(--text)" }} title={user.defaultLocation}>
-                                📍 {user.defaultLocation}
-                              </p>
-                            ) : (
-                              <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
-                            )}
+                            {(() => {
+                              const allLocations = [...new Set([
+                                ...(plantPrefix(user.defaultLocation) ? [plantPrefix(user.defaultLocation)] : []),
+                                ...(user.mappedPlants ?? []),
+                              ])];
+                              return allLocations.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {allLocations.map(p => (
+                                    <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }} title={p}>
+                                      📍 {p}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
+                              );
+                            })()}
                             {ROLE_ATTRS[user.role].includes("brand") && (
                               user.brand ? (
                                 <div className="flex flex-wrap gap-1 mt-0.5">
@@ -1175,15 +1179,6 @@ export default function AdminPage() {
                             )}
                             {ROLE_ATTRS[user.role].includes("approver") && user.backupApprover && (
                               <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 2: {user.backupApprover.name}</p>
-                            )}
-                            {ROLE_ATTRS[user.role].includes("plants") && (user.mappedPlants?.length ?? 0) > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-0.5">
-                                {user.mappedPlants!.map(p => (
-                                  <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }} title={`Additional mapped plant: ${p}`}>
-                                    + {p}
-                                  </span>
-                                ))}
-                              </div>
                             )}
                           </div>
                           <button
