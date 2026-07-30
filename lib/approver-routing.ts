@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { findExtraMappedUserIds } from "@/lib/user-plants";
 
 type ApproverUser = {
   id: string;
@@ -57,9 +58,18 @@ export async function findApproversForLocationBrand(
 ) {
   // Match approvers by plant prefix (first part before " - ") so sub-storage variants
   // like "Galle Branch - HNB" and "Galle Branch - Sales" both resolve to "Galle Branch" approvers.
+  // Also matches approvers who have this plant among their ADDITIONAL mapped plants
+  // (UserPlantMapping), not just their primary defaultLocation.
   const plantPrefix = location ? location.split(" - ")[0].trim() : null;
+  const extraApproverIds = plantPrefix ? await findExtraMappedUserIds("APPROVER", plantPrefix) : [];
   const baseWhere = plantPrefix
-    ? { role: "APPROVER" as const, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } }
+    ? {
+        role: "APPROVER" as const,
+        OR: [
+          { defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
+          ...(extraApproverIds.length > 0 ? [{ id: { in: extraApproverIds } }] : []),
+        ],
+      }
     : { role: "APPROVER" as const };
 
   const findUsers = (where: object) =>

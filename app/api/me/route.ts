@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { plantPrefix } from "@/lib/user-plants";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -20,5 +21,14 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ user });
+  // Additional mapped plants (beyond the primary defaultLocation) — raw SQL so this
+  // never depends on the Prisma client having been regenerated after the schema change.
+  const mappedPlants = user
+    ? await prisma.$queryRaw<{ plantName: string }[]>`
+        SELECT "plantName" FROM "UserPlantMapping" WHERE "userId" = ${session.user.id}
+      `.catch(() => [] as { plantName: string }[])
+    : [];
+  const allPlants = [...new Set([plantPrefix(user?.defaultLocation), ...mappedPlants.map((m) => plantPrefix(m.plantName))].filter(Boolean))];
+
+  return NextResponse.json({ user, mappedPlants: allPlants });
 }

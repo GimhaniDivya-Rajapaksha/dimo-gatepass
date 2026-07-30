@@ -41,6 +41,7 @@ type User = {
   defaultLocation?: string | null; brand?: string | null;
   approver?: { id: string; name: string } | null;
   backupApprover?: { id: string; name: string } | null;
+  mappedPlants?: string[];
 };
 
 const ROLES = [
@@ -67,15 +68,17 @@ const roleBg: Record<string, string> = {
   DELIVERY_COORDINATOR: "#f0fdfa", SPECIAL_APPROVER: "#faf5ff",
 };
 
-// Which attributes each role needs
-const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
-  INITIATOR:            ["location", "brand", "approver"],
-  SECURITY_OFFICER:     ["location"],
-  APPROVER:             ["location", "brand", "approver"],
-  CASHIER:              ["location"],
-  AREA_SALES_OFFICER:   ["location", "brand"],
-  SERVICE_ADVISOR:      ["location", "brand"],
-  DELIVERY_COORDINATOR: ["location"],
+// Which attributes each role needs. "plants" (additional mapped plants, on top of the
+// primary "location") is offered for every role that has "location" — a user keeps
+// exactly one role, but can now be mapped to more than one plant.
+const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver" | "plants")[]> = {
+  INITIATOR:            ["location", "brand", "approver", "plants"],
+  SECURITY_OFFICER:     ["location", "plants"],
+  APPROVER:             ["location", "brand", "approver", "plants"],
+  CASHIER:              ["location", "plants"],
+  AREA_SALES_OFFICER:   ["location", "brand", "plants"],
+  SERVICE_ADVISOR:      ["location", "brand", "plants"],
+  DELIVERY_COORDINATOR: ["location", "plants"],
   ADMIN:                [],
   SPECIAL_APPROVER:     [],
 };
@@ -110,11 +113,14 @@ function AssignAttributesModal({
   const brandRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [plantOptions, setPlantOptions] = useState<string[]>([]);
+  const [selectedPlants, setSelectedPlants] = useState<string[]>(user.mappedPlants ?? []);
+  const [plantSearch, setPlantSearch] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/locations")
       .then(r => r.json())
-      .then(d => setLocations(d.locations ?? []))
+      .then(d => { setLocations(d.locations ?? []); setPlantOptions(d.plants ?? []); })
       .catch(() => {});
   }, []);
 
@@ -164,6 +170,23 @@ function AssignAttributesModal({
         }),
       });
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
+
+      if (fields.includes("plants")) {
+        const before = user.mappedPlants ?? [];
+        const toAdd = selectedPlants.filter(p => !before.includes(p));
+        const toRemove = before.filter(p => !selectedPlants.includes(p));
+        await Promise.all([
+          ...toAdd.map(p => fetch("/api/admin/plant-mappings", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: user.id, plantName: p }),
+          })),
+          ...toRemove.map(p => fetch("/api/admin/plant-mappings", {
+            method: "DELETE", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: user.id, plantName: p }),
+          })),
+        ]);
+      }
+
       onSaved({
         defaultLocation: fields.includes("location") ? location || null : user.defaultLocation,
         brand: fields.includes("brand") ? brand || null : user.brand,
@@ -175,6 +198,7 @@ function AssignAttributesModal({
         backupApprover: fields.includes("approver")
           ? backupApproverId ? (approverOptions.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approverOptions.find(a => a.id === backupApproverId)!.name } : null) : null
           : user.backupApprover,
+        mappedPlants: fields.includes("plants") ? selectedPlants : user.mappedPlants,
       });
       onClose();
     } catch {
@@ -413,6 +437,48 @@ function AssignAttributesModal({
               </select>
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Initiators can select this approver if Approver 1 is unavailable.
+              </p>
+            </div>
+          )}
+
+          {fields.includes("plants") && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                Mapped Plants <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional — in addition to Location above)</span>
+              </label>
+              <div className="rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                <div className="p-2 border-b" style={{ borderColor: "var(--border)" }}>
+                  <input
+                    type="text"
+                    value={plantSearch}
+                    onChange={e => setPlantSearch(e.target.value)}
+                    placeholder="Search plants..."
+                    className="w-full bg-transparent text-sm outline-none px-2 py-1.5"
+                    style={{ color: "var(--text)" }}
+                  />
+                </div>
+                <ul className="max-h-44 overflow-y-auto py-1">
+                  {plantOptions.filter(p => p.toLowerCase().includes(plantSearch.toLowerCase())).length === 0 ? (
+                    <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No plants found</li>
+                  ) : (
+                    plantOptions.filter(p => p.toLowerCase().includes(plantSearch.toLowerCase())).map(p => {
+                      const checked = selectedPlants.includes(p);
+                      return (
+                        <li key={p}
+                          className="flex items-center gap-2.5 px-4 py-2 text-sm cursor-pointer hover:opacity-80"
+                          style={{ color: "var(--text)" }}
+                          onClick={() => setSelectedPlants(prev => checked ? prev.filter(x => x !== p) : [...prev, p])}
+                        >
+                          <input type="checkbox" checked={checked} readOnly className="pointer-events-none" />
+                          {p}
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              </div>
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                This user will see and receive data for these plants in addition to their primary Location above. Role stays unchanged.
               </p>
             </div>
           )}
@@ -1109,6 +1175,15 @@ export default function AdminPage() {
                             )}
                             {ROLE_ATTRS[user.role].includes("approver") && user.backupApprover && (
                               <p className="text-xs" style={{ color: "var(--text-muted)" }}>Approver 2: {user.backupApprover.name}</p>
+                            )}
+                            {ROLE_ATTRS[user.role].includes("plants") && (user.mappedPlants?.length ?? 0) > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {user.mappedPlants!.map(p => (
+                                  <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#f0fdf4", color: "#15803d" }} title={`Additional mapped plant: ${p}`}>
+                                    + {p}
+                                  </span>
+                                ))}
+                              </div>
                             )}
                           </div>
                           <button
