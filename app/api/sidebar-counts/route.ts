@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isApproverRole } from "@/lib/roles";
+import { getUserPlantPrefixes, plantsWhereOr } from "@/lib/user-plants";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -11,8 +12,7 @@ export async function GET(req: NextRequest) {
   const role = session.user.role as string;
   const userId = session.user.id as string;
   const userName = (session.user as { name?: string | null }).name ?? "";
-  const defaultLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
-  const plantPrefix = defaultLocation ? defaultLocation.split(" - ")[0].trim() : null;
+  const myPlants = await getUserPlantPrefixes(userId);
 
   // Cookie forwarding for internal API calls (keeps session auth intact)
   const cookie = req.headers.get("cookie") ?? "";
@@ -31,18 +31,18 @@ export async function GET(req: NextRequest) {
         { createdById: userId },
         { parentPass: { createdById: userId } },
       ];
-      if (plantPrefix) {
+      for (const plant of myPlants) {
         orClauses.push({
           securityCreated: true,
           status: { not: "DRAFT" },
-          createdBy: { defaultLocation: { startsWith: plantPrefix } },
+          createdBy: { defaultLocation: { startsWith: plant } },
         });
       }
-      if (defaultLocation) {
+      for (const plant of myPlants) {
         orClauses.push({
           passType: "AFTER_SALES",
           passSubType: "SUB_OUT",
-          toLocation: { equals: defaultLocation, mode: "insensitive" as const },
+          toLocation: { startsWith: plant, mode: "insensitive" as const },
           status: "COMPLETED",
         });
       }
@@ -53,23 +53,12 @@ export async function GET(req: NextRequest) {
       completed = await prisma.gatePass.count({ where: { AND: [{ OR: orClauses }, { status: "COMPLETED"        }] } as any });
 
       // Vehicle Arrivals: call the exact same API endpoints the receive page uses so
-      // the count ALWAYS matches what the page shows (locationView=true bypasses own-passes filter).
-      // toLocationCode filters server-side by the code part of the location string (after " - ").
+      // the count ALWAYS matches what the page shows. locationView=true bypasses the
+      // own-passes filter AND tells the server to resolve the caller's mapped plants
+      // itself (see /api/gate-pass) — no plant params need to be sent from here.
       const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "1", locationView: "true" });
       const asParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", limit: "1", locationView: "true" });
       const tdParams = new URLSearchParams({ passType: "TEST_DRIVE", status: "GATE_OUT", limit: "1", locationView: "true" });
-      if (defaultLocation) {
-        const myCode = defaultLocation.split(" - ").slice(1).join(" - ").trim();
-        if (myCode) {
-          ltParams.set("toLocationCode", myCode);
-          asParams.set("toLocationCode", myCode);
-          tdParams.set("toLocationCode", myCode);
-        } else if (plantPrefix) {
-          ltParams.set("toLocationPlant", plantPrefix);
-          asParams.set("toLocationPlant", plantPrefix);
-          tdParams.set("toLocationPlant", plantPrefix);
-        }
-      }
       const ltRes = await fetch(`${origin}/api/gate-pass?${ltParams}`, { headers: { cookie } });
       const ltData = ltRes.ok ? await ltRes.json() : { total: 0 };
       const asRes = await fetch(`${origin}/api/gate-pass?${asParams}`, { headers: { cookie } });
@@ -83,10 +72,11 @@ export async function GET(req: NextRequest) {
         { createdById: userId },
         { parentPass: { createdById: userId } },
       ];
-      if (plantPrefix) {
-        orClauses.push({ passType: "AFTER_SALES", toLocation: { startsWith: plantPrefix, mode: "insensitive" as const } });
-        orClauses.push({ passType: "AFTER_SALES", fromLocation: { startsWith: plantPrefix, mode: "insensitive" as const } });
-        orClauses.push({ passType: "LOCATION_TRANSFER", toLocation: { startsWith: plantPrefix, mode: "insensitive" as const }, status: "COMPLETED" });
+      for (const plant of myPlants) {
+        const loc = { startsWith: plant, mode: "insensitive" as const };
+        orClauses.push({ passType: "AFTER_SALES", toLocation: loc });
+        orClauses.push({ passType: "AFTER_SALES", fromLocation: loc });
+        orClauses.push({ passType: "LOCATION_TRANSFER", toLocation: loc, status: "COMPLETED" });
       }
       myPasses  = await prisma.gatePass.count({ where: { AND: [{ OR: orClauses }] } as any });
       pending   = await prisma.gatePass.count({ where: { AND: [{ OR: orClauses }, { status: "PENDING_APPROVAL" }] } as any });
@@ -124,19 +114,14 @@ export async function GET(req: NextRequest) {
       completed = await prisma.gatePass.count({ where: { status: "COMPLETED" } as any });
 
     } else if (role === "DELIVERY_COORDINATOR") {
-      if (plantPrefix) {
-        const locationOr = {
-          OR: [
-            { fromLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
-            { toLocation:   { startsWith: plantPrefix, mode: "insensitive" as const } },
-          ],
-        };
+      if (myPlants.length > 0) {
+        const locationOr = { OR: [...plantsWhereOr("fromLocation", myPlants), ...plantsWhereOr("toLocation", myPlants)] };
         pending   = await prisma.gatePass.count({ where: { AND: [locationOr, { status: "PENDING_APPROVAL" }] } as any });
         completed = await prisma.gatePass.count({ where: { AND: [locationOr, { status: "COMPLETED"       }] } as any });
       }
     } else if (role === "CASHIER") {
-      if (plantPrefix) {
-        const cashierFilter = { fromLocation: { startsWith: plantPrefix, mode: "insensitive" as const } };
+      if (myPlants.length > 0) {
+        const cashierFilter = { OR: plantsWhereOr("fromLocation", myPlants) };
         pending   = await prisma.gatePass.count({ where: { AND: [cashierFilter, { status: "CASHIER_REVIEW" }] } as any });
         completed = await prisma.gatePass.count({ where: { AND: [cashierFilter, { status: "COMPLETED"      }] } as any });
       }

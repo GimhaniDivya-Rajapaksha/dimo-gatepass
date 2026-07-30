@@ -84,6 +84,8 @@ export default function ReceivePage() {
   const [updatedChassis, setUpdatedChassis] = useState<Record<string, string>>({});
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"pending" | "completed">("pending");
+  const [mappedPlants, setMappedPlants] = useState<string[]>([]);
+  const [plantFilter, setPlantFilter] = useState<string>("ALL");
 
   useEffect(() => {
     const allowedRoles = ["RECIPIENT", "INITIATOR", "SERVICE_ADVISOR"];
@@ -92,17 +94,19 @@ export default function ReceivePage() {
     }
   }, [status, session, router]);
 
-  const myLocation = (session?.user as { defaultLocation?: string | null })?.defaultLocation ?? null;
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetch("/api/me").then(r => r.json()).then(d => setMappedPlants(d.mappedPlants ?? [])).catch(() => {});
+  }, [status]);
 
   const fetchPasses = useCallback(async () => {
     setLoading(true);
     try {
       // locationView=true bypasses the INITIATOR "own passes only" filter so destination
-      // initiators can see incoming passes they did not create.
-      // Use plant-level (toLocationPlant startsWith) so ALL users at the same plant see
-      // arrivals regardless of which storage location they are assigned to.
-      const myPlant = myLocation ? myLocation.split(" - ")[0].trim() : null;
-      const toLocQ  = myPlant ? `&toLocationPlant=${encodeURIComponent(myPlant)}` : "";
+      // initiators can see incoming passes they did not create — the server resolves this
+      // user's own mapped plants and restricts to them; myPlantFilter optionally narrows
+      // that down to one specific plant, but only if it's actually one of the user's own.
+      const plantQ = plantFilter !== "ALL" ? `&myPlantFilter=${encodeURIComponent(plantFilter)}` : "";
 
       const ltParams      = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT",  limit: "100", locationView: "true" });
       const asGateOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT",  limit: "50",  locationView: "true" });
@@ -112,47 +116,38 @@ export default function ReceivePage() {
       const tdCompParams  = new URLSearchParams({ passType: "TEST_DRIVE", status: "COMPLETED", limit: "20",  locationView: "true" });
 
       // Sequential fetches — connection pool limit is 1 on Supabase free tier
-      const ltRes         = await fetch(`/api/gate-pass?${ltParams}${toLocQ}`);
+      const ltRes         = await fetch(`/api/gate-pass?${ltParams}${plantQ}`);
       const ltData        = ltRes.ok ? await ltRes.json() : { passes: [] };
-      const asGateOutRes  = await fetch(`/api/gate-pass?${asGateOutParams}${toLocQ}`);
+      const asGateOutRes  = await fetch(`/api/gate-pass?${asGateOutParams}${plantQ}`);
       const asGateOutData = asGateOutRes.ok ? await asGateOutRes.json() : { passes: [] };
-      const ltCompRes     = await fetch(`/api/gate-pass?${ltCompParams}${toLocQ}`);
+      const ltCompRes     = await fetch(`/api/gate-pass?${ltCompParams}${plantQ}`);
       const ltCompData    = ltCompRes.ok ? await ltCompRes.json() : { passes: [] };
-      const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}${toLocQ}`);
+      const asCompRes     = await fetch(`/api/gate-pass?${asCompParams}${plantQ}`);
       const asCompData    = asCompRes.ok ? await asCompRes.json() : { passes: [] };
-      const tdRes         = await fetch(`/api/gate-pass?${tdParams}${toLocQ}`);
+      const tdRes         = await fetch(`/api/gate-pass?${tdParams}${plantQ}`);
       const tdData        = tdRes.ok ? await tdRes.json() : { passes: [] };
-      const tdCompRes     = await fetch(`/api/gate-pass?${tdCompParams}${toLocQ}`);
+      const tdCompRes     = await fetch(`/api/gate-pass?${tdCompParams}${plantQ}`);
       const tdCompData    = tdCompRes.ok ? await tdCompRes.json() : { passes: [] };
 
-      // Client-side secondary check: plant-level prefix match (consistent with server filter)
-      const myPlantLower = myPlant?.toLowerCase() ?? null;
-      const locationMatch = (p: GatePass) => {
-        if (!myLocation) return true;
-        const toLoc = (p.toLocation ?? "").toLowerCase().trim();
-        if (!toLoc) return true;
-        if (myPlantLower && toLoc.startsWith(myPlantLower)) return true;
-        return false;
-      };
-
-      setLtPending((ltData.passes ?? []).filter(locationMatch));
-      setAsPending((asGateOutData.passes ?? []).filter(locationMatch));
-      setTdPending((tdData.passes ?? []).filter(locationMatch));
+      // The server is now the sole authority on which plants this user may see (it resolves
+      // and validates against their full mapped-plant list) — no client-side re-filtering.
+      setLtPending(ltData.passes ?? []);
+      setAsPending(asGateOutData.passes ?? []);
+      setTdPending(tdData.passes ?? []);
       setCompleted([
-        ...(asCompData.passes ?? []).filter(locationMatch),
-        ...(ltCompData.passes ?? []).filter(locationMatch),
-        ...(tdCompData.passes ?? []).filter(locationMatch),
+        ...(asCompData.passes ?? []),
+        ...(ltCompData.passes ?? []),
+        ...(tdCompData.passes ?? []),
       ]);
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myLocation]);
+  }, [plantFilter]);
 
   useEffect(() => {
     if (status === "authenticated") void fetchPasses();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [status, plantFilter]);
 
   // Notification poll: auto-refresh when vehicle arrives or security confirms Gate IN
   const lastNotifCount = useRef(0);
@@ -225,16 +220,29 @@ export default function ReceivePage() {
             Confirm arrivals — After Sales transfers &amp; Location Transfer passes
           </p>
         </div>
-        <button
-          onClick={() => void fetchPasses()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
-          style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {mappedPlants.length > 1 && (
+            <select
+              value={plantFilter}
+              onChange={(e) => setPlantFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl text-sm font-semibold border focus:outline-none"
+              style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+            >
+              <option value="ALL">All Mapped Plants</option>
+              {mappedPlants.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+          <button
+            onClick={() => void fetchPasses()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all hover:shadow-sm"
+            style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text-muted)" }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}

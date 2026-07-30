@@ -31,6 +31,18 @@ export async function GET() {
       ORDER BY u."createdAt" DESC
     `;
 
+    // Additional mapped plants (beyond the primary defaultLocation above) — raw SQL so this
+    // never depends on the Prisma client having been regenerated after the schema change.
+    const plantRows = await prisma.$queryRaw<{ userId: string; plantName: string }[]>`
+      SELECT "userId", "plantName" FROM "UserPlantMapping" ORDER BY "plantName" ASC
+    `.catch(() => [] as { userId: string; plantName: string }[]);
+    const plantsByUser = new Map<string, string[]>();
+    for (const row of plantRows) {
+      const list = plantsByUser.get(row.userId) ?? [];
+      list.push(row.plantName);
+      plantsByUser.set(row.userId, list);
+    }
+
     const shaped = users.map(u => ({
       id: u.id,
       name: u.name,
@@ -44,6 +56,7 @@ export async function GET() {
       isDisabled: u.isDisabled,
       approver: u.approverId2 ? { id: u.approverId2, name: u.approverName } : null,
       backupApprover: u.backupApproverId ? { id: u.backupApproverId, name: u.backupApproverName } : null,
+      mappedPlants: plantsByUser.get(u.id) ?? [],
     }));
 
     return NextResponse.json(shaped);

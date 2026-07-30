@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sendApprovalRequestEmail, sendRequestedByNotificationEmail, sendTestDriveReturnTimeExceededEmail } from "@/lib/email";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 import { isApproverRole } from "@/lib/roles";
+import { getUserPlantPrefixes, plantsWhereOr, findExtraMappedUserIds } from "@/lib/user-plants";
 
 function ciEquals(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -49,12 +50,20 @@ async function sendApprovalEmailsToApprovers(approvers: { id: string; email: str
   }
 }
 
-// Returns cashiers at the vehicle's location; falls back to all cashiers if none assigned there.
+// Returns cashiers at the vehicle's location (including anyone additionally mapped to it
+// via UserPlantMapping); falls back to all cashiers if none assigned there.
 async function getCashiersForLocation(fromLocation: string | null) {
   const plantPrefix = fromLocation ? fromLocation.split(" - ")[0].trim() : null;
   if (plantPrefix) {
+    const extraIds = await findExtraMappedUserIds("CASHIER", plantPrefix);
     const located = await prisma.user.findMany({
-      where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
+      where: {
+        role: "CASHIER" as any,
+        OR: [
+          { defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
+          ...(extraIds.length > 0 ? [{ id: { in: extraIds } }] : []),
+        ],
+      },
     });
     if (located.length > 0) return located;
   }
@@ -75,49 +84,49 @@ export async function GET(req: NextRequest) {
 
   const role = session.user.role;
   const where: Record<string, unknown> = {};
+  const locationView = searchParams.get("locationView") === "true";
 
   if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
-    const locationView = searchParams.get("locationView") === "true";
     if (status === "DRAFT") {
-      // Security-created drafts: only show to the role at the SAME location as the Security Officer.
-      // Filter by matching the creator's defaultLocation plant prefix — more reliable than
-      // fromLocation/toLocation which can be null on older passes.
-      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
-      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
+      // Security-created drafts: only show to the role at the SAME location(s) as the Security
+      // Officer. Filter by matching the creator's defaultLocation plant prefix against any of
+      // this user's mapped plants — more reliable than fromLocation/toLocation which can be
+      // null on older passes.
+      const myPlants = await getUserPlantPrefixes(session.user.id);
       where.AND = [
         { status: "DRAFT" },
         { comments: { contains: `[[ASSIGNED_ROLE:${role}]]` } },
-        plantPrefix
-          ? { createdBy: { defaultLocation: { startsWith: plantPrefix } } }
+        myPlants.length > 0
+          ? { OR: myPlants.map((p) => ({ createdBy: { defaultLocation: { startsWith: p } } })) }
           : {},
       ];
     } else if (role === "INITIATOR" && !locationView && !(passType === "AFTER_SALES" && search)) {
       // INITIATOR sees own passes AND sub-passes linked to their main passes
       // Exception: bypass when searching After Sales by GP number (e.g. "Find Gate IN Pass" on create screen)
       // so passes created by Service Advisors or Security Officers are findable.
-      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
+      const myPlants = await getUserPlantPrefixes(session.user.id);
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
-      // Security-created passes (any non-DRAFT status) from Security Officers at the same location
-      // should be visible to the Initiator who completed them, showing real status.
-      if (plantPrefix) {
+      // Security-created passes (any non-DRAFT status) from Security Officers at any of this
+      // initiator's mapped locations should be visible to the Initiator who completed them,
+      // showing real status.
+      for (const plant of myPlants) {
         orClauses.push({
           securityCreated: true,
           status: { not: "DRAFT" },
-          createdBy: { defaultLocation: { startsWith: plantPrefix } },
+          createdBy: { defaultLocation: { startsWith: plant } },
         });
       }
-      // Also show incoming After Sales SUB_OUT passes that have already been
-      // confirmed at this initiator's location, so the destination team can
-      // track the received vehicle in "My Gate Passes".
-      if (myLocation) {
+      // Also show incoming After Sales SUB_OUT passes that have already been confirmed at any
+      // of this initiator's mapped locations, so the destination team can track the received
+      // vehicle in "My Gate Passes".
+      for (const plant of myPlants) {
         orClauses.push({
           passType: "AFTER_SALES",
           passSubType: "SUB_OUT",
-          toLocation: ciEquals(myLocation),
+          toLocation: { startsWith: plant, mode: "insensitive" as const },
           status: "COMPLETED",
         });
       }
@@ -129,18 +138,18 @@ export async function GET(req: NextRequest) {
   } else if (role === "AREA_SALES_OFFICER") {
     // ASO sees their own passes + AFTER_SALES passes destined for their location
     // UNLESS locationView=true (Vehicles Incoming dashboard) or searching by GP number
-    const locationView = searchParams.get("locationView") === "true";
     const isAfterSalesSearch = searchParams.get("passType") === "AFTER_SALES" && searchParams.get("search");
     if (!locationView && !isAfterSalesSearch) {
-      const asoLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+      const asoPlants = await getUserPlantPrefixes(session.user.id);
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
       // Promo/Finance are sub-locations under the same plant, so match by
-      // plant prefix instead of the exact storage-location text.
-      if (asoLocation) {
-        const plantLocation = ciStartsWithPlant(asoLocation);
+      // plant prefix instead of the exact storage-location text — across every
+      // plant this ASO is mapped to, not just their primary one.
+      for (const plant of asoPlants) {
+        const plantLocation = { startsWith: plant, mode: "insensitive" as const };
         orClauses.push({ passType: "AFTER_SALES", toLocation: plantLocation });
         orClauses.push({ passType: "AFTER_SALES", fromLocation: plantLocation });
         // COMPLETED LT passes where ASO confirmed arrival — show in My Gate Passes & Completed.
@@ -162,23 +171,18 @@ export async function GET(req: NextRequest) {
       ];
     }
   } else if (role === "DELIVERY_COORDINATOR") {
-    // DC sees all passes at their location (either departing from or arriving to)
-    const dcLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-    if (dcLocation) {
-      const plant = dcLocation.split(" - ")[0].trim();
+    // DC sees all passes at any of their mapped plants (either departing from or arriving to)
+    const dcPlants = await getUserPlantPrefixes(session.user.id);
+    if (dcPlants.length > 0) {
       where.AND = [{
-        OR: [
-          { fromLocation: { startsWith: plant, mode: "insensitive" as const } },
-          { toLocation:   { startsWith: plant, mode: "insensitive" as const } },
-        ],
+        OR: [...plantsWhereOr("fromLocation", dcPlants), ...plantsWhereOr("toLocation", dcPlants)],
       }];
     }
   } else if (role === "CASHIER") {
-    // Cashier only sees passes originating from their plant location
-    const cashierLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-    if (cashierLocation) {
-      const plant = cashierLocation.split(" - ")[0].trim();
-      where.AND = [{ fromLocation: { startsWith: plant, mode: "insensitive" as const } }];
+    // Cashier only sees passes originating from any of their mapped plant locations
+    const cashierPlants = await getUserPlantPrefixes(session.user.id);
+    if (cashierPlants.length > 0) {
+      where.AND = [{ OR: plantsWhereOr("fromLocation", cashierPlants) }];
     }
   }
   // APPROVER: for PENDING_APPROVAL passes, only show ones explicitly assigned to them
@@ -215,12 +219,53 @@ export async function GET(req: NextRequest) {
   else if (toLocationPlant) where.toLocation = { startsWith: toLocationPlant, mode: "insensitive" };
   else if (toLocationFilter) where.toLocation = ciEquals(toLocationFilter);
 
+  // Vehicle Arrivals (locationView=true, Initiator/ASO only): never trust the client-supplied
+  // toLocationPlant/toLocationCode/toLocation above for who this user is — the frontend used to
+  // compute it from the user's own single defaultLocation and send it unvalidated. Resolve the
+  // caller's actual mapped plants server-side instead and use that as the real restriction.
+  // A client-requested single-plant filter (the "All Mapped Plants / one plant" dropdown) is
+  // honored ONLY if it's actually one of this user's own mapped plants — never an arbitrary value.
+  // Uses where.AND (not where.OR) so it can't be clobbered by the `search` param handling below,
+  // which also assigns where.OR.
+  if (locationView && (role === "INITIATOR" || role === "AREA_SALES_OFFICER")) {
+    const myArrivalPlants = await getUserPlantPrefixes(session.user.id);
+    const requestedPlant = searchParams.get("myPlantFilter");
+    const effectivePlants = requestedPlant && myArrivalPlants.includes(requestedPlant)
+      ? [requestedPlant]
+      : myArrivalPlants;
+    delete where.toLocation;
+    const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    (where as any).AND = [
+      ...existingAnd,
+      effectivePlants.length > 0
+        ? { OR: plantsWhereOr("toLocation", effectivePlants) }
+        // No plant mapped at all — show nothing rather than falling back to "everything".
+        : { toLocation: "__no_plant_mapped__" },
+    ];
+  }
+
   const fromLocationFilter = searchParams.get("fromLocation");
   const fromLocationPlant  = searchParams.get("fromLocationPlant");
   const fromLocationCode   = searchParams.get("fromLocationCode");
   if (fromLocationCode)       where.fromLocation = { contains: fromLocationCode,   mode: "insensitive" };
   else if (fromLocationPlant) where.fromLocation = { startsWith: fromLocationPlant, mode: "insensitive" };
   else if (fromLocationFilter) where.fromLocation = ciEquals(fromLocationFilter);
+
+  // Security Officer queue: same server-authoritative fix as Vehicle Arrivals above — never
+  // trust the client-supplied fromLocationPlant for who this user is; resolve their actual
+  // mapped plants server-side instead.
+  if (role === "SECURITY_OFFICER") {
+    const mySecPlants = await getUserPlantPrefixes(session.user.id);
+    delete where.fromLocation;
+    const existingAndSec = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    (where as any).AND = [
+      ...existingAndSec,
+      mySecPlants.length > 0
+        ? { OR: plantsWhereOr("fromLocation", mySecPlants) }
+        // No plant mapped at all — show nothing rather than falling back to "everything".
+        : { fromLocation: "__no_plant_mapped__" },
+    ];
+  }
 
   if (passType) where.passType = passType;
 
@@ -669,8 +714,9 @@ export async function POST(req: NextRequest) {
       console.error("[CD] SAP order lookup failed (record-keeping only; pass proceeds to Security):", err);
     }
 
+    const cdExtraSecIds = approverLocation ? await findExtraMappedUserIds("SECURITY_OFFICER", approverLocation) : [];
     const secWhere = approverLocation
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: approverLocation }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: approverLocation }, ...(cdExtraSecIds.length > 0 ? [{ id: { in: cdExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const secOfficers = await prisma.user.findMany({ where: secWhere });
     if (secOfficers.length > 0) {
@@ -691,8 +737,9 @@ export async function POST(req: NextRequest) {
   // MAIN_IN created: notify Security Officers at fromLocation (initiator's DIMO location — vehicle arriving for service)
   if (body.passType === "AFTER_SALES" && body.passSubType === "MAIN_IN") {
     const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const mainInExtraSecIds = fromLoc ? await findExtraMappedUserIds("SECURITY_OFFICER", fromLoc) : [];
     const secWhere = fromLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: fromLoc }, ...(mainInExtraSecIds.length > 0 ? [{ id: { in: mainInExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const secOfficers = await prisma.user.findMany({ where: secWhere });
     if (secOfficers.length > 0) {
@@ -712,8 +759,9 @@ export async function POST(req: NextRequest) {
   // SUB_OUT created: notify Security Officers at fromLocation (vehicle leaving DIMO to sub-location)
   if (body.passType === "AFTER_SALES" && body.passSubType === "SUB_OUT") {
     const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const subOutExtraSecIds = fromLoc ? await findExtraMappedUserIds("SECURITY_OFFICER", fromLoc) : [];
     const secWhere = fromLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: fromLoc }, ...(subOutExtraSecIds.length > 0 ? [{ id: { in: subOutExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const secOfficers = await prisma.user.findMany({ where: secWhere });
     if (secOfficers.length > 0) {
@@ -890,8 +938,12 @@ export async function POST(req: NextRequest) {
   if (body.passType === "LOCATION_TRANSFER" && !gatePass.asoCreated && gatePass.fromLocation) {
     const fromAsoFilter = ciStartsWithPlant(gatePass.fromLocation as string);
     if (fromAsoFilter) {
+      const ltExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation as string);
       const fromAsos = await prisma.user.findMany({
-        where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilter },
+        where: {
+          role: "AREA_SALES_OFFICER" as any,
+          OR: [{ defaultLocation: fromAsoFilter }, ...(ltExtraAsoIds.length > 0 ? [{ id: { in: ltExtraAsoIds } }] : [])],
+        },
         select: { id: true },
       });
       if (fromAsos.length > 0) {
