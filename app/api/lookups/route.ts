@@ -200,29 +200,10 @@ export async function GET(req: NextRequest) {
         // Filter by locationType FIRST (while storageDescription still has the raw SAP value
         // so inferType can correctly classify "Promo location" → PROMOTION, etc.).
         // Overlaying custom DB labels before this step would break inferType for renamed entries.
-        let filteredOptions = filterApiLocations(options, q, locationType);
-
-        // For PROMOTION/FINANCE: if this vehicle has no matching ext_sloc entries,
-        // fall back to all locations of that type from the already-fetched allRows.
-        if (filteredOptions.length === 0 && (locationType === "PROMOTION" || locationType === "FINANCE")) {
-          const allSeen = new Set<string>();
-          const allOptions: LocationOption[] = [];
-          for (const row of allRows) {
-            if (!row.extPlant || !row.extSloc) continue;
-            const id = `${row.extPlant}|${row.extSloc}`;
-            if (allSeen.has(id)) continue;
-            allSeen.add(id);
-            const plantDesc = row.extPlantDesc || row.extPlant;
-            const slocDesc  = row.extSlocDesc  || row.extSloc;
-            allOptions.push({
-              id, value: `${plantDesc} - ${slocDesc}`, label: `${plantDesc} - ${slocDesc}`,
-              plantCode: row.extPlant, plantDescription: plantDesc,
-              storageLocation: row.extSloc, storageDescription: slocDesc,
-              source: "api",
-            });
-          }
-          filteredOptions = filterApiLocations(allOptions, q, locationType);
-        }
+        // Cross-vehicle fallback removed per explicit instruction — if this vehicle has no
+        // matching ext_sloc entries of the requested type, the list is empty (no other
+        // vehicle's SAP history is searched).
+        const filteredOptions = filterApiLocations(options, q, locationType);
 
         return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
