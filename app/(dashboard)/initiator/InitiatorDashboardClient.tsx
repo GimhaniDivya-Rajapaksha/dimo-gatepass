@@ -544,14 +544,12 @@ export default function InitiatorDashboardClient({ user }: Props) {
         } finally { if (!cancelled) setMainInLoading(false); }
 
         try {
-          const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+          // locationView=true makes the server resolve this initiator's actual mapped plants
+          // (all of them, not just the primary defaultLocation) and OR-match toLocation against
+          // that full list — so no client-side plant filter is needed or applied below.
           const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
-          if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
-          else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
           // LT passes in GATE_OUT heading to this initiator's location
-          const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50" });
-          if (destinationPlant) ltParams.set("toLocationPlant", destinationPlant);
-          else if (user.defaultLocation) ltParams.set("toLocation", user.defaultLocation);
+          const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", locationView: "true", limit: "50" });
           const [arrivingRes, subOutRes, ltRes] = await Promise.all([
             fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
             fetch(`/api/gate-pass?${subOutParams}`),
@@ -565,15 +563,10 @@ export default function InitiatorDashboardClient({ user }: Props) {
               (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
               || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
             );
-            // SUB_OUT passes heading TO this initiator's location
-            const incoming = (subOutData.passes || []).filter((p: GatePass) =>
-              p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
-              && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
-            );
-            // LT passes in transit to this initiator's location
-            const ltIncoming = (ltData.passes || []).filter((p: GatePass) =>
-              !destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase())
-            );
+            // SUB_OUT passes heading TO this initiator's mapped plant(s) — already scoped server-side
+            const incoming = (subOutData.passes || []).filter((p: GatePass) => p.passSubType === "SUB_OUT" && p.status === "GATE_OUT");
+            // LT passes in transit to this initiator's mapped plant(s) — already scoped server-side
+            const ltIncoming = ltData.passes || [];
             const seen = new Set<string>();
             const merged: GatePass[] = [];
             for (const p of [...own, ...incoming, ...ltIncoming]) {
@@ -633,14 +626,12 @@ export default function InitiatorDashboardClient({ user }: Props) {
     if (isASO) return;
     setArrivingLoading(true);
     try {
-      const destinationPlant = user.defaultLocation?.split(" - ")[0]?.trim();
+      // locationView=true makes the server resolve this initiator's actual mapped plants
+      // (all of them, not just the primary defaultLocation) and OR-match toLocation against
+      // that full list — so no client-side plant filter is needed or applied below.
       const subOutParams = new URLSearchParams({ passType: "AFTER_SALES", passSubType: "SUB_OUT", status: "GATE_OUT", locationView: "true", limit: "50" });
-      if (destinationPlant) subOutParams.set("toLocationPlant", destinationPlant);
-      else if (user.defaultLocation) subOutParams.set("toLocation", user.defaultLocation);
       // LT passes in GATE_OUT heading to this initiator's location
-      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", limit: "50" });
-      if (destinationPlant) ltParams.set("toLocationPlant", destinationPlant);
-      else if (user.defaultLocation) ltParams.set("toLocation", user.defaultLocation);
+      const ltParams = new URLSearchParams({ passType: "LOCATION_TRANSFER", status: "GATE_OUT", locationView: "true", limit: "50" });
       const [ownRes, incomingRes, ltRes] = await Promise.all([
         fetch("/api/gate-pass?passType=AFTER_SALES&limit=100"),
         fetch(`/api/gate-pass?${subOutParams}`),
@@ -654,15 +645,10 @@ export default function InitiatorDashboardClient({ user }: Props) {
         (p.passSubType === "SUB_OUT_IN" && (p.status === "APPROVED" || p.status === "GATE_OUT"))
         || (p.passSubType === "SUB_IN" && p.status === "GATE_OUT")
       );
-      // SUB_OUT passes heading TO this initiator's location
-      const incoming = (incomingData.passes || []).filter((p: GatePass) =>
-        p.passSubType === "SUB_OUT" && p.status === "GATE_OUT"
-        && (!destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase()))
-      );
-      // LT passes in transit to this initiator's location
-      const ltIncoming = (ltData.passes || []).filter((p: GatePass) =>
-        !destinationPlant || (p.toLocation ?? "").toLowerCase().startsWith(destinationPlant.toLowerCase())
-      );
+      // SUB_OUT passes heading TO this initiator's mapped plant(s) — already scoped server-side
+      const incoming = (incomingData.passes || []).filter((p: GatePass) => p.passSubType === "SUB_OUT" && p.status === "GATE_OUT");
+      // LT passes in transit to this initiator's mapped plant(s) — already scoped server-side
+      const ltIncoming = ltData.passes || [];
       const seen = new Set<string>();
       const merged: GatePass[] = [];
       for (const p of [...own, ...incoming, ...ltIncoming]) {
