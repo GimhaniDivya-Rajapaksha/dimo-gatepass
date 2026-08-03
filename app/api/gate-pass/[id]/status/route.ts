@@ -1687,7 +1687,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // INITIATOR / AREA_SALES_OFFICER: resubmit a rejected pass
   if (action === "resubmit") {
-    const canResubmit = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER";
+    // An Approver who created their own pass (Approver-initiated gate passes) can resubmit
+    // it exactly like an Initiator/ASO would — every other role's access is unchanged.
+    const canResubmit = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER"
+      || isApproverRole(session.user.role);
     if (!canResubmit) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
