@@ -94,6 +94,9 @@ function AssignAttributesModal({
 }) {
   const role = user.role ?? "";
   const fields = ROLE_ATTRS[role] ?? [];
+  // Security Officer must always have exactly one assigned plant/location — every
+  // other role keeps the existing multi-select "Select Locations" behavior unchanged.
+  const isSecurity = role === "SECURITY_OFFICER";
   // An Approver initiating their own gate pass must be routed to a Special Approver,
   // never another normal Approver — so the pool this picker offers depends on whose
   // attributes are being edited.
@@ -182,19 +185,29 @@ function AssignAttributesModal({
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
 
       if (fields.includes("location")) {
-        const before = user.mappedPlants ?? [];
-        const toAdd = selectedLocations.filter(p => !before.includes(p));
-        const toRemove = before.filter(p => !selectedLocations.includes(p));
-        await Promise.all([
-          ...toAdd.map(p => fetch("/api/admin/plant-mappings", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: user.id, plantName: p }),
-          })),
-          ...toRemove.map(p => fetch("/api/admin/plant-mappings", {
+        if (isSecurity) {
+          // Security Officer: exactly one location, held only in defaultLocation above —
+          // never store any additional mapped-plant rows for this role.
+          const before = user.mappedPlants ?? [];
+          await Promise.all(before.map(p => fetch("/api/admin/plant-mappings", {
             method: "DELETE", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ userId: user.id, plantName: p }),
-          })),
-        ]);
+          })));
+        } else {
+          const before = user.mappedPlants ?? [];
+          const toAdd = selectedLocations.filter(p => !before.includes(p));
+          const toRemove = before.filter(p => !selectedLocations.includes(p));
+          await Promise.all([
+            ...toAdd.map(p => fetch("/api/admin/plant-mappings", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: user.id, plantName: p }),
+            })),
+            ...toRemove.map(p => fetch("/api/admin/plant-mappings", {
+              method: "DELETE", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: user.id, plantName: p }),
+            })),
+          ]);
+        }
       }
 
       onSaved({
@@ -208,7 +221,7 @@ function AssignAttributesModal({
         backupApprover: fields.includes("approver")
           ? backupApproverId ? (approverOptions.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approverOptions.find(a => a.id === backupApproverId)!.name } : null) : null
           : user.backupApprover,
-        mappedPlants: fields.includes("location") ? selectedLocations : user.mappedPlants,
+        mappedPlants: fields.includes("location") ? (isSecurity ? [] : selectedLocations) : user.mappedPlants,
       });
       onClose();
     } catch {
@@ -248,7 +261,7 @@ function AssignAttributesModal({
           {fields.includes("location") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Select Locations <span className="text-red-500">*</span>
+                {isSecurity ? "Select Location" : "Select Locations"} <span className="text-red-500">*</span>
               </label>
               <div ref={locationRef} className="relative">
                 <div
@@ -313,7 +326,13 @@ function AssignAttributesModal({
                               style={{ background: checked ? "#eff6ff" : "transparent", color: checked ? "#1d4ed8" : "var(--text)", fontWeight: checked ? 600 : 400 }}
                               onMouseDown={e => {
                                 e.preventDefault();
-                                setSelectedLocations(prev => checked ? prev.filter(x => x !== l) : [...prev, l]);
+                                if (isSecurity) {
+                                  setSelectedLocations([l]);
+                                  setLocationOpen(false);
+                                  setLocationSearch("");
+                                } else {
+                                  setSelectedLocations(prev => checked ? prev.filter(x => x !== l) : [...prev, l]);
+                                }
                                 setError("");
                               }}
                             >
@@ -333,7 +352,9 @@ function AssignAttributesModal({
               </div>
               {selectedLocations.length === 0 && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                This user will see and receive data only for the locations selected here.
+                {isSecurity
+                  ? "Security Officer can only be assigned one location."
+                  : "This user will see and receive data only for the locations selected here."}
               </p>
             </div>
           )}

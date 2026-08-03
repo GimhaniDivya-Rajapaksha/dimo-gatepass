@@ -17,6 +17,15 @@ export async function POST(req: NextRequest) {
   const plant = typeof plantName === "string" ? plantName.trim() : "";
   if (!userId || !plant) return NextResponse.json({ error: "userId and plantName required" }, { status: 400 });
 
+  // Security Officer must always have exactly one assigned plant/location (their
+  // defaultLocation) — never an additional mapped plant. Every other role is unaffected.
+  const rows = await prisma.$queryRaw<{ role: string | null }[]>`
+    SELECT role::text AS role FROM "User" WHERE id = ${userId}
+  `;
+  if (rows[0]?.role === "SECURITY_OFFICER") {
+    return NextResponse.json({ error: "Security Officer can only be assigned one location." }, { status: 400 });
+  }
+
   try {
     await prisma.$executeRaw`
       INSERT INTO "UserPlantMapping" ("id", "userId", "plantName")
