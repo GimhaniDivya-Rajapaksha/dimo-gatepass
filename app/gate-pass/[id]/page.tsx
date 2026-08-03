@@ -1591,8 +1591,10 @@ function InitiatorGatePassDetailPageInner() {
           </div>
         )}
 
-        {/* Resubmit Banner — shown to initiator when pass is rejected */}
-        {!isApproverView && data.status === "REJECTED" && (
+        {/* Resubmit Banner — shown to the creator when their pass is rejected. An Approver who
+            created their own pass (Approver-initiated gate passes) must see this too, even
+            though isApproverView is otherwise true for them — isCreator overrides that here. */}
+        {(!isApproverView || isCreator) && data.status === "REJECTED" && (
           <div className="mb-4 rounded-2xl border overflow-hidden no-print" style={{ borderColor: "#fca5a5" }}>
             <div className="px-5 py-3 flex items-center gap-2" style={{ background: "#fef2f2" }}>
               <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
