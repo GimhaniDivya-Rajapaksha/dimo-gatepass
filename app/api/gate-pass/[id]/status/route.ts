@@ -1079,7 +1079,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Print Gate OUT: initiator printing the gate pass counts as Gate OUT confirmation.
   // Security no longer needs to confirm Gate OUT for LT and CD when initiator prints.
   if (action === "print_gate_out") {
-    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR" || session.user.role === "AREA_SALES_OFFICER";
+    // An Approver who created their own pass (Approver-initiated gate passes) can print/
+    // release it exactly like an Initiator would — the isCreator ownership check below still
+    // applies, so this only ever allows printing their own pass, never someone else's.
+    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR"
+      || session.user.role === "AREA_SALES_OFFICER" || session.user.role === "APPROVER";
     if (!canPrintRelease) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
