@@ -613,9 +613,26 @@ export async function POST(req: NextRequest) {
     createData.serviceJobNo = body.serviceJobNo;
   }
 
-  const gatePass = await (prisma.gatePass.create as any)({
-    data: createData,
-  });
+  // gatePassNumber is computed from "current max + 1" above, which is not atomic — two
+  // requests created close together (e.g. an LT Return Gate Pass's outbound leg immediately
+  // followed by its return leg) can both read the same max and collide on the same number.
+  // gatePassNumber is the only @unique field on GatePass, so a P2002 here can only be that
+  // collision — recompute a fresh number and retry rather than failing the request.
+  let gatePass;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      gatePass = await (prisma.gatePass.create as any)({ data: createData });
+      break;
+    } catch (e: any) {
+      if (e?.code === "P2002" && attempt < 4) {
+        const retryLastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
+        const retryLastNum = retryLastPass ? parseInt(retryLastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
+        createData.gatePassNumber = `GP-${String(retryLastNum + 1).padStart(4, "0")}`;
+        continue;
+      }
+      throw e;
+    }
+  }
 
   // Notify the "Requested By" person (if selected from AD and email is known)
   if (createData.requestedByEmail && createData.requestedBy) {
