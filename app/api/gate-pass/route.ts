@@ -901,7 +901,10 @@ export async function POST(req: NextRequest) {
         })
       : await prisma.user.findMany({ where: { role: approverRole as any } });
 
-    if (selectedApproverName && approvers.length === 0) {
+    // Approver-initiated passes must go only to the specifically selected Special Approver —
+    // never fall back to notifying every Special Approver if the exact match comes up empty.
+    // Every other creator role keeps the existing "fall back to notify everyone" behavior.
+    if (selectedApproverName && approvers.length === 0 && session.user.role !== "APPROVER") {
       approvers = await prisma.user.findMany({ where: { role: approverRole as any } });
     }
 

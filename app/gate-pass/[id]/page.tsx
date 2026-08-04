@@ -923,10 +923,15 @@ function InitiatorGatePassDetailPageInner() {
     ? { ...rawSc, label: "Gate In" }
     : rawSc;
   const isLT = data.passType === "LOCATION_TRANSFER";
+  // Check if current user created this pass (to determine gate_out eligibility, cancel eligibility)
+  const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
+  // An Approver who created their own pass (Approver-initiated gate passes) can cancel it
+  // exactly like an Initiator/ASO would, but only their own — never someone else's pass
+  // they're merely reviewing.
   const canCancel  = (
     data.status === "PENDING_APPROVAL" ||
     (data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW")
-  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
+  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER" || (role === "APPROVER" && isCreator));
   const isApproverView = isApproverRole(role) || role === "ADMIN";
   // True if this approver is specifically assigned to this gate pass.
   // null intendedApprover means old pass (no selection stored) — allow any approver.
@@ -956,8 +961,6 @@ function InitiatorGatePassDetailPageInner() {
   );
   const isASO = role === "AREA_SALES_OFFICER";
   const pendingApproval = data.status === "PENDING_APPROVAL";
-  // Check if current user created this pass (to determine gate_out eligibility)
-  const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
   // ASO LT: can operate the Vehicle Go slider if they created it OR are the requestedBy app user
   const isAsoLtPass = (data as any).asoCreated === true && data.passType === "LOCATION_TRANSFER";
   const isRequestedByUser = (data as any).requestedByEmail && session?.user?.email === (data as any).requestedByEmail &&
