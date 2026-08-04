@@ -1660,7 +1660,7 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {isInitiatorView && fromPrintIcon && (
+            {(isInitiatorView || (role === "APPROVER" && isCreatorByName)) && fromPrintIcon && (
               <button type="button" onClick={(e) => {
                   e.stopPropagation();
                   if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
