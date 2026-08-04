@@ -190,6 +190,11 @@ export async function GET(req: NextRequest) {
   // For other statuses (approved/rejected history), no restriction.
   if (isApproverRole(role) && (!status || status === "PENDING_APPROVAL")) {
     const approverName = (session.user as { name?: string | null }).name ?? "";
+    // Approver-created gate passes (Approver-initiated passes) must always be visible to the
+    // Approver who created them, in every status, without waiting for their Special Approver
+    // to act — mirrors how an Initiator always sees their own createdById passes. Scoped to
+    // role === "APPROVER" specifically (Special Approver never creates passes).
+    const ownCreatedFilter = role === "APPROVER" ? { createdById: session.user.id } : null;
     if (approverName) {
       // LT Return Gate Pass: the return leg is created locked and isn't actually approvable
       // until its outbound leg completes — exclude it from "pending approval" here so it
@@ -206,8 +211,14 @@ export async function GET(req: NextRequest) {
       };
       const nonPendingFilter = { status: { not: "PENDING_APPROVAL" as const } };
       if (!where.OR) {
-        where.OR = [assignedFilter as object, nonPendingFilter as object];
+        where.OR = [
+          assignedFilter as object,
+          nonPendingFilter as object,
+          ...(ownCreatedFilter ? [ownCreatedFilter as object] : []),
+        ];
       }
+    } else if (ownCreatedFilter && !where.OR) {
+      where.OR = [ownCreatedFilter as object];
     }
   }
   // ADMIN sees all
