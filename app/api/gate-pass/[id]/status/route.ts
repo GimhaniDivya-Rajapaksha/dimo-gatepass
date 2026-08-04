@@ -310,6 +310,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    // LT Return Gate Pass: rejecting the outbound leg means the linked return leg (still
+    // locked, never itself approved) can never proceed — reject it too, automatically.
+    // Rejecting the return leg itself (handled elsewhere, once unlocked) never reaches here
+    // and never touches the outbound leg — this cascade only ever runs outbound → return.
+    if (action === "reject" && gatePass.passType === "LOCATION_TRANSFER") {
+      const linkedReturnPass = await prisma.gatePass.findFirst({
+        where: { parentPassId: gatePass.id, returnPassLocked: true, status: "PENDING_APPROVAL" },
+      });
+      if (linkedReturnPass) {
+        await prisma.gatePass.update({
+          where: { id: linkedReturnPass.id },
+          data: {
+            status: "REJECTED",
+            approvedById: session.user.id,
+            approvedAt: new Date(),
+            rejectionReason: `Automatically rejected — the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+          },
+        });
+        await prisma.notification.create({
+          data: {
+            userId: linkedReturnPass.createdById,
+            type: "GATE_PASS_REJECTED",
+            title: "Return Gate Pass Rejected",
+            message: `Your return gate pass ${linkedReturnPass.gatePassNumber} was automatically rejected because the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+            gatePassId: linkedReturnPass.id,
+          },
+        });
+      }
+    }
+
     // Notify the pass creator (security officer or initiator)
     await prisma.notification.create({
       data: {
