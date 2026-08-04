@@ -370,11 +370,20 @@ export async function GET(req: NextRequest) {
     (where as any).updatedAt = { gte: new Date(updatedAfter) };
   }
 
-  // Test Drive has no Approver workflow at all — Approvers must never see Test Drive
-  // passes in any list (pending queue, approved history, or "All" tab), regardless of status.
+  // Test Drive has no Approver workflow at all — Approvers must never see OTHER people's Test
+  // Drive passes in any list (pending queue, approved history, or "All" tab), regardless of
+  // status. Exception: an Approver who created their own Test Drive pass (Approver-initiated
+  // gate passes) must still see it in their own records, exactly like every other pass type
+  // they've created — this mirrors ownCreatedFilter above.
   if (isApproverRole(role)) {
     const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
-    (where as any).AND = [...existingAnd, { passType: { not: "TEST_DRIVE" } }];
+    (where as any).AND = [
+      ...existingAnd,
+      { OR: [
+        { passType: { not: "TEST_DRIVE" } },
+        { passType: "TEST_DRIVE", createdById: session.user.id },
+      ]},
+    ];
   }
 
   try {
