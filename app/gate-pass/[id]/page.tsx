@@ -1075,7 +1075,7 @@ function InitiatorGatePassDetailPageInner() {
               </h1>
             </div>
             <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt", flexShrink: 0, whiteSpace: "nowrap" }}>
-              <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{data.parentPass?.gatePassNumber ?? data.gatePassNumber}</p>
+              <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{(data.passType === "AFTER_SALES" ? data.parentPass?.gatePassNumber : null) ?? data.gatePassNumber}</p>
               <p>Status: {sc.label}</p>
               <p>Printed: {new Date().toLocaleString()}</p>
             </div>
@@ -1115,7 +1115,7 @@ function InitiatorGatePassDetailPageInner() {
           </button>
           <div className="flex-1">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate Pass {data.parentPass?.gatePassNumber ?? data.gatePassNumber}</h1>
+              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate Pass {(data.passType === "AFTER_SALES" ? data.parentPass?.gatePassNumber : null) ?? data.gatePassNumber}</h1>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.dot }} />
                 {sc.label}
