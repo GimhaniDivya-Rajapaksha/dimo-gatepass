@@ -352,7 +352,7 @@ export default function ReceivePage() {
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-bold text-base font-mono" style={{ color: "var(--accent)" }}>
-                                  {gp.parentPass?.gatePassNumber ?? gp.gatePassNumber}
+                                  {(gp.passType === "AFTER_SALES" ? gp.parentPass?.gatePassNumber : null) ?? gp.gatePassNumber}
                                 </span>
                                 <PassTypeBadge passType={gp.passType} passSubType={gp.passSubType} />
                                 <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
@@ -523,7 +523,7 @@ export default function ReceivePage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm font-mono" style={{ color: "var(--accent)" }}>
-                          {gp.parentPass?.gatePassNumber ?? gp.gatePassNumber}
+                          {(gp.passType === "AFTER_SALES" ? gp.parentPass?.gatePassNumber : null) ?? gp.gatePassNumber}
                         </span>
                         <PassTypeBadge passType={gp.passType} passSubType={gp.passSubType} />
                       </div>

@@ -178,7 +178,7 @@ export default function PendingCompletionPage() {
           <div className="flex flex-col divide-y" style={{ borderColor: "var(--border)" }}>
             {filtered.map((p) => {
               const typeLabel = passTypeLabel(p);
-              const gpNum = p.parentPass?.gatePassNumber ?? p.gatePassNumber;
+              const gpNum = (p.passType === "AFTER_SALES" ? p.parentPass?.gatePassNumber : null) ?? p.gatePassNumber;
               return (
                 <button
                   key={p.id}
