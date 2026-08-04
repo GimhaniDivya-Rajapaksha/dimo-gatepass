@@ -191,7 +191,10 @@ export async function GET(req: NextRequest) {
   if (isApproverRole(role) && (!status || status === "PENDING_APPROVAL")) {
     const approverName = (session.user as { name?: string | null }).name ?? "";
     if (approverName) {
-      const pendingFilter = { status: "PENDING_APPROVAL" as const };
+      // LT Return Gate Pass: the return leg is created locked and isn't actually approvable
+      // until its outbound leg completes — exclude it from "pending approval" here so it
+      // doesn't show up in the system alongside the outbound leg before it's ready.
+      const pendingFilter = { status: "PENDING_APPROVAL" as const, returnPassLocked: false };
       const assignedFilter = {
         AND: [
           pendingFilter,

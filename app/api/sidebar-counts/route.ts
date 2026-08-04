@@ -95,7 +95,10 @@ export async function GET(req: NextRequest) {
           AND: [
             approverMatch,
             { OR: [
-              { status: "PENDING_APPROVAL" },
+              // LT Return Gate Pass: the return leg is created locked and isn't actually
+              // approvable until its outbound leg completes — exclude it from this count
+              // so it doesn't show up until it's ready, matching the queue list.
+              { status: "PENDING_APPROVAL", returnPassLocked: false },
               { AND: [{ status: "CASHIER_REVIEW" }, { hasCredit: true }, { creditApproved: false }, { creditRejected: false }] },
             ]},
           ],
