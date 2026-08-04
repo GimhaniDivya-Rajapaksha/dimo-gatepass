@@ -54,23 +54,27 @@ function brandMatches(userBrand: string | null | undefined, vehicleMake: string 
 export async function findApproversForLocationBrand(
   location: string | null,
   selectedApproverName?: string,
-  vehicleMake?: string | null
+  vehicleMake?: string | null,
+  // Defaults to "APPROVER" so every existing caller's behavior is completely unchanged.
+  // Pass "SPECIAL_APPROVER" when routing a pass created by an Approver (Approver-initiated
+  // gate passes must only ever route to their Special Approver, never a normal Approver).
+  targetRole: "APPROVER" | "SPECIAL_APPROVER" = "APPROVER"
 ) {
   // Match approvers by plant prefix (first part before " - ") so sub-storage variants
   // like "Galle Branch - HNB" and "Galle Branch - Sales" both resolve to "Galle Branch" approvers.
   // Also matches approvers who have this plant among their ADDITIONAL mapped plants
   // (UserPlantMapping), not just their primary defaultLocation.
   const plantPrefix = location ? location.split(" - ")[0].trim() : null;
-  const extraApproverIds = plantPrefix ? await findExtraMappedUserIds("APPROVER", plantPrefix) : [];
+  const extraApproverIds = plantPrefix ? await findExtraMappedUserIds(targetRole, plantPrefix) : [];
   const baseWhere = plantPrefix
     ? {
-        role: "APPROVER" as const,
+        role: targetRole,
         OR: [
           { defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
           ...(extraApproverIds.length > 0 ? [{ id: { in: extraApproverIds } }] : []),
         ],
       }
-    : { role: "APPROVER" as const };
+    : { role: targetRole };
 
   const findUsers = (where: object) =>
     prisma.user.findMany({
@@ -85,7 +89,7 @@ export async function findApproversForLocationBrand(
     // Honor the explicit name selection regardless of location — only fall through to
     // location-based routing if no approver with that name exists at all.
     const exact = (await findUsers({
-      role: "APPROVER",
+      role: targetRole,
       name: { equals: selectedName, mode: "insensitive" },
     })).filter((approver) => brandMatches(approver.brand, vehicleMake));
     if (exact.length > 0) return exact;
@@ -96,12 +100,12 @@ export async function findApproversForLocationBrand(
   if (sameLocationBrand.length > 0) return sameLocationBrand;
 
   if (hasVehicleBrand) {
-    const sameBrand = (await findUsers({ role: "APPROVER" })).filter((approver) => brandMatches(approver.brand, vehicleMake));
+    const sameBrand = (await findUsers({ role: targetRole })).filter((approver) => brandMatches(approver.brand, vehicleMake));
     if (sameBrand.length > 0) return sameBrand;
     // No brand-matched approver found anywhere — fall back to location approvers
     if (sameLocation.length > 0) return sameLocation;
   }
 
   if (sameLocation.length > 0) return sameLocation;
-  return findUsers({ role: "APPROVER" });
+  return findUsers({ role: targetRole });
 }
