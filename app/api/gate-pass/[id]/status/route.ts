@@ -1858,7 +1858,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         targetApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
       }
     } else {
-      targetApprovers = await findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make);
+      // Approver-initiated passes must route resubmission back to their Special Approver,
+      // never a normal Approver — same rule as initial submission. Only the creator can
+      // resubmit (enforced above), so session.user.role here is the creator's own role.
+      const resubmitApproverRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+      targetApprovers = await findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make, resubmitApproverRole);
     }
     const resubmitRecipients = [...targetApprovers, ...admins];
     if (resubmitRecipients.length > 0) {
