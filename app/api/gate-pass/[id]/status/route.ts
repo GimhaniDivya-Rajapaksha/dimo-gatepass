@@ -62,6 +62,45 @@ async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string 
   });
 }
 
+// LT Return Gate Pass: the return leg's own "please approve" email is deliberately
+// suppressed at creation time (see app/api/gate-pass/route.ts) because it's locked and not
+// yet actionable. Call this right after unlocking it (its parent just completed) to send
+// that email now, matching the same approver-resolution logic used at initial submission.
+async function sendReturnLegApprovalEmails(parentPassId: string) {
+  const returnPasses = await prisma.gatePass.findMany({
+    where: { parentPassId, returnPassLocked: false, status: "PENDING_APPROVAL" },
+    include: { createdBy: { select: { name: true, role: true } } },
+  });
+  if (returnPasses.length === 0) return;
+
+  const { sendApprovalRequestEmail } = await import("@/lib/email");
+  for (const rp of returnPasses) {
+    const creatorRole = (rp as any).createdBy?.role as string | undefined;
+    const approverRole = creatorRole === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+    const rpApproverName = rp.intendedApprover;
+    let rpApprovers = rpApproverName
+      ? await prisma.user.findMany({ where: { role: approverRole as any, name: { equals: rpApproverName, mode: "insensitive" } } })
+      : await prisma.user.findMany({ where: { role: approverRole as any } });
+    if (rpApproverName && rpApprovers.length === 0 && creatorRole !== "APPROVER") {
+      rpApprovers = await prisma.user.findMany({ where: { role: approverRole as any } });
+    }
+    for (const approverUser of rpApprovers) {
+      sendApprovalRequestEmail(approverUser.email, approverUser.name, rp.id, {
+        gatePassNumber: rp.gatePassNumber,
+        passType: rp.passType,
+        passSubType: rp.passSubType,
+        vehicle: rp.vehicle ?? "",
+        chassis: rp.chassis,
+        toLocation: rp.toLocation,
+        fromLocation: rp.fromLocation,
+        departureDate: rp.departureDate,
+        departureTime: rp.departureTime,
+        createdByName: (rp as any).createdBy?.name || "Initiator",
+      }, approverUser.id).catch((e: unknown) => console.error("[email] return leg approval email failed:", e));
+    }
+  }
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -546,6 +585,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         where: { parentPassId: gatePass.id, returnPassLocked: true },
         data: { returnPassLocked: false },
       });
+      await sendReturnLegApprovalEmails(gatePass.id);
     }
 
     const targetLabel = gatePass.toLocation as string | null;
@@ -1615,6 +1655,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         where: { parentPassId: gatePass.id, returnPassLocked: true },
         data: { returnPassLocked: false },
       });
+      await sendReturnLegApprovalEmails(gatePass.id);
     }
 
     await prisma.notification.create({
