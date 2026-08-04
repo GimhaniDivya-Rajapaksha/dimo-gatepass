@@ -1828,7 +1828,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // INITIATOR / AREA_SALES_OFFICER: cancel their own PENDING_APPROVAL pass
   if (action === "cancel") {
-    if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN" && session.user.role !== "AREA_SALES_OFFICER") {
+    // An Approver who created their own pass (Approver-initiated gate passes) can cancel it
+    // exactly like an Initiator/ASO would — every other role's access is unchanged.
+    const canCancelRole = session.user.role === "INITIATOR" || session.user.role === "ADMIN"
+      || session.user.role === "AREA_SALES_OFFICER" || session.user.role === "APPROVER";
+    if (!canCancelRole) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.createdById !== session.user.id && session.user.role !== "ADMIN") {
