@@ -252,19 +252,33 @@ export async function GET(req: NextRequest) {
   else if (fromLocationFilter) where.fromLocation = ciEquals(fromLocationFilter);
 
   // Security Officer queue: same server-authoritative fix as Vehicle Arrivals above — never
-  // trust the client-supplied fromLocationPlant for who this user is; resolve their actual
-  // mapped plants server-side instead.
+  // trust the client-supplied fromLocationPlant/toLocationPlant for who this user is; resolve
+  // their actual mapped plant(s) server-side instead. Only overrides whichever field this
+  // specific request was actually filtering by (Gate OUT queries filter fromLocation, Gate IN
+  // queries filter toLocation), so a Gate IN request is never also required to match on
+  // fromLocation (which could be any other plant — the vehicle's origin) and vice versa.
   if (role === "SECURITY_OFFICER") {
     const mySecPlants = await getUserPlantPrefixes(session.user.id);
-    delete where.fromLocation;
     const existingAndSec = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
-    (where as any).AND = [
-      ...existingAndSec,
-      mySecPlants.length > 0
-        ? { OR: plantsWhereOr("fromLocation", mySecPlants) }
-        // No plant mapped at all — show nothing rather than falling back to "everything".
-        : { fromLocation: "__no_plant_mapped__" },
-    ];
+    const secAnd: object[] = [...existingAndSec];
+    if (fromLocationFilter || fromLocationPlant || fromLocationCode) {
+      delete where.fromLocation;
+      secAnd.push(
+        mySecPlants.length > 0
+          ? { OR: plantsWhereOr("fromLocation", mySecPlants) }
+          // No plant mapped at all — show nothing rather than falling back to "everything".
+          : { fromLocation: "__no_plant_mapped__" }
+      );
+    }
+    if (toLocationFilter || toLocationPlant || toLocationCode) {
+      delete where.toLocation;
+      secAnd.push(
+        mySecPlants.length > 0
+          ? { OR: plantsWhereOr("toLocation", mySecPlants) }
+          : { toLocation: "__no_plant_mapped__" }
+      );
+    }
+    if (secAnd.length > 0) (where as any).AND = secAnd;
   }
 
   if (passType) where.passType = passType;
