@@ -433,6 +433,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       rejectionReason: comment.trim() || "Rejected via email",
     },
   });
+
+  // LT Return Gate Pass: rejecting the outbound leg by email must also reject its linked
+  // return leg (still locked, never itself approved) — same rule as an in-system rejection.
+  // Rejecting the return leg itself never reaches here in a way that touches its outbound
+  // leg, since this only looks for children of the pass being rejected.
+  if (gatePass.passType === "LOCATION_TRANSFER") {
+    const linkedReturnPass = await prisma.gatePass.findFirst({
+      where: { parentPassId: gatePass.id, returnPassLocked: true, status: "PENDING_APPROVAL" },
+    });
+    if (linkedReturnPass) {
+      await prisma.gatePass.update({
+        where: { id: linkedReturnPass.id },
+        data: {
+          status: "REJECTED",
+          approvedById: approver?.id,
+          approvedAt: new Date(),
+          rejectionReason: `Automatically rejected — the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+        },
+      });
+      await prisma.notification.create({
+        data: {
+          userId: linkedReturnPass.createdById,
+          type: "GATE_PASS_REJECTED",
+          title: "Return Gate Pass Rejected",
+          message: `Your return gate pass ${linkedReturnPass.gatePassNumber} was automatically rejected because the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+          gatePassId: linkedReturnPass.id,
+        },
+      });
+    }
+  }
+
   await prisma.notification.create({
     data: {
       userId: gatePass.createdById,
