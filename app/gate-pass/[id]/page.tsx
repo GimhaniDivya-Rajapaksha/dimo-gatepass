@@ -925,13 +925,19 @@ function InitiatorGatePassDetailPageInner() {
   const isLT = data.passType === "LOCATION_TRANSFER";
   // Check if current user created this pass (to determine gate_out eligibility, cancel eligibility)
   const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
+  // /sub-passes (this page's data source) only selects createdBy.name, not id/email, so
+  // isCreator above is always false in practice — it's left untouched here since it also
+  // gates several existing Location Transfer / Customer Delivery / After Sales branches
+  // further down this page, and fixing its data source would change what Initiators see
+  // there. This name-based match is used only for the Approver cancel/resubmit checks below.
+  const isCreatorByName = (data.createdBy.name ?? "").trim().toLowerCase() === (session?.user?.name ?? "").trim().toLowerCase();
   // An Approver who created their own pass (Approver-initiated gate passes) can cancel it
   // exactly like an Initiator/ASO would, but only their own — never someone else's pass
   // they're merely reviewing.
   const canCancel  = (
     data.status === "PENDING_APPROVAL" ||
     (data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW")
-  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER" || (role === "APPROVER" && isCreator));
+  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER" || (role === "APPROVER" && isCreatorByName));
   const isApproverView = isApproverRole(role) || role === "ADMIN";
   // True if this approver is specifically assigned to this gate pass.
   // null intendedApprover means old pass (no selection stored) — allow any approver.
@@ -1596,8 +1602,9 @@ function InitiatorGatePassDetailPageInner() {
 
         {/* Resubmit Banner — shown to the creator when their pass is rejected. An Approver who
             created their own pass (Approver-initiated gate passes) must see this too, even
-            though isApproverView is otherwise true for them — isCreator overrides that here. */}
-        {(!isApproverView || isCreator) && data.status === "REJECTED" && (
+            though isApproverView is otherwise true for them — isCreatorByName overrides that
+            here (see its definition above for why isCreator itself isn't used). */}
+        {(!isApproverView || isCreatorByName) && data.status === "REJECTED" && (
           <div className="mb-4 rounded-2xl border overflow-hidden no-print" style={{ borderColor: "#fca5a5" }}>
             <div className="px-5 py-3 flex items-center gap-2" style={{ background: "#fef2f2" }}>
               <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
