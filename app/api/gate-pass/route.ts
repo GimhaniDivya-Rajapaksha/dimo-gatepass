@@ -966,7 +966,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+  // LT Return Gate Pass: the return leg is created locked and can't actually be approved
+  // until its outbound leg completes — sending "please approve" now would be premature and
+  // misleading. Suppress it here; it's sent later (see sendReturnLegApprovalEmails in
+  // app/api/gate-pass/[id]/status/route.ts) once the outbound leg completes and this unlocks.
+  if (createData.returnPassLocked !== true) {
+    await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+  }
 
   // LT: notify ASOs at fromLocation when pass is created by a non-ASO
   if (body.passType === "LOCATION_TRANSFER" && !gatePass.asoCreated && gatePass.fromLocation) {
