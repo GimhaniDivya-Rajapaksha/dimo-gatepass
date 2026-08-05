@@ -1877,7 +1877,9 @@ export default function CreateGatePassPage() {
     const e: Record<string, string> = {};
 
     // Helpers
-    const validNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+    // This field accepts either a NIC or a Driving Licence number (matches its own
+    // "DL / NIC No" label) — Sri Lankan DL format is 1 letter followed by 7 digits.
+    const validNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim()) || /^[A-Za-z][0-9]{7}$/.test(v.trim());
     const validPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
     const now = new Date();
     const today = new Date(now); today.setHours(0, 0, 0, 0);
@@ -2019,7 +2021,7 @@ export default function CreateGatePassPage() {
       if (transportMode === "CARRIER" && !src.companyName) e.companyName = "Carrier company name is required";
       if (transportMode === "CARRIER" && !src.carrierRegNo) e.carrierRegNo = "Carrier registration number is required";
       if (!src.driverNIC) e.driverNIC = "Driver NIC / DL No is required";
-      else if (!validNIC(src.driverNIC)) e.driverNIC = "Invalid NIC format (e.g. 123456789V or 200012345678)";
+      else if (!validNIC(src.driverNIC)) e.driverNIC = "Invalid NIC/DL format (e.g. 123456789V, 200012345678, or B1234567)";
       if (!src.driverName) e.driverName = "Driver name is required";
       if (!src.contactNo) e.contactNo = "Driver contact number is required";
       else if (!validPhone(src.contactNo)) e.contactNo = "Invalid contact number format";
