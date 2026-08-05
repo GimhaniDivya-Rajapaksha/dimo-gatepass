@@ -514,7 +514,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR", "AREA_SALES_OFFICER"];
+  // An Approver creating their own gate pass (Approver-initiated gate passes) needs the same
+  // inline "Add New Carrier / Driver / Location label" capability as an Initiator does.
+  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR", "AREA_SALES_OFFICER", "APPROVER"];
   if (!session || !allowedToPost.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
