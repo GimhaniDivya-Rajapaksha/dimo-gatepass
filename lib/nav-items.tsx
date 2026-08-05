@@ -142,16 +142,17 @@ export const navItemsByRole: Record<string, NavItem[]> = {
     { label: "Dashboard", href: "/approver", icon: <DashboardIcon /> },
     { label: "Create Gate Pass", href: "/gate-pass/create", icon: <PlusIcon /> },
     { label: "Pending Requests", href: "/gate-pass/approve", icon: <CheckIcon />, showPendingBadge: true },
-    {
-      label: "Payment Overrides",
-      href: "/gate-pass?status=CASHIER_REVIEW&cashierOverride=true",
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-      ),
-      showOverrideBadge: true,
-    },
+    // Temporarily hidden per explicit request — restore this item to bring it back.
+    // {
+    //   label: "Payment Overrides",
+    //   href: "/gate-pass?status=CASHIER_REVIEW&cashierOverride=true",
+    //   icon: (
+    //     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    //       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+    //     </svg>
+    //   ),
+    //   showOverrideBadge: true,
+    // },
     { label: "All Gate Passes", href: "/gate-pass", icon: <ListIcon /> },
     { label: "Completed", href: "/gate-pass?status=COMPLETED", icon: <FlagIcon />, showCompletedBadge: true },
     { label: "Vehicle Report", href: "/vehicle-report", icon: <VehicleReportIcon /> },
