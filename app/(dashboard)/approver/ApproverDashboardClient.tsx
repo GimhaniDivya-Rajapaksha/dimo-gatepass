@@ -125,6 +125,10 @@ export default function ApproverDashboardClient({ user }: Props) {
   const [queue, setQueue] = useState<GatePass[]>([]);
   const [queueLoading, setQueueLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("PENDING_APPROVAL");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const QUEUE_PAGE_SIZE = 8;
 
   useEffect(() => {
     fetch("/api/gate-pass/stats")
@@ -133,18 +137,22 @@ export default function ApproverDashboardClient({ user }: Props) {
       .catch(() => setStatsLoading(false));
   }, []);
 
+  useEffect(() => { setPage(1); }, [statusFilter]);
+
   const fetchQueue = useCallback(async () => {
     setQueueLoading(true);
     try {
-      const res = await fetch(`/api/gate-pass?status=${statusFilter}&limit=8`);
+      const res = await fetch(`/api/gate-pass?status=${statusFilter}&limit=${QUEUE_PAGE_SIZE}&page=${page}`);
       if (res.ok) {
         const d = await res.json();
         setQueue(d.passes || []);
+        setQueueTotal(d.total || 0);
+        setTotalPages(Math.max(1, Math.ceil((d.total || 0) / QUEUE_PAGE_SIZE)));
       }
     } finally {
       setQueueLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
@@ -362,6 +370,21 @@ export default function ApproverDashboardClient({ user }: Props) {
             </tbody>
           </table>
         </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: "var(--border)" }}>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>Showing {queue.length} of {queueTotal}</p>
+            <div className="flex gap-2">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border disabled:opacity-40"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>Prev</button>
+              <span className="px-3 py-1.5 text-xs" style={{ color: "var(--text-muted)" }}>{page}/{totalPages}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border disabled:opacity-40"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
     </motion.div>
