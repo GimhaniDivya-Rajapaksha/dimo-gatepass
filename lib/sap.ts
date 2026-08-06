@@ -151,10 +151,27 @@ function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
   );
 }
 
+// ── Location Transfer vehicle status allowlist ──────────────────────────────────
+// Prefixes match ANY code starting with them (e.g. "QP*" matches QP03, QP60, QP99, ...).
+const LT_STATUS_PREFIXES = ["QE", "QP", "QR", "QS", "QV", "VMM", "VMS"];
+// Codes with no wildcard prefix given — matched literally only.
+const LT_STATUS_EXACT = new Set(["INITIAL", "QT05", "QT10", "QT20", "QT30", "QT40"]);
+// Customer Delivery's own statuses — must never appear in Location Transfer, even
+// though they'd otherwise match the "QS" prefix above.
+const LT_EXCLUDED_STATUSES = new Set(["QS40", "QS4X", "QS50", "QS5X", "QS60"]);
+
+function isLocationTransferEligibleStatus(mmsta: string): boolean {
+  const code = mmsta.trim().toUpperCase();
+  if (!code) return false;
+  if (LT_EXCLUDED_STATUSES.has(code)) return false;
+  if (LT_STATUS_EXACT.has(code)) return true;
+  return LT_STATUS_PREFIXES.some((prefix) => code.startsWith(prefix));
+}
+
 /**
  * Search vehicles from SAP via Azure APIM proxy.
  *
- * passType = "LOCATION_TRANSFER" → /in  (no mmsta filter — all vehicles)
+ * passType = "LOCATION_TRANSFER" → /in, filtered to the LT status allowlist (mmsta)
  * passType = "CUSTOMER_DELIVERY" → /out (sdsta eq 'QS60' — Sales Order Completed)
  * passType = "both"              → both endpoints in parallel, deduplicated by VIN
  */
@@ -181,7 +198,7 @@ export async function fetchSapVehicles(
 
   if (passType === "LOCATION_TRANSFER" || passType === "TEST_DRIVE") {
     // Test Drive reuses the exact same vehicle search/filter as Location Transfer.
-    raw = await fetchIN();
+    raw = (await fetchIN()).filter((v) => isLocationTransferEligibleStatus(v.primaryStatus));
   } else if (passType === "CUSTOMER_DELIVERY") {
     raw = await fetchOUT();
   } else {
@@ -202,6 +219,38 @@ export async function fetchSapVehicles(
 
   const all = [...seen.values()].filter((v) => v.vehicleNo || v.chassisNo);
   return jsVehicleFilter(all, q);
+}
+
+/**
+ * Fetch a single vehicle's current mmsta/sdsta from SAP's /in endpoint — used only to
+ * decide whether a Location Transfer's SAP write should execute (see isSapWriteEligible).
+ * Returns null if the vehicle isn't found or the lookup fails; callers must treat that as
+ * "cannot confirm eligibility" and skip the SAP write rather than guess.
+ */
+export async function fetchVehicleSapStatus(vin: string): Promise<{ mmsta: string; sdsta: string } | null> {
+  const safeVin = vin.trim();
+  if (!safeVin) return null;
+  try {
+    const rows = await apimPost("in", `vhvin eq '${safeVin.replace(/'/g, "''")}'`);
+    const row = rows[0];
+    if (!row) return null;
+    return { mmsta: str(row["mmsta"]), sdsta: str(row["sdsta"]) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * SAP write eligibility rule for Location Transfer: only write to SAP when the vehicle's
+ * current status is MMSTA=QP60 AND (SDSTA is blank OR SDSTA=QS20). Every other eligible
+ * Location Transfer status still completes normally in the application — only the SAP
+ * write itself is skipped.
+ */
+export function isSapWriteEligible(status: { mmsta: string; sdsta: string } | null): boolean {
+  if (!status) return false;
+  const mmsta = status.mmsta.trim().toUpperCase();
+  const sdsta = status.sdsta.trim().toUpperCase();
+  return mmsta === "QP60" && (sdsta === "" || sdsta === "QS20");
 }
 
 /**
