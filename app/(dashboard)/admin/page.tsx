@@ -960,6 +960,12 @@ export default function AdminPage() {
           <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>Assign roles and manage system access</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} onClick={() => setShowAddUser(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-semibold shadow-md"
+            style={{ background: "linear-gradient(135deg, #1a4f9e, #2563eb)" }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+            Add User
+          </motion.button>
         </div>
       </div>
 
