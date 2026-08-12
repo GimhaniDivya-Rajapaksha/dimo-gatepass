@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendApprovalRequestEmail, sendRequestedByNotificationEmail } from "@/lib/email";
+import { sendApprovalRequestEmail, sendRequestedByNotificationEmail, sendTestDriveReturnTimeExceededEmail } from "@/lib/email";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
+import { isApproverRole } from "@/lib/roles";
+import { getUserPlantPrefixes, plantsWhereOr, findExtraMappedUserIds } from "@/lib/user-plants";
 
 function ciEquals(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -48,12 +50,20 @@ async function sendApprovalEmailsToApprovers(approvers: { id: string; email: str
   }
 }
 
-// Returns cashiers at the vehicle's location; falls back to all cashiers if none assigned there.
+// Returns cashiers at the vehicle's location (including anyone additionally mapped to it
+// via UserPlantMapping); falls back to all cashiers if none assigned there.
 async function getCashiersForLocation(fromLocation: string | null) {
   const plantPrefix = fromLocation ? fromLocation.split(" - ")[0].trim() : null;
   if (plantPrefix) {
+    const extraIds = await findExtraMappedUserIds("CASHIER", plantPrefix);
     const located = await prisma.user.findMany({
-      where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
+      where: {
+        role: "CASHIER" as any,
+        OR: [
+          { defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } },
+          ...(extraIds.length > 0 ? [{ id: { in: extraIds } }] : []),
+        ],
+      },
     });
     if (located.length > 0) return located;
   }
@@ -74,49 +84,49 @@ export async function GET(req: NextRequest) {
 
   const role = session.user.role;
   const where: Record<string, unknown> = {};
+  const locationView = searchParams.get("locationView") === "true";
 
   if (role === "INITIATOR" || role === "SERVICE_ADVISOR") {
-    const locationView = searchParams.get("locationView") === "true";
     if (status === "DRAFT") {
-      // Security-created drafts: only show to the role at the SAME location as the Security Officer.
-      // Filter by matching the creator's defaultLocation plant prefix — more reliable than
-      // fromLocation/toLocation which can be null on older passes.
-      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation ?? null;
-      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
+      // Security-created drafts: only show to the role at the SAME location(s) as the Security
+      // Officer. Filter by matching the creator's defaultLocation plant prefix against any of
+      // this user's mapped plants — more reliable than fromLocation/toLocation which can be
+      // null on older passes.
+      const myPlants = await getUserPlantPrefixes(session.user.id);
       where.AND = [
         { status: "DRAFT" },
         { comments: { contains: `[[ASSIGNED_ROLE:${role}]]` } },
-        plantPrefix
-          ? { createdBy: { defaultLocation: { startsWith: plantPrefix } } }
+        myPlants.length > 0
+          ? { OR: myPlants.map((p) => ({ createdBy: { defaultLocation: { startsWith: p } } })) }
           : {},
       ];
     } else if (role === "INITIATOR" && !locationView && !(passType === "AFTER_SALES" && search)) {
       // INITIATOR sees own passes AND sub-passes linked to their main passes
       // Exception: bypass when searching After Sales by GP number (e.g. "Find Gate IN Pass" on create screen)
       // so passes created by Service Advisors or Security Officers are findable.
-      const myLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-      const plantPrefix = myLocation ? myLocation.split(" - ")[0].trim() : null;
+      const myPlants = await getUserPlantPrefixes(session.user.id);
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
-      // Security-created passes (any non-DRAFT status) from Security Officers at the same location
-      // should be visible to the Initiator who completed them, showing real status.
-      if (plantPrefix) {
+      // Security-created passes (any non-DRAFT status) from Security Officers at any of this
+      // initiator's mapped locations should be visible to the Initiator who completed them,
+      // showing real status.
+      for (const plant of myPlants) {
         orClauses.push({
           securityCreated: true,
           status: { not: "DRAFT" },
-          createdBy: { defaultLocation: { startsWith: plantPrefix } },
+          createdBy: { defaultLocation: { startsWith: plant } },
         });
       }
-      // Also show incoming After Sales SUB_OUT passes that have already been
-      // confirmed at this initiator's location, so the destination team can
-      // track the received vehicle in "My Gate Passes".
-      if (myLocation) {
+      // Also show incoming After Sales SUB_OUT passes that have already been confirmed at any
+      // of this initiator's mapped locations, so the destination team can track the received
+      // vehicle in "My Gate Passes".
+      for (const plant of myPlants) {
         orClauses.push({
           passType: "AFTER_SALES",
           passSubType: "SUB_OUT",
-          toLocation: ciEquals(myLocation),
+          toLocation: { startsWith: plant, mode: "insensitive" as const },
           status: "COMPLETED",
         });
       }
@@ -128,18 +138,18 @@ export async function GET(req: NextRequest) {
   } else if (role === "AREA_SALES_OFFICER") {
     // ASO sees their own passes + AFTER_SALES passes destined for their location
     // UNLESS locationView=true (Vehicles Incoming dashboard) or searching by GP number
-    const locationView = searchParams.get("locationView") === "true";
     const isAfterSalesSearch = searchParams.get("passType") === "AFTER_SALES" && searchParams.get("search");
     if (!locationView && !isAfterSalesSearch) {
-      const asoLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
+      const asoPlants = await getUserPlantPrefixes(session.user.id);
       const orClauses: unknown[] = [
         { createdById: session.user.id },
         { parentPass: { createdById: session.user.id } },
       ];
       // Promo/Finance are sub-locations under the same plant, so match by
-      // plant prefix instead of the exact storage-location text.
-      if (asoLocation) {
-        const plantLocation = ciStartsWithPlant(asoLocation);
+      // plant prefix instead of the exact storage-location text — across every
+      // plant this ASO is mapped to, not just their primary one.
+      for (const plant of asoPlants) {
+        const plantLocation = { startsWith: plant, mode: "insensitive" as const };
         orClauses.push({ passType: "AFTER_SALES", toLocation: plantLocation });
         orClauses.push({ passType: "AFTER_SALES", fromLocation: plantLocation });
         // COMPLETED LT passes where ASO confirmed arrival — show in My Gate Passes & Completed.
@@ -161,32 +171,35 @@ export async function GET(req: NextRequest) {
       ];
     }
   } else if (role === "DELIVERY_COORDINATOR") {
-    // DC sees all passes at their location (either departing from or arriving to)
-    const dcLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-    if (dcLocation) {
-      const plant = dcLocation.split(" - ")[0].trim();
+    // DC sees all passes at any of their mapped plants (either departing from or arriving to)
+    const dcPlants = await getUserPlantPrefixes(session.user.id);
+    if (dcPlants.length > 0) {
       where.AND = [{
-        OR: [
-          { fromLocation: { startsWith: plant, mode: "insensitive" as const } },
-          { toLocation:   { startsWith: plant, mode: "insensitive" as const } },
-        ],
+        OR: [...plantsWhereOr("fromLocation", dcPlants), ...plantsWhereOr("toLocation", dcPlants)],
       }];
     }
   } else if (role === "CASHIER") {
-    // Cashier only sees passes originating from their plant location
-    const cashierLocation = (session.user as { defaultLocation?: string | null }).defaultLocation;
-    if (cashierLocation) {
-      const plant = cashierLocation.split(" - ")[0].trim();
-      where.AND = [{ fromLocation: { startsWith: plant, mode: "insensitive" as const } }];
+    // Cashier only sees passes originating from any of their mapped plant locations
+    const cashierPlants = await getUserPlantPrefixes(session.user.id);
+    if (cashierPlants.length > 0) {
+      where.AND = [{ OR: plantsWhereOr("fromLocation", cashierPlants) }];
     }
   }
   // APPROVER: for PENDING_APPROVAL passes, only show ones explicitly assigned to them
   // (intendedApprover = their name). For null intendedApprover (old passes), still show all.
   // For other statuses (approved/rejected history), no restriction.
-  if (role === "APPROVER" && (!status || status === "PENDING_APPROVAL")) {
+  if (isApproverRole(role) && (!status || status === "PENDING_APPROVAL")) {
     const approverName = (session.user as { name?: string | null }).name ?? "";
+    // Approver-created gate passes (Approver-initiated passes) must always be visible to the
+    // Approver who created them, in every status, without waiting for their Special Approver
+    // to act — mirrors how an Initiator always sees their own createdById passes. Scoped to
+    // role === "APPROVER" specifically (Special Approver never creates passes).
+    const ownCreatedFilter = role === "APPROVER" ? { createdById: session.user.id } : null;
     if (approverName) {
-      const pendingFilter = { status: "PENDING_APPROVAL" as const };
+      // LT Return Gate Pass: the return leg is created locked and isn't actually approvable
+      // until its outbound leg completes — exclude it from "pending approval" here so it
+      // doesn't show up in the system alongside the outbound leg before it's ready.
+      const pendingFilter = { status: "PENDING_APPROVAL" as const, returnPassLocked: false };
       const assignedFilter = {
         AND: [
           pendingFilter,
@@ -198,8 +211,14 @@ export async function GET(req: NextRequest) {
       };
       const nonPendingFilter = { status: { not: "PENDING_APPROVAL" as const } };
       if (!where.OR) {
-        where.OR = [assignedFilter as object, nonPendingFilter as object];
+        where.OR = [
+          assignedFilter as object,
+          nonPendingFilter as object,
+          ...(ownCreatedFilter ? [ownCreatedFilter as object] : []),
+        ];
       }
+    } else if (ownCreatedFilter && !where.OR) {
+      where.OR = [ownCreatedFilter as object];
     }
   }
   // ADMIN sees all
@@ -214,12 +233,67 @@ export async function GET(req: NextRequest) {
   else if (toLocationPlant) where.toLocation = { startsWith: toLocationPlant, mode: "insensitive" };
   else if (toLocationFilter) where.toLocation = ciEquals(toLocationFilter);
 
+  // Vehicle Arrivals (locationView=true, Initiator/ASO only): never trust the client-supplied
+  // toLocationPlant/toLocationCode/toLocation above for who this user is — the frontend used to
+  // compute it from the user's own single defaultLocation and send it unvalidated. Resolve the
+  // caller's actual mapped plants server-side instead and use that as the real restriction.
+  // A client-requested single-plant filter (the "All Mapped Plants / one plant" dropdown) is
+  // honored ONLY if it's actually one of this user's own mapped plants — never an arbitrary value.
+  // Uses where.AND (not where.OR) so it can't be clobbered by the `search` param handling below,
+  // which also assigns where.OR.
+  if (locationView && (role === "INITIATOR" || role === "AREA_SALES_OFFICER")) {
+    const myArrivalPlants = await getUserPlantPrefixes(session.user.id);
+    const requestedPlant = searchParams.get("myPlantFilter");
+    const effectivePlants = requestedPlant && myArrivalPlants.includes(requestedPlant)
+      ? [requestedPlant]
+      : myArrivalPlants;
+    delete where.toLocation;
+    const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    (where as any).AND = [
+      ...existingAnd,
+      effectivePlants.length > 0
+        ? { OR: plantsWhereOr("toLocation", effectivePlants) }
+        // No plant mapped at all — show nothing rather than falling back to "everything".
+        : { toLocation: "__no_plant_mapped__" },
+    ];
+  }
+
   const fromLocationFilter = searchParams.get("fromLocation");
   const fromLocationPlant  = searchParams.get("fromLocationPlant");
   const fromLocationCode   = searchParams.get("fromLocationCode");
   if (fromLocationCode)       where.fromLocation = { contains: fromLocationCode,   mode: "insensitive" };
   else if (fromLocationPlant) where.fromLocation = { startsWith: fromLocationPlant, mode: "insensitive" };
   else if (fromLocationFilter) where.fromLocation = ciEquals(fromLocationFilter);
+
+  // Security Officer queue: same server-authoritative fix as Vehicle Arrivals above — never
+  // trust the client-supplied fromLocationPlant/toLocationPlant for who this user is; resolve
+  // their actual mapped plant(s) server-side instead. Only overrides whichever field this
+  // specific request was actually filtering by (Gate OUT queries filter fromLocation, Gate IN
+  // queries filter toLocation), so a Gate IN request is never also required to match on
+  // fromLocation (which could be any other plant — the vehicle's origin) and vice versa.
+  if (role === "SECURITY_OFFICER") {
+    const mySecPlants = await getUserPlantPrefixes(session.user.id);
+    const existingAndSec = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    const secAnd: object[] = [...existingAndSec];
+    if (fromLocationFilter || fromLocationPlant || fromLocationCode) {
+      delete where.fromLocation;
+      secAnd.push(
+        mySecPlants.length > 0
+          ? { OR: plantsWhereOr("fromLocation", mySecPlants) }
+          // No plant mapped at all — show nothing rather than falling back to "everything".
+          : { fromLocation: "__no_plant_mapped__" }
+      );
+    }
+    if (toLocationFilter || toLocationPlant || toLocationCode) {
+      delete where.toLocation;
+      secAnd.push(
+        mySecPlants.length > 0
+          ? { OR: plantsWhereOr("toLocation", mySecPlants) }
+          : { toLocation: "__no_plant_mapped__" }
+      );
+    }
+    if (secAnd.length > 0) (where as any).AND = secAnd;
+  }
 
   if (passType) where.passType = passType;
 
@@ -245,7 +319,7 @@ export async function GET(req: NextRequest) {
   // Approver queue: when querying PENDING_APPROVAL, also surface CASHIER_REVIEW passes
   // that have a pending credit component (mixed payment). Applies to all pass types so
   // that CUSTOMER_DELIVERY mixed-payment passes are visible alongside After Sales ones.
-  if (role === "APPROVER" && status === "PENDING_APPROVAL") {
+  if (isApproverRole(role) && status === "PENDING_APPROVAL") {
     delete (where as any).status;
     const approverName = (session.user as { name?: string | null }).name ?? "";
     const approverMatchFilter = approverName
@@ -296,6 +370,22 @@ export async function GET(req: NextRequest) {
     (where as any).updatedAt = { gte: new Date(updatedAfter) };
   }
 
+  // Test Drive has no Approver workflow at all — Approvers must never see OTHER people's Test
+  // Drive passes in any list (pending queue, approved history, or "All" tab), regardless of
+  // status. Exception: an Approver who created their own Test Drive pass (Approver-initiated
+  // gate passes) must still see it in their own records, exactly like every other pass type
+  // they've created — this mirrors ownCreatedFilter above.
+  if (isApproverRole(role)) {
+    const existingAnd = Array.isArray((where as any).AND) ? (where as any).AND : (where as any).AND ? [(where as any).AND] : [];
+    (where as any).AND = [
+      ...existingAnd,
+      { OR: [
+        { passType: { not: "TEST_DRIVE" } },
+        { passType: "TEST_DRIVE", createdById: session.user.id },
+      ]},
+    ];
+  }
+
   try {
     // Run these sequentially to avoid exhausting tiny pooled connection limits
     // during dev and high-concurrency dashboard loads.
@@ -343,7 +433,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
   const session = await getServerSession(authOptions);
-  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER"];
+  const allowedRoles = ["INITIATOR", "AREA_SALES_OFFICER", "SERVICE_ADVISOR", "CASHIER", "APPROVER"];
   if (!session || !allowedRoles.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -359,8 +449,61 @@ export async function POST(req: NextRequest) {
       if (!["SUB_IN", "SUB_OUT", "SUB_OUT_IN", "MAIN_OUT"].includes(body.passSubType)) {
         return NextResponse.json({ error: "Area Sales Officer can only create After Sales sub-passes" }, { status: 403 });
       }
-    } else {
+    } else if (body.passType !== "TEST_DRIVE") {
+      // Test Drive has no approver workflow for anyone (see isTestDrive below) — ASO can
+      // create it exactly like an Initiator does, no extra checks needed.
       return NextResponse.json({ error: "Unauthorized pass type for ASO" }, { status: 403 });
+    }
+  }
+
+  // Carrier mode: the driver must already exist in Driver Master Data and be mapped to the
+  // selected carrier — free-typed driver details are never accepted here. Enforced server-side
+  // so the UI's dropdown-only picker can never be bypassed by calling this API directly.
+  // Test Drive is unaffected — its own transportMode is always "DRIVER"/"CUSTOMER", never "CARRIER".
+  if (body.transportMode === "CARRIER") {
+    const carrierRegNo = typeof body.carrierRegNo === "string" ? body.carrierRegNo.trim() : "";
+    const driverNIC = typeof body.driverNIC === "string" ? body.driverNIC.trim() : "";
+    const invalidDriverError = "Please select a valid driver mapped to the selected carrier. Manually entered driver details are not allowed.";
+    if (!carrierRegNo || !driverNIC) {
+      return NextResponse.json({ error: invalidDriverError }, { status: 400 });
+    }
+    const carrier = await prisma.carrierOption.findFirst({ where: { registrationNo: { equals: carrierRegNo, mode: "insensitive" } } });
+    const driver = carrier ? await (prisma.driverOption as any).findFirst({ where: { nic: { equals: driverNIC, mode: "insensitive" } } }) : null;
+    if (!carrier || !driver || driver.carrierId !== carrier.id) {
+      return NextResponse.json({ error: invalidDriverError }, { status: 400 });
+    }
+    // Authoritative values from Master Data — never trust client-sent name/contact.
+    body.driverName = driver.name;
+    body.driverNIC = driver.nic;
+    body.driverContact = driver.contact ?? body.driverContact ?? null;
+  }
+
+  // LT Return Gate Pass leg only (identified by returnPassLocked, set only by that flow):
+  // its own Expected Arrival Date & Time must be strictly later than its own Estimated
+  // Departure Date & Time, AND that Estimated Departure must itself be strictly later than
+  // the first/outbound journey's own Expected Arrival (same date is fine, time must be later).
+  // Does not affect the original/outbound LT leg's own fields or validation.
+  if (body.passType === "LOCATION_TRANSFER" && body.returnPassLocked === true) {
+    if (body.departureDate && body.departureTime && body.arrivalDate && body.arrivalTime) {
+      const departureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+      const arrivalDT = new Date(`${body.arrivalDate}T${body.arrivalTime}:00`);
+      if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(arrivalDT.getTime()) && arrivalDT.getTime() <= departureDT.getTime()) {
+        return NextResponse.json({ error: "Return journey expected arrival must be after the return journey departure." }, { status: 400 });
+      }
+    }
+    if (body.parentPassId && body.departureDate && body.departureTime) {
+      const parentPass = await prisma.gatePass.findUnique({
+        where: { id: body.parentPassId as string },
+        select: { arrivalDate: true, arrivalTime: true },
+      });
+      if (parentPass?.arrivalDate && parentPass.arrivalTime) {
+        const firstArrivalDT = new Date(`${parentPass.arrivalDate}T${parentPass.arrivalTime}:00`);
+        const returnDepartureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+        if (!Number.isNaN(firstArrivalDT.getTime()) && !Number.isNaN(returnDepartureDT.getTime()) &&
+            returnDepartureDT.getTime() <= firstArrivalDT.getTime()) {
+          return NextResponse.json({ error: "Return journey departure must be after the first journey's expected arrival." }, { status: 400 });
+        }
+      }
     }
   }
 
@@ -390,13 +533,48 @@ export async function POST(req: NextRequest) {
   // - All other pass types → PENDING_APPROVAL (normal approval flow)
   const isAfterSalesMainOut = body.passType === "AFTER_SALES" && body.passSubType === "MAIN_OUT";
   const isAfterSalesSubPass = body.passType === "AFTER_SALES" && ["MAIN_IN", "SUB_IN", "SUB_OUT", "SUB_OUT_IN"].includes(body.passSubType);
+  // Test Drive: no approval workflow at all — goes straight to Security Gate Out, same as an already-approved pass.
+  const isTestDrive = body.passType === "TEST_DRIVE";
+
+  // Test Drive's own Driver/Customer fields are plain free-text inputs on the create form —
+  // enforce the same NIC/licence/phone format rules server-side so they can't be bypassed.
+  if (isTestDrive) {
+    const validNIC = (v: string) => /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+    const validLicenceNo = (v: string) => /^[A-Za-z][0-9]{7}$/.test(v.trim());
+    const validPhone = (v: string) => /^[0-9+\-\s]{7,15}$/.test(v.trim());
+    if (body.transportMode === "DRIVER") {
+      const driverNIC = typeof body.driverNIC === "string" ? body.driverNIC.trim() : "";
+      if (!driverNIC || (!validNIC(driverNIC) && !validLicenceNo(driverNIC))) {
+        return NextResponse.json({ error: "Invalid Driving Licence No. / NIC format for the Test Drive driver (e.g. 123456789V or B1234567)." }, { status: 400 });
+      }
+      if (body.driverContact && !validPhone(body.driverContact)) {
+        return NextResponse.json({ error: "Invalid driver contact number format." }, { status: 400 });
+      }
+    } else if (body.transportMode === "CUSTOMER") {
+      const customerNIC = typeof body.customerNIC === "string" ? body.customerNIC.trim() : "";
+      if (!customerNIC || !validNIC(customerNIC)) {
+        return NextResponse.json({ error: "Invalid Customer NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+      }
+      if (!body.customerContact || !validPhone(body.customerContact)) {
+        return NextResponse.json({ error: "Invalid customer contact number format." }, { status: 400 });
+      }
+    }
+    // Return Date & Time must always be strictly later than Gate Out Date & Time.
+    if (body.departureDate && body.departureTime && body.returnDate && body.returnTime) {
+      const departureDT = new Date(`${body.departureDate}T${body.departureTime}:00`);
+      const returnDT = new Date(`${body.returnDate}T${body.returnTime}:00`);
+      if (!Number.isNaN(departureDT.getTime()) && !Number.isNaN(returnDT.getTime()) && returnDT.getTime() <= departureDT.getTime()) {
+        return NextResponse.json({ error: "Return Date & Time must be later than the Gate Out Date & Time." }, { status: 400 });
+      }
+    }
+  }
 
   // Use max existing number (not count) to avoid collisions after deletions
   const lastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
   const lastNum = lastPass ? parseInt(lastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
   const gatePassNumber = `GP-${String(lastNum + 1).padStart(4, "0")}`;
 
-  const initialStatus = isAfterSalesSubPass ? "APPROVED" : "PENDING_APPROVAL";
+  const initialStatus = (isAfterSalesSubPass || isTestDrive) ? "APPROVED" : "PENDING_APPROVAL";
 
   const createData: Record<string, unknown> = {
     gatePassNumber,
@@ -429,18 +607,28 @@ export async function POST(req: NextRequest) {
     mileage: body.mileage || null,
     insurance: body.insurance || null,
     garagePlate: body.garagePlate || null,
+    remarks: body.remarks || null,
     comments: body.comments || null,
     passSubType: body.passSubType || null,
     paymentType: null, // Auto-detected from SAP payTerm when cashier processes
     parentPassId: body.parentPassId || null,
+    returnPassLocked: body.returnPassLocked || false,
     fromLocation: body.fromLocation || null,
     fromPlantCode: body.fromPlantCode || null,
     fromStorageLocation: body.fromStorageLocation || null,
     sapVehicleId: body.sapVehicleId || null,
     asoCreated: session.user.role === "AREA_SALES_OFFICER" && body.passType === "LOCATION_TRANSFER",
     createdById: session.user.id,
-    // Auto-approved After Sales sub-passes: set approvedAt so gate_out check works
-    ...(isAfterSalesSubPass ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
+    // Auto-approved After Sales sub-passes / Test Drive: set approvedAt so gate_out check works
+    ...((isAfterSalesSubPass || isTestDrive) ? { approvedAt: new Date(), approvedById: session.user.id } : {}),
+    // Test Drive only — no other pass type sends these
+    ...(isTestDrive ? {
+      returnDate: body.returnDate || null,
+      returnTime: body.returnTime || null,
+      customerName: body.customerName || null,
+      customerNIC: body.customerNIC || null,
+      customerContact: body.customerContact || null,
+    } : {}),
   };
 
   // Only include serviceJobNo for After Sales passes (field added via db push, stale client)
@@ -448,9 +636,26 @@ export async function POST(req: NextRequest) {
     createData.serviceJobNo = body.serviceJobNo;
   }
 
-  const gatePass = await (prisma.gatePass.create as any)({
-    data: createData,
-  });
+  // gatePassNumber is computed from "current max + 1" above, which is not atomic — two
+  // requests created close together (e.g. an LT Return Gate Pass's outbound leg immediately
+  // followed by its return leg) can both read the same max and collide on the same number.
+  // gatePassNumber is the only @unique field on GatePass, so a P2002 here can only be that
+  // collision — recompute a fresh number and retry rather than failing the request.
+  let gatePass;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      gatePass = await (prisma.gatePass.create as any)({ data: createData });
+      break;
+    } catch (e: any) {
+      if (e?.code === "P2002" && attempt < 4) {
+        const retryLastPass = await prisma.gatePass.findFirst({ orderBy: { gatePassNumber: "desc" } });
+        const retryLastNum = retryLastPass ? parseInt(retryLastPass.gatePassNumber.replace(/^GP-/, ""), 10) || 0 : 0;
+        createData.gatePassNumber = `GP-${String(retryLastNum + 1).padStart(4, "0")}`;
+        continue;
+      }
+      throw e;
+    }
+  }
 
   // Notify the "Requested By" person (if selected from AD and email is known)
   if (createData.requestedByEmail && createData.requestedBy) {
@@ -473,162 +678,122 @@ export async function POST(req: NextRequest) {
     ).catch((e: unknown) => console.error("[email] requestedBy notification failed:", e));
   }
 
-  // CUSTOMER_DELIVERY: route based on SAP isHappyPath (FS §2.4)
-  // Happy path (hstat=H070, fkart=ZSF2|ZVVO, zterm=ZC01, !cancelled) → ALL orders happy → Cashier
-  // Any non-happy order, or no orders → Approver (PENDING_APPROVAL)
-  // SAP fetch error → show error notification to initiator, route to Approver
-  if (body.passType === "CUSTOMER_DELIVERY") {
-    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
-    const approverLocation = (createData.fromLocation as string | null) ?? null;
-    const creatorName = session.user.name || "Unknown";
-
-    // Helper: route to Approver with correct payment type labels derived from actual zterm values
-    async function routeToApprover(
-      message: string,
-      opts: { hasImmediate?: boolean; hasCredit?: boolean; paymentType?: string } = {}
-    ) {
-      const ptImmediate = opts.hasImmediate ?? false;
-      const ptCredit    = opts.hasCredit    ?? true;
-      const ptType      = opts.paymentType  ?? "CREDIT";
-      await prisma.gatePass.update({
-        where: { id: gatePass.id },
-        data: {
-          status: "PENDING_APPROVAL",
-          paymentType: ptType,
-          hasImmediate: ptImmediate,
-          hasCredit: ptCredit,
-          creditApproved: false,
-        },
+  // Test Drive: Return Time selected beyond the 1-hour cap is allowed (not blocked),
+  // but the Initiator and their Reporting Manager get notified in-app + by email.
+  if (isTestDrive && body.returnTimeExceeded) {
+    try {
+      const initiator = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { id: true, name: true, email: true, approver: { select: { id: true, name: true, email: true } } },
       });
-      gatePass.status = "PENDING_APPROVAL";
-      let cdApprovers = selectedApproverName
-        ? await prisma.user.findMany({ where: { role: "APPROVER", name: { equals: selectedApproverName, mode: "insensitive" } } })
-        : await prisma.user.findMany({ where: { role: "APPROVER" } });
-      if (selectedApproverName && cdApprovers.length === 0) {
-        cdApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-      }
-      if (cdApprovers.length > 0) {
+      const recipients = [initiator, initiator?.approver].filter(
+        (u): u is { id: string; name: string; email: string } => !!u
+      );
+      if (recipients.length > 0) {
         await prisma.notification.createMany({
-          data: cdApprovers.map((a) => ({
-            userId: a.id,
-            type: "GATE_PASS_SUBMITTED",
-            title: "Customer Delivery Approval Required",
-            message,
-            gatePassId: gatePass.id,
-          })),
-        });
-        await sendApprovalEmailsToApprovers(cdApprovers, gatePass, creatorName);
-      }
-      const cdAdmins = await prisma.user.findMany({ where: { role: "ADMIN" } });
-      if (cdAdmins.length > 0) {
-        await prisma.notification.createMany({
-          data: cdAdmins.map((a) => ({
-            userId: a.id,
-            type: "GATE_PASS_SUBMITTED",
-            title: "New Customer Delivery Submitted",
-            message: `${creatorName} submitted ${gatePass.gatePassNumber} for approval.`,
+          data: recipients.map((u) => ({
+            userId: u.id,
+            type: "TEST_DRIVE_RETURN_TIME_EXCEEDED",
+            title: "Test Drive Return Time Exceeds 1 Hour",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) has a scheduled Return Time beyond the 1-hour Test Drive limit.`,
             gatePassId: gatePass.id,
           })),
         });
       }
+      for (const u of recipients) {
+        sendTestDriveReturnTimeExceededEmail(u.email, u.name, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          departureDate: gatePass.departureDate,
+          departureTime: gatePass.departureTime,
+          returnTime: gatePass.returnTime,
+        }).catch((e: unknown) => console.error("[email] Test Drive return-time-exceeded notification failed:", e));
+      }
+    } catch (e) {
+      console.error("[TEST_DRIVE] return-time-exceeded notification failed:", e);
     }
+  }
+
+  // CUSTOMER_DELIVERY: no Approver, no Cashier — every CD pass is auto-approved immediately
+  // and goes straight to Security (or the Initiator's own print) for Gate Out, regardless of
+  // happy path / unhappy path / immediate / credit. SAP order data (ServiceOrder rows,
+  // hasCredit/hasImmediate/paymentType) is still fetched and stored for record-keeping and
+  // later reconciliation — it just no longer decides the pass's status or who reviews it.
+  if (body.passType === "CUSTOMER_DELIVERY") {
+    const approverLocation = (createData.fromLocation as string | null) ?? null;
+
+    await prisma.gatePass.update({
+      where: { id: gatePass.id },
+      data: { status: "APPROVED", approvedAt: new Date(), approvedById: session.user.id },
+    });
+    gatePass.status = "APPROVED";
 
     try {
       const { fetchSapOrders } = await import("@/lib/sap");
       const chassisNo = (createData.chassis as string | null) ?? "";
       const plateNo   = (createData.vehicle as string) ?? "";
       const sapOrders = await fetchSapOrders(chassisNo, plateNo);
-      // Include all non-cancelled orders with an orderId
       const active = sapOrders.filter((o) => !o.cancelled && o.orderId);
 
-      if (active.length === 0) {
-        // No SAP orders → route to Approver (no zterm data, default CREDIT)
-        await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — no SAP orders found. Please review and approve.`);
-        return NextResponse.json({ gatePass }, { status: 201 });
-      }
+      if (active.length > 0) {
+        await prisma.serviceOrder.createMany({
+          data: active.map((o) => ({
+            gatePassId:      gatePass.id,
+            orderId:         o.orderId,
+            orderStatus:     o.orderStatus || o.orderStatusCode || "—",
+            orderStatusCode: o.orderStatusCode,
+            billingType:     o.billingType,
+            payTermCode:     o.payTermCode,
+            payTerm:         o.payTerm,
+            cancelled:       o.cancelled,
+            isHappyPath:     o.isHappyPath,
+            isAssigned:      false,
+          })),
+        });
 
-      // Store all orders with proper fields (no more HSTAT-format string)
-      await prisma.serviceOrder.createMany({
-        data: active.map((o) => ({
-          gatePassId:      gatePass.id,
-          orderId:         o.orderId,
-          orderStatus:     o.orderStatus || o.orderStatusCode || "—",
-          orderStatusCode: o.orderStatusCode,
-          billingType:     o.billingType,
-          payTermCode:     o.payTermCode,
-          payTerm:         o.payTerm,
-          cancelled:       o.cancelled,
-          isHappyPath:     o.isHappyPath,
-          isAssigned:      false,
-        })),
-      });
-
-      // Routing: ALL orders must be happy path for Immediate → Cashier
-      // Any non-happy-path order → Approver (no Mixed path)
-      const allImmediate = active.every((o) => o.isHappyPath);
-
-      // Payment type label is based on zterm alone (ZC01 = Immediate), independent of routing
-      const ztermHasImmediate = active.some((o) => o.payTermCode === "ZC01");
-      const ztermHasCredit    = active.some((o) => o.payTermCode !== "ZC01");
-      const ztermPaymentType  = ztermHasImmediate && ztermHasCredit ? "MIXED"
-                              : ztermHasImmediate ? "IMMEDIATE"
-                              : "CREDIT";
-
-      if (allImmediate) {
-        // All happy path → Cashier
+        // Payment type label recorded for reporting/reconciliation only — does not affect routing.
+        const ztermHasImmediate = active.some((o) => o.payTermCode === "ZC01");
+        const ztermHasCredit    = active.some((o) => o.payTermCode !== "ZC01");
+        const ztermPaymentType  = ztermHasImmediate && ztermHasCredit ? "MIXED"
+                                : ztermHasImmediate ? "IMMEDIATE"
+                                : "CREDIT";
         await prisma.gatePass.update({
           where: { id: gatePass.id },
-          data: { status: "CASHIER_REVIEW", paymentType: "IMMEDIATE", hasImmediate: true, cashierCleared: false },
+          data: { paymentType: ztermPaymentType, hasImmediate: ztermHasImmediate, hasCredit: ztermHasCredit },
         });
-        gatePass.status = "CASHIER_REVIEW";
-        const cashiers = await getCashiersForLocation(approverLocation);
-        if (cashiers.length > 0) {
-          await prisma.notification.createMany({
-            data: cashiers.map((c) => ({
-              userId: c.id,
-              type: "CASHIER_REVIEW_REQUIRED",
-              title: "CD Payment Clearance Required",
-              message: `${gatePassNumber} (${gatePass.vehicle}) — Customer Delivery, immediate payment. Please confirm payment clearance.`,
-              gatePassId: gatePass.id,
-            })),
-          });
-        }
-        return NextResponse.json({ gatePass }, { status: 201 });
-      } else {
-        // One or more non-happy-path orders → Approver
-        // Label reflects actual zterm (ZC01 = Immediate, other = Credit)
-        const approverMsg = ztermHasImmediate && !ztermHasCredit
-          ? `${gatePassNumber} (${gatePass.vehicle}) — immediate payment order not yet fully invoiced (billing pending). Please review and approve.`
-          : `${gatePassNumber} (${gatePass.vehicle}) — credit payment terms detected. Please review and approve.`;
-        await routeToApprover(approverMsg, {
-          hasImmediate: ztermHasImmediate,
-          hasCredit:    ztermHasCredit,
-          paymentType:  ztermPaymentType,
-        });
-        return NextResponse.json({ gatePass }, { status: 201 });
       }
     } catch (err) {
-      // SAP fetch failed — notify initiator and route to Approver as safe default
-      console.error("[CD] SAP fetch error:", err);
-      await prisma.notification.create({
-        data: {
-          userId: gatePass.createdById,
-          type: "GATE_PASS_SUBMITTED",
-          title: "SAP Order Lookup Failed",
-          message: `Gate pass ${gatePassNumber} was created but SAP order data could not be retrieved. The pass has been sent to an approver for manual review.`,
-          gatePassId: gatePass.id,
-        },
-      });
-      await routeToApprover(`${gatePassNumber} (${gatePass.vehicle}) — SAP order lookup failed. Please review manually.`);
-      return NextResponse.json({ gatePass }, { status: 201 });
+      // Record-keeping only — a SAP lookup failure never blocks or reroutes the pass.
+      console.error("[CD] SAP order lookup failed (record-keeping only; pass proceeds to Security):", err);
     }
+
+    const cdExtraSecIds = approverLocation ? await findExtraMappedUserIds("SECURITY_OFFICER", approverLocation) : [];
+    const secWhere = approverLocation
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: approverLocation }, ...(cdExtraSecIds.length > 0 ? [{ id: { in: cdExtraSecIds } }] : [])] }
+      : { role: "SECURITY_OFFICER" as any };
+    const secOfficers = await prisma.user.findMany({ where: secWhere });
+    if (secOfficers.length > 0) {
+      await prisma.notification.createMany({
+        data: secOfficers.map((s: { id: string }) => ({
+          userId: s.id,
+          type: "GATE_PASS_APPROVED",
+          title: "Customer Delivery Approved — Confirm Gate OUT",
+          message: `${gatePassNumber} (${gatePass.vehicle}) — customer delivery approved. Please confirm Gate OUT.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
+
+    return NextResponse.json({ gatePass }, { status: 201 });
   }
 
   // MAIN_IN created: notify Security Officers at fromLocation (initiator's DIMO location — vehicle arriving for service)
   if (body.passType === "AFTER_SALES" && body.passSubType === "MAIN_IN") {
     const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const mainInExtraSecIds = fromLoc ? await findExtraMappedUserIds("SECURITY_OFFICER", fromLoc) : [];
     const secWhere = fromLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: fromLoc }, ...(mainInExtraSecIds.length > 0 ? [{ id: { in: mainInExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const secOfficers = await prisma.user.findMany({ where: secWhere });
     if (secOfficers.length > 0) {
@@ -648,8 +813,9 @@ export async function POST(req: NextRequest) {
   // SUB_OUT created: notify Security Officers at fromLocation (vehicle leaving DIMO to sub-location)
   if (body.passType === "AFTER_SALES" && body.passSubType === "SUB_OUT") {
     const fromLoc = (createData.fromLocation as string | null) ?? null;
+    const subOutExtraSecIds = fromLoc ? await findExtraMappedUserIds("SECURITY_OFFICER", fromLoc) : [];
     const secWhere = fromLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: fromLoc }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: fromLoc }, ...(subOutExtraSecIds.length > 0 ? [{ id: { in: subOutExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const secOfficers = await prisma.user.findMany({ where: secWhere });
     if (secOfficers.length > 0) {
@@ -772,30 +938,41 @@ export async function POST(req: NextRequest) {
   }
 
   // Notify selected approver if provided; otherwise notify all APPROVERs.
-  const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
-  let approvers = selectedApproverName
-    ? await prisma.user.findMany({
-        where: {
-          role: "APPROVER",
-          name: { equals: selectedApproverName, mode: "insensitive" },
-        },
-      })
-    : await prisma.user.findMany({ where: { role: "APPROVER" } });
+  // Test Drive has no approval workflow at all (see isTestDrive above, which auto-approves
+  // it at creation) — it must never notify, email, or otherwise involve any Approver.
+  let approvers: { id: string; email: string; name: string }[] = [];
+  if (!isTestDrive) {
+    const selectedApproverName = typeof body.approver === "string" ? body.approver.trim() : "";
+    // An Approver initiating their own gate pass must never route to (or notify) a normal
+    // Approver — it goes only to whichever Special Approver they're mapped to.
+    const approverRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+    approvers = selectedApproverName
+      ? await prisma.user.findMany({
+          where: {
+            role: approverRole as any,
+            name: { equals: selectedApproverName, mode: "insensitive" },
+          },
+        })
+      : await prisma.user.findMany({ where: { role: approverRole as any } });
 
-  if (selectedApproverName && approvers.length === 0) {
-    approvers = await prisma.user.findMany({ where: { role: "APPROVER" } });
-  }
+    // Approver-initiated passes must go only to the specifically selected Special Approver —
+    // never fall back to notifying every Special Approver if the exact match comes up empty.
+    // Every other creator role keeps the existing "fall back to notify everyone" behavior.
+    if (selectedApproverName && approvers.length === 0 && session.user.role !== "APPROVER") {
+      approvers = await prisma.user.findMany({ where: { role: approverRole as any } });
+    }
 
-  if (approvers.length > 0) {
-    await prisma.notification.createMany({
-      data: approvers.map((a) => ({
-        userId: a.id,
-        type: "GATE_PASS_SUBMITTED",
-        title: "New Gate Pass Submitted",
-        message: `${session.user.name} submitted ${gatePassNumber} for approval.`,
-        gatePassId: gatePass.id,
-      })),
-    });
+    if (approvers.length > 0) {
+      await prisma.notification.createMany({
+        data: approvers.map((a) => ({
+          userId: a.id,
+          type: "GATE_PASS_SUBMITTED",
+          title: "New Gate Pass Submitted",
+          message: `${session.user.name} submitted ${gatePassNumber} for approval.`,
+          gatePassId: gatePass.id,
+        })),
+      });
+    }
   }
 
   // Notify ADMIN users so the dot indicator appears on their dashboard
@@ -812,14 +989,24 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+  // LT Return Gate Pass: the return leg is created locked and can't actually be approved
+  // until its outbound leg completes — sending "please approve" now would be premature and
+  // misleading. Suppress it here; it's sent later (see sendReturnLegApprovalEmails in
+  // app/api/gate-pass/[id]/status/route.ts) once the outbound leg completes and this unlocks.
+  if (createData.returnPassLocked !== true) {
+    await sendApprovalEmailsToApprovers(approvers, gatePass, session.user.name || "Unknown");
+  }
 
   // LT: notify ASOs at fromLocation when pass is created by a non-ASO
   if (body.passType === "LOCATION_TRANSFER" && !gatePass.asoCreated && gatePass.fromLocation) {
     const fromAsoFilter = ciStartsWithPlant(gatePass.fromLocation as string);
     if (fromAsoFilter) {
+      const ltExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation as string);
       const fromAsos = await prisma.user.findMany({
-        where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilter },
+        where: {
+          role: "AREA_SALES_OFFICER" as any,
+          OR: [{ defaultLocation: fromAsoFilter }, ...(ltExtraAsoIds.length > 0 ? [{ id: { in: ltExtraAsoIds } }] : [])],
+        },
         select: { id: true },
       });
       if (fromAsos.length > 0) {

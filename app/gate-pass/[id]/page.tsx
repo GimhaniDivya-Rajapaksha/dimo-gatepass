@@ -6,6 +6,7 @@ import TimePicker from "@/components/ui/TimePicker";
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "next-auth/react";
+import { isApproverRole } from "@/lib/roles";
 
 type SubPassSummary = {
   id: string; gatePassNumber: string; passSubType: string | null; status: string;
@@ -21,8 +22,9 @@ type GatePassDetail = {
   requestedBy: string | null; outReason: string | null; transportMode: string | null;
   companyName: string | null; carrierName: string | null; carrierRegNo: string | null;
   driverName: string | null; driverNIC: string | null; driverContact: string | null;
+  driverLicenceNo: string | null; gateOutBy: string | null; returnPassLocked: boolean;
   mileage: string | null; insurance: string | null; garagePlate: string | null;
-  comments: string | null; rejectionReason: string | null;
+  comments: string | null; remarks: string | null; rejectionReason: string | null;
   resubmitCount: number; resubmitNote: string | null;
   intendedApprover: string | null; previousApprover: string | null; approverChangeReason: string | null;
   paymentType: string | null;
@@ -371,6 +373,179 @@ function InitiatorGatePassDetailPageInner() {
   const [escalationResubmitted, setEscalationResubmitted] = useState(false);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
+  // ── Change Driver / Carrier — fully isolated from every existing action on this page ──
+  type DriverChangeLogEntry = { id: string; previousData: { driverName: string | null; driverNIC: string | null; companyName?: string | null }; newData: { driverName: string | null; driverNIC: string | null; companyName?: string | null }; reason: string | null; changedByName: string; createdAt: string };
+  type DriverOptionResult = { id: string; value: string; label: string; driverName?: string; driverNIC?: string; driverContact?: string; driverLicenceNo?: string };
+  type CarrierOptionResult = { id: string; value: string; label: string; companyName?: string };
+  const [driverChangeInfo, setDriverChangeInfo] = useState<{ canEdit: boolean; changeLogs: DriverChangeLogEntry[] } | null>(null);
+  const [driverChangeModalOpen, setDriverChangeModalOpen] = useState(false);
+  const [carrierSearchQuery, setCarrierSearchQuery] = useState("");
+  const [carrierSearchResults, setCarrierSearchResults] = useState<CarrierOptionResult[]>([]);
+  const [selectedCarrier, setSelectedCarrier] = useState<{ id: string; companyName: string; registrationNo: string } | null>(null);
+  const [driverSearchQuery, setDriverSearchQuery] = useState("");
+  const [driverSearchResults, setDriverSearchResults] = useState<DriverOptionResult[]>([]);
+  const [selectedNewDriver, setSelectedNewDriver] = useState<{ name: string; nic: string; licenceNo: string } | null>(null);
+  const [showAddNewDriver, setShowAddNewDriver] = useState(false);
+  const [newDriverForm, setNewDriverForm] = useState({ name: "", nic: "", licenceNo: "", contact: "" });
+  const [driverChangeReason, setDriverChangeReason] = useState("");
+  const [driverChangeLoading, setDriverChangeLoading] = useState(false);
+  const [driverChangeError, setDriverChangeError] = useState("");
+
+  const refreshDriverChangeInfo = useRef<() => void>(() => {});
+  refreshDriverChangeInfo.current = () => {
+    fetch(`/api/gate-pass/${id}/driver-update`)
+      .then(r => r.ok ? r.json() : null)
+      .then(json => { if (json) setDriverChangeInfo({ canEdit: json.canEdit, changeLogs: json.changeLogs }); })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!data?.id) return;
+    refreshDriverChangeInfo.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.id, data?.status, data?.gateOutBy]);
+
+  async function loadDriverOptions(q: string, carrierId: string | null) {
+    try {
+      const url = `/api/lookups?field=driverNIC&q=${encodeURIComponent(q)}&limit=50${carrierId ? `&carrierId=${carrierId}` : ""}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        setDriverSearchResults(json.options ?? []);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  async function loadCarrierOptions(q: string) {
+    try {
+      const res = await fetch(`/api/lookups?field=companyName&q=${encodeURIComponent(q)}&limit=50`);
+      if (res.ok) {
+        const json = await res.json();
+        setCarrierSearchResults(json.options ?? []);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  async function searchCarriers(q: string) {
+    setCarrierSearchQuery(q);
+    void loadCarrierOptions(q);
+  }
+
+  function pickCarrier(o: CarrierOptionResult) {
+    const registrationNo = (o as { registrationNo?: string }).registrationNo ?? o.value;
+    setSelectedCarrier({ id: o.id, companyName: o.companyName ?? o.value, registrationNo });
+    setCarrierSearchResults([]);
+    setCarrierSearchQuery(o.companyName ?? o.value);
+    // Changing carrier invalidates the previously selected driver — refilter to the new carrier.
+    setSelectedNewDriver(null);
+    setDriverSearchQuery("");
+    void loadDriverOptions("", o.id);
+  }
+
+  async function openDriverChangeModal() {
+    setDriverChangeModalOpen(true);
+    setDriverChangeError("");
+    setSelectedNewDriver(null);
+    setShowAddNewDriver(false);
+    setNewDriverForm({ name: "", nic: "", licenceNo: "", contact: "" });
+    setDriverChangeReason("");
+    setDriverSearchQuery("");
+    setDriverSearchResults([]);
+    setSelectedCarrier(null);
+    setCarrierSearchQuery(data?.companyName ?? "");
+    setCarrierSearchResults([]);
+    let resolvedCarrierId: string | null = null;
+    if (data?.carrierRegNo) {
+      try {
+        const res = await fetch(`/api/lookups?field=carrierRegNo&q=${encodeURIComponent(data.carrierRegNo)}&limit=5`);
+        if (res.ok) {
+          const json = await res.json();
+          const match = (json.options ?? []).find((o: { value: string }) => o.value === data.carrierRegNo);
+          if (match) {
+            resolvedCarrierId = match.id;
+            setSelectedCarrier({ id: match.id, companyName: match.companyName ?? data.companyName ?? "", registrationNo: match.value });
+          }
+        }
+      } catch { /* carrier not resolvable from master data — driver list stays unfiltered */ }
+    }
+    // Preload the full driver list (from master data, filtered to this carrier when resolved)
+    // so the picker behaves as a browsable dropdown, not just a type-to-search box.
+    void loadDriverOptions("", resolvedCarrierId);
+    // Same for Carrier Company — browsable on open instead of requiring the user to type first.
+    void loadCarrierOptions("");
+  }
+
+  async function searchDrivers(q: string) {
+    setDriverSearchQuery(q);
+    setSelectedNewDriver(null);
+    void loadDriverOptions(q, selectedCarrier?.id ?? null);
+  }
+
+  function pickDriver(o: DriverOptionResult) {
+    setSelectedNewDriver({ name: o.driverName ?? o.value, nic: o.driverNIC ?? o.value, licenceNo: o.driverLicenceNo ?? "" });
+    setDriverSearchResults([]);
+    setDriverSearchQuery(`${o.driverNIC ?? o.value} — ${o.driverName ?? ""}`);
+  }
+
+  async function submitNewDriver() {
+    setDriverChangeError("");
+    if (!selectedCarrier) {
+      setDriverChangeError("Please select a Carrier Company first — a driver must be assigned to a carrier.");
+      return;
+    }
+    const { name, nic, licenceNo, contact } = newDriverForm;
+    if (!name.trim() || !nic.trim() || !licenceNo.trim()) {
+      setDriverChangeError("Name, NIC, and Driving Licence No. are all required to add a new driver.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/lookups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field: "driver", name, nic, licenceNo, contact, carrierId: selectedCarrier.id }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setDriverChangeError(json.error || "Failed to add driver."); return; }
+      setSelectedNewDriver({ name: json.option.name, nic: json.option.nic, licenceNo: json.option.licenceNo ?? licenceNo });
+      setShowAddNewDriver(false);
+      setDriverSearchQuery(`${json.option.nic} — ${json.option.name}`);
+    } catch {
+      setDriverChangeError("Failed to add driver.");
+    }
+  }
+
+  async function handleDriverChangeSubmit() {
+    if (!selectedNewDriver || !selectedCarrier || !data) return;
+    setDriverChangeLoading(true);
+    setDriverChangeError("");
+    try {
+      const res = await fetch(`/api/gate-pass/${data.id}/driver-update`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverName: selectedNewDriver.name,
+          driverNIC: selectedNewDriver.nic,
+          driverLicenceNo: selectedNewDriver.licenceNo,
+          companyName: selectedCarrier.companyName,
+          carrierRegNo: selectedCarrier.registrationNo,
+          reason: driverChangeReason || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setDriverChangeError(json.error || "Failed to update driver."); return; }
+      // Refetch via the same endpoint the page normally loads from — the bare PATCH response
+      // lacks the createdBy/approvedBy/subPasses relations the rest of this page relies on.
+      const refreshed = await fetch(`/api/gate-pass/${id}/sub-passes`).then(r => r.ok ? r.json() : null).catch(() => null);
+      if (refreshed?.pass) setData(refreshed.pass);
+      setDriverChangeModalOpen(false);
+      refreshDriverChangeInfo.current();
+    } catch {
+      setDriverChangeError("Failed to update driver.");
+    } finally {
+      setDriverChangeLoading(false);
+    }
+  }
+
   useEffect(() => {
     fetch(`/api/gate-pass/${id}/sub-passes`)
       .then((r) => r.json())
@@ -431,8 +606,8 @@ function InitiatorGatePassDetailPageInner() {
 
   async function handlePrintGatePass(writeSap = true) {
     if (!data) return;
-    // APPROVED LT/CD: printing counts as Gate OUT — update status before printing
-    if (data.status === "APPROVED" && (data.passType === "LOCATION_TRANSFER" || data.passType === "CUSTOMER_DELIVERY")) {
+    // APPROVED LT/CD/Test Drive: printing counts as Gate OUT — update status before printing
+    if (data.status === "APPROVED" && (data.passType === "LOCATION_TRANSFER" || data.passType === "CUSTOMER_DELIVERY" || data.passType === "TEST_DRIVE")) {
       try {
         const res = await fetch(`/api/gate-pass/${id}/status`, {
           method: "PATCH",
@@ -748,11 +923,22 @@ function InitiatorGatePassDetailPageInner() {
     ? { ...rawSc, label: "Gate In" }
     : rawSc;
   const isLT = data.passType === "LOCATION_TRANSFER";
+  // Check if current user created this pass (to determine gate_out eligibility, cancel eligibility)
+  const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
+  // /sub-passes (this page's data source) only selects createdBy.name, not id/email, so
+  // isCreator above is always false in practice — it's left untouched here since it also
+  // gates several existing Location Transfer / Customer Delivery / After Sales branches
+  // further down this page, and fixing its data source would change what Initiators see
+  // there. This name-based match is used only for the Approver cancel/resubmit checks below.
+  const isCreatorByName = (data.createdBy.name ?? "").trim().toLowerCase() === (session?.user?.name ?? "").trim().toLowerCase();
+  // An Approver who created their own pass (Approver-initiated gate passes) can cancel it
+  // exactly like an Initiator/ASO would, but only their own — never someone else's pass
+  // they're merely reviewing.
   const canCancel  = (
     data.status === "PENDING_APPROVAL" ||
     (data.passType === "CUSTOMER_DELIVERY" && data.status === "CASHIER_REVIEW")
-  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER");
-  const isApproverView = role === "APPROVER" || role === "ADMIN";
+  ) && (role === "INITIATOR" || role === "AREA_SALES_OFFICER" || (role === "APPROVER" && isCreatorByName));
+  const isApproverView = isApproverRole(role) || role === "ADMIN";
   // True if this approver is specifically assigned to this gate pass.
   // null intendedApprover means old pass (no selection stored) — allow any approver.
   const isIntendedApprover = role === "ADMIN" || !data.intendedApprover ||
@@ -781,8 +967,6 @@ function InitiatorGatePassDetailPageInner() {
   );
   const isASO = role === "AREA_SALES_OFFICER";
   const pendingApproval = data.status === "PENDING_APPROVAL";
-  // Check if current user created this pass (to determine gate_out eligibility)
-  const isCreator = data.createdBy.id === session?.user?.id || data.createdBy.email === session?.user?.email;
   // ASO LT: can operate the Vehicle Go slider if they created it OR are the requestedBy app user
   const isAsoLtPass = (data as any).asoCreated === true && data.passType === "LOCATION_TRANSFER";
   const isRequestedByUser = (data as any).requestedByEmail && session?.user?.email === (data as any).requestedByEmail &&
@@ -811,6 +995,7 @@ function InitiatorGatePassDetailPageInner() {
     { label: "Company Name", value: data.companyName },
     { label: "Driver Name", value: data.driverName },
     { label: "Driver NIC No", value: data.driverNIC },
+    { label: "Driving Licence No.", value: data.driverLicenceNo },
     { label: "Driver Contact", value: data.driverContact },
   ].filter((field) => hasDisplayValue(field.value));
   const hasTransportationMode = hasDisplayValue(data.transportMode);
@@ -866,10 +1051,15 @@ function InitiatorGatePassDetailPageInner() {
           .print-doc .p-3  { padding: 4px 8px !important; }
           .print-doc .p-4  { padding: 5px 10px !important; }
           .print-doc .p-5  { padding: 6px 12px !important; }
+          .print-doc .py-2 { padding-top: 2px !important; padding-bottom: 2px !important; }
           .print-doc .py-3 { padding-top: 3px !important; padding-bottom: 3px !important; }
+          .print-doc .py-4 { padding-top: 4px !important; padding-bottom: 4px !important; }
           .print-doc .px-6 { padding-left: 10px !important; padding-right: 10px !important; }
           .print-doc .gap-3 { gap: 4px !important; }
           .print-doc .gap-4 { gap: 5px !important; }
+          .print-doc .mt-6 { margin-top: 6px !important; }
+          .print-doc .mt-4 { margin-top: 4px !important; }
+          .print-doc .pt-4 { padding-top: 4px !important; }
 
           /* Signature row */
           .print-sig { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #d1d5db !important; }
@@ -884,14 +1074,14 @@ function InitiatorGatePassDetailPageInner() {
         {/* Print-only header */}
         <div className="hidden print:block mb-5">
           <div className="flex items-start justify-between pb-2 mb-3" style={{ borderBottom: "2px solid #0d1b3e" }}>
-            <div>
+            <div style={{ minWidth: 0, flex: "1 1 auto", paddingRight: "10px" }}>
               <p style={{ color: "#0d1b3e", fontSize: "7.5pt", fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase" }}>DIMO Gate Pass System</p>
-              <h1 style={{ color: "#0d1b3e", fontSize: "15pt", fontWeight: 700, marginTop: "1px" }}>
-                {isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"} — Gate Pass
+              <h1 style={{ color: "#0d1b3e", fontSize: "15pt", fontWeight: 700, marginTop: "1px", wordBreak: "break-word" }}>
+                {data.passType === "TEST_DRIVE" ? "Gate Pass for Test Drive" : `${isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"} — Gate Pass`}
               </h1>
             </div>
-            <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt" }}>
-              <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{data.parentPass?.gatePassNumber ?? data.gatePassNumber}</p>
+            <div className="text-right" style={{ color: "#6b7280", fontSize: "8pt", flexShrink: 0, whiteSpace: "nowrap" }}>
+              <p style={{ color: "#0d1b3e", fontWeight: 700, fontSize: "11pt" }}>{(data.passType === "AFTER_SALES" ? data.parentPass?.gatePassNumber : null) ?? data.gatePassNumber}</p>
               <p>Status: {sc.label}</p>
               <p>Printed: {new Date().toLocaleString()}</p>
             </div>
@@ -931,7 +1121,7 @@ function InitiatorGatePassDetailPageInner() {
           </button>
           <div className="flex-1">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate Pass {data.parentPass?.gatePassNumber ?? data.gatePassNumber}</h1>
+              <h1 className="text-xl font-bold" style={{ color: "var(--text)" }}>Gate Pass {(data.passType === "AFTER_SALES" ? data.parentPass?.gatePassNumber : null) ?? data.gatePassNumber}</h1>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold" style={{ background: sc.bg, color: sc.color }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc.dot }} />
                 {sc.label}
@@ -942,7 +1132,7 @@ function InitiatorGatePassDetailPageInner() {
               <span className="w-1 h-1 rounded-full" style={{ background: "var(--border)" }} />
               <span>{new Date(data.createdAt).toLocaleString()}</span>
               <span className="px-2 py-0.5 rounded-md font-medium" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
-                {isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : "Customer Delivery"}
+                {isLT ? "Location Transfer" : data.passType === "AFTER_SALES" ? "After Sales" : data.passType === "TEST_DRIVE" ? "Test Drive" : "Customer Delivery"}
               </span>
             </div>
             {data.approvedBy && data.passType !== "AFTER_SALES" && (
@@ -1063,6 +1253,48 @@ function InitiatorGatePassDetailPageInner() {
                 ))}
               </div>
             )}
+
+            {driverChangeInfo?.canEdit && (
+              <div className="mt-4 no-print">
+                <button
+                  type="button"
+                  onClick={() => void openDriverChangeModal()}
+                  className="text-xs font-bold px-3.5 py-2 rounded-lg border transition-all hover:opacity-90"
+                  style={{ borderColor: "#2563eb", color: "#fff", background: "#2563eb" }}
+                >
+                  Change Driver / Carrier
+                </button>
+              </div>
+            )}
+
+            {driverChangeInfo && driverChangeInfo.changeLogs.length > 0 && (
+              <div className="mt-4 pt-4 no-print" style={{ borderTop: "1px solid var(--border)" }}>
+                <p className="text-xs font-bold uppercase tracking-widest mb-2.5" style={{ color: "var(--text-muted)" }}>Driver / Carrier Change History</p>
+                <div className="space-y-2">
+                  {driverChangeInfo.changeLogs.map((log) => {
+                    const carrierChanged = (log.previousData.companyName ?? null) !== (log.newData.companyName ?? null) && (log.newData.companyName || log.previousData.companyName);
+                    return (
+                      <div key={log.id} className="text-xs rounded-lg px-3 py-2" style={{ background: "var(--surface2)", color: "var(--text-muted)" }}>
+                        <span style={{ color: "var(--text)" }}>
+                          {log.previousData.driverName ?? "—"} ({log.previousData.driverNIC ?? "—"}) &rarr; {log.newData.driverName ?? "—"} ({log.newData.driverNIC ?? "—"})
+                        </span>
+                        {carrierChanged && (
+                          <>
+                            <br />
+                            <span style={{ color: "var(--text)" }}>
+                              Carrier: {log.previousData.companyName ?? "—"} &rarr; {log.newData.companyName ?? "—"}
+                            </span>
+                          </>
+                        )}
+                        <br />
+                        Changed by {log.changedByName} on {new Date(log.createdAt).toLocaleString()}
+                        {log.reason ? <> — {log.reason}</> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </Section>
         )}
 
@@ -1073,6 +1305,12 @@ function InitiatorGatePassDetailPageInner() {
             ))}
           </Section>
         )}
+
+        {/* Remarks — always shown (even empty) on both screen and print, unlike the optional
+            fields above which hide entirely when blank. */}
+        <Section title="Remarks">
+          <Field label="Remarks" value={data.remarks} />
+        </Section>
 
         {(() => {
           const clean = data.comments
@@ -1362,8 +1600,11 @@ function InitiatorGatePassDetailPageInner() {
           </div>
         )}
 
-        {/* Resubmit Banner — shown to initiator when pass is rejected */}
-        {!isApproverView && data.status === "REJECTED" && (
+        {/* Resubmit Banner — shown to the creator when their pass is rejected. An Approver who
+            created their own pass (Approver-initiated gate passes) must see this too, even
+            though isApproverView is otherwise true for them — isCreatorByName overrides that
+            here (see its definition above for why isCreator itself isn't used). */}
+        {(!isApproverView || isCreatorByName) && data.status === "REJECTED" && (
           <div className="mb-4 rounded-2xl border overflow-hidden no-print" style={{ borderColor: "#fca5a5" }}>
             <div className="px-5 py-3 flex items-center gap-2" style={{ background: "#fef2f2" }}>
               <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#ef4444" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1419,7 +1660,7 @@ function InitiatorGatePassDetailPageInner() {
             </button>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {isInitiatorView && fromPrintIcon && (
+            {(isInitiatorView || (role === "APPROVER" && isCreatorByName)) && fromPrintIcon && (
               <button type="button" onClick={(e) => {
                   e.stopPropagation();
                   if (data?.passType === "LOCATION_TRANSFER" || data?.passType === "CUSTOMER_DELIVERY") {
@@ -2547,6 +2788,155 @@ function InitiatorGatePassDetailPageInner() {
                   style={{ background: "linear-gradient(135deg,#7f1d1d,#dc2626)" }}
                 >
                   Yes, Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Change Driver Modal (Approved onward; carrier/vehicle/destination/approver stay frozen) ── */}
+      <AnimatePresence>
+        {driverChangeModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+            onClick={() => !driverChangeLoading && setDriverChangeModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 320, damping: 28 }}
+              className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-5" style={{ background: "var(--surface2)" }}>
+                <p className="text-sm font-black" style={{ color: "var(--text)" }}>Change Driver / Carrier</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  Only Driver and Carrier can be updated here. All other details (vehicle, destination, approver) stay locked.
+                </p>
+              </div>
+              <div className="px-6 py-5 space-y-4" style={{ maxHeight: "65vh", overflowY: "auto" }}>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: "var(--text-muted)" }}>
+                    Carrier Company
+                  </label>
+                  <input
+                    type="text" value={carrierSearchQuery}
+                    onChange={(e) => void searchCarriers(e.target.value)}
+                    placeholder="Search carrier company..."
+                    className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                  />
+                  {carrierSearchResults.length > 0 && (
+                    <div className="mt-1.5 rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)", maxHeight: 180, overflowY: "auto" }}>
+                      {carrierSearchResults.map((o) => (
+                        <button key={o.id} type="button" onClick={() => pickCarrier(o)}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:opacity-80"
+                          style={{ color: "var(--text)", background: "var(--surface)" }}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {selectedCarrier && (
+                    <div className="mt-2 text-xs rounded-lg px-3 py-2" style={{ background: "#eff6ff", color: "#1d4ed8" }}>
+                      Selected: {selectedCarrier.companyName} — {selectedCarrier.registrationNo}
+                    </div>
+                  )}
+                </div>
+
+                {!showAddNewDriver ? (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: "var(--text-muted)" }}>
+                      Search Driver (NIC or Name)
+                    </label>
+                    <input
+                      type="text" value={driverSearchQuery}
+                      onChange={(e) => void searchDrivers(e.target.value)}
+                      placeholder="Type NIC or driver name..."
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                    {driverSearchResults.length > 0 && (
+                      <div className="mt-1.5 rounded-xl border overflow-hidden" style={{ borderColor: "var(--border)", maxHeight: 180, overflowY: "auto" }}>
+                        {driverSearchResults.map((o) => (
+                          <button key={o.id} type="button" onClick={() => pickDriver(o)}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:opacity-80"
+                            style={{ color: "var(--text)", background: "var(--surface)" }}>
+                            {o.driverNIC ?? o.value} — {o.driverName ?? ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedNewDriver && (
+                      <div className="mt-2 text-xs rounded-lg px-3 py-2" style={{ background: "#f0fdf4", color: "#15803d" }}>
+                        Selected: {selectedNewDriver.name} ({selectedNewDriver.nic}){selectedNewDriver.licenceNo ? ` — DL: ${selectedNewDriver.licenceNo}` : ""}
+                      </div>
+                    )}
+                    <button type="button" onClick={() => setShowAddNewDriver(true)} disabled={!selectedCarrier}
+                      className="mt-2 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed" style={{ color: "#2563eb" }}>
+                      + Add New Driver
+                    </button>
+                    {!selectedCarrier && (
+                      <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>Select a Carrier Company above first.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>New Driver</p>
+                    <input type="text" placeholder="Driver Name" value={newDriverForm.name}
+                      onChange={(e) => setNewDriverForm({ ...newDriverForm, name: e.target.value })}
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    <input type="text" placeholder="NIC" value={newDriverForm.nic}
+                      onChange={(e) => setNewDriverForm({ ...newDriverForm, nic: e.target.value })}
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    <input type="text" placeholder="Driving Licence No." value={newDriverForm.licenceNo}
+                      onChange={(e) => setNewDriverForm({ ...newDriverForm, licenceNo: e.target.value })}
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    <input type="text" placeholder="Contact No. (optional)" value={newDriverForm.contact}
+                      onChange={(e) => setNewDriverForm({ ...newDriverForm, contact: e.target.value })}
+                      className="w-full border rounded-xl px-4 py-2.5 text-sm" style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => void submitNewDriver()}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold text-white" style={{ background: "#2563eb" }}>
+                        Save Driver
+                      </button>
+                      <button type="button" onClick={() => setShowAddNewDriver(false)}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold border" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: "var(--text-muted)" }}>
+                    Reason (optional)
+                  </label>
+                  <textarea value={driverChangeReason} onChange={(e) => setDriverChangeReason(e.target.value)}
+                    rows={2} placeholder="e.g. Original driver unavailable"
+                    className="w-full border rounded-xl px-4 py-2.5 text-sm resize-none"
+                    style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+                </div>
+
+                {driverChangeError && (
+                  <p className="text-xs font-semibold" style={{ color: "#dc2626" }}>{driverChangeError}</p>
+                )}
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button type="button" onClick={() => setDriverChangeModalOpen(false)} disabled={driverChangeLoading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all hover:opacity-80"
+                  style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "var(--surface2)" }}>
+                  Close
+                </button>
+                <button type="button" onClick={() => void handleDriverChangeSubmit()} disabled={!selectedNewDriver || !selectedCarrier || driverChangeLoading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ background: "#2563eb" }}>
+                  {driverChangeLoading ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </motion.div>

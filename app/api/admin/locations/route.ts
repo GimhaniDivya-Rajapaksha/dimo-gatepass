@@ -27,7 +27,16 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ locations: locations.filter(Boolean).sort() });
+    // Deduped plant-level list (prefix before " - ") for the multi-plant mapping picker —
+    // additive alongside the existing full location list, which is unchanged.
+    const plantSeen = new Set<string>();
+    const plants: string[] = [];
+    for (const loc of locations) {
+      const plant = loc.split(" - ")[0].trim();
+      if (plant && !plantSeen.has(plant)) { plantSeen.add(plant); plants.push(plant); }
+    }
+
+    return NextResponse.json({ locations: locations.filter(Boolean).sort(), plants: plants.filter(Boolean).sort() });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ locations: [] });

@@ -41,74 +41,90 @@ type User = {
   defaultLocation?: string | null; brand?: string | null;
   approver?: { id: string; name: string } | null;
   backupApprover?: { id: string; name: string } | null;
+  mappedPlants?: string[];
 };
 
 const ROLES = [
   "INITIATOR", "APPROVER", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER", "SERVICE_ADVISOR",
-  "DELIVERY_COORDINATOR",
+  "DELIVERY_COORDINATOR", "SPECIAL_APPROVER",
 ];
 const ROLE_LABELS: Record<string, string> = {
   INITIATOR: "Initiator", APPROVER: "Approver",
   ADMIN: "Admin", CASHIER: "Cashier", AREA_SALES_OFFICER: "Area Sales Officer",
   SECURITY_OFFICER: "Security Officer", SERVICE_ADVISOR: "Service Advisor",
-  DELIVERY_COORDINATOR: "Delivery Coordinator",
+  DELIVERY_COORDINATOR: "Delivery Coordinator", SPECIAL_APPROVER: "Special Approver",
 };
 const roleColors: Record<string, string> = {
   INITIATOR: "#2563eb", APPROVER: "#7c3aed",
   ADMIN: "#dc2626", CASHIER: "#d97706", AREA_SALES_OFFICER: "#0891b2",
   SECURITY_OFFICER: "#0f766e", SERVICE_ADVISOR: "#ea580c",
-  DELIVERY_COORDINATOR: "#0d9488",
+  DELIVERY_COORDINATOR: "#0d9488", SPECIAL_APPROVER: "#9333ea",
 };
 const roleBg: Record<string, string> = {
   INITIATOR: "#eff6ff", APPROVER: "#f5f3ff",
   ADMIN: "#fef2f2", CASHIER: "#fffbeb", AREA_SALES_OFFICER: "#ecfeff",
   SECURITY_OFFICER: "#f0fdfa", SERVICE_ADVISOR: "#fff7ed",
-  DELIVERY_COORDINATOR: "#f0fdfa",
+  DELIVERY_COORDINATOR: "#f0fdfa", SPECIAL_APPROVER: "#faf5ff",
 };
 
-// Which attributes each role needs
+// Which attributes each role needs. "location" is a multi-select ("Select Locations") —
+// a user keeps exactly one role, but can be mapped to one or more locations/plants.
 const ROLE_ATTRS: Record<string, ("location" | "brand" | "approver")[]> = {
   INITIATOR:            ["location", "brand", "approver"],
   SECURITY_OFFICER:     ["location"],
-  APPROVER:             ["location", "brand"],
+  APPROVER:             ["location", "brand", "approver"],
   CASHIER:              ["location"],
   AREA_SALES_OFFICER:   ["location", "brand"],
   SERVICE_ADVISOR:      ["location", "brand"],
   DELIVERY_COORDINATOR: ["location"],
   ADMIN:                [],
+  SPECIAL_APPROVER:     [],
 };
 
 /* ─── Assign Attributes Modal ─────────────────────────────────────── */
 function AssignAttributesModal({
-  user, approvers, onClose, onSaved,
+  user, approvers, specialApprovers, onClose, onSaved,
 }: {
   user: User;
   approvers: User[];
+  specialApprovers: User[];
   onClose: () => void;
   onSaved: (updated: Partial<User>) => void;
 }) {
   const role = user.role ?? "";
   const fields = ROLE_ATTRS[role] ?? [];
-  const [location, setLocation] = useState(user.defaultLocation ?? "");
-  const [brand, setBrand] = useState(user.brand ?? "");
-  const [approverId, setApproverId] = useState(user.approverId ?? "");
-  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
-  const [locations, setLocations] = useState<string[]>([]);
+  // Security Officer must always have exactly one assigned plant/location — every
+  // other role keeps the existing multi-select "Select Locations" behavior unchanged.
+  const isSecurity = role === "SECURITY_OFFICER";
+  // An Approver initiating their own gate pass must be routed to a Special Approver,
+  // never another normal Approver — so the pool this picker offers depends on whose
+  // attributes are being edited.
+  const approverOptions = role === "APPROVER" ? specialApprovers : approvers;
+  const [selectedLocations, setSelectedLocations] = useState<string[]>(
+    [...new Set([...(user.defaultLocation ? [user.defaultLocation] : []), ...(user.mappedPlants ?? [])])]
+  );
   const [locationSearch, setLocationSearch] = useState("");
   const [locationOpen, setLocationOpen] = useState(false);
   const locationRef = useRef<HTMLDivElement>(null);
+  const [brand, setBrand] = useState(user.brand ?? "");
+  const [approverId, setApproverId] = useState(user.approverId ?? "");
+  const [backupApproverId, setBackupApproverId] = useState(user.backupApproverId ?? "");
   const [brandList, setBrandList] = useState<string[]>([]);
   const [brandSearch, setBrandSearch] = useState("");
   const [brandOpen, setBrandOpen] = useState(false);
   const brandRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
 
   useEffect(() => {
+    // The full, original location list (same one the old single "Location" field used) —
+    // every plant + sub-location combination, not the deduped plant-only list, so nothing
+    // that existed before is filtered, hidden, or collapsed.
     fetch("/api/admin/locations")
       .then(r => r.json())
-      .then(d => setLocations(d.locations ?? []))
+      .then(d => setLocationOptions(d.locations ?? []))
       .catch(() => {});
   }, []);
 
@@ -141,34 +157,71 @@ function AssignAttributesModal({
 
   const handleSave = async () => {
     // Validate mandatory fields per role
-    if (fields.includes("location") && !location.trim()) { setError("Location is required for this role."); return; }
+    if (fields.includes("location") && selectedLocations.length === 0) { setError("At least one location is required for this role."); return; }
     if (fields.includes("brand") && !brand.trim()) { setError("Brand is required for this role."); return; }
     if (approverId && backupApproverId && approverId === backupApproverId) { setError("Approver 1 and Approver 2 must be different."); return; }
     setLoading(true); setError("");
     try {
+      // A great many existing places across the app still read a single `defaultLocation`
+      // field — keep the current primary if it's still among the selections, otherwise
+      // fall back to the first one. Every selected location (including that one) is also
+      // stored as a full mapped-location row, so both the single-location checks and the
+      // multi-location checks resolve to the exact same, complete set.
+      const newDefaultLocation = fields.includes("location")
+        ? (user.defaultLocation && selectedLocations.includes(user.defaultLocation) ? user.defaultLocation : selectedLocations[0] ?? null)
+        : null;
+
       const res = await fetch("/api/admin/assign-attributes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user.id,
-          ...(fields.includes("location") ? { defaultLocation: location } : {}),
+          ...(fields.includes("location") ? { defaultLocation: newDefaultLocation } : {}),
           ...(fields.includes("brand") ? { brand } : {}),
           ...(fields.includes("approver") ? { approverId } : {}),
           ...(fields.includes("approver") ? { backupApproverId } : {}),
         }),
       });
       if (!res.ok) { const d = await res.json(); setError(d.error || "Failed"); setLoading(false); return; }
+
+      if (fields.includes("location")) {
+        if (isSecurity) {
+          // Security Officer: exactly one location, held only in defaultLocation above —
+          // never store any additional mapped-plant rows for this role.
+          const before = user.mappedPlants ?? [];
+          await Promise.all(before.map(p => fetch("/api/admin/plant-mappings", {
+            method: "DELETE", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: user.id, plantName: p }),
+          })));
+        } else {
+          const before = user.mappedPlants ?? [];
+          const toAdd = selectedLocations.filter(p => !before.includes(p));
+          const toRemove = before.filter(p => !selectedLocations.includes(p));
+          await Promise.all([
+            ...toAdd.map(p => fetch("/api/admin/plant-mappings", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: user.id, plantName: p }),
+            })),
+            ...toRemove.map(p => fetch("/api/admin/plant-mappings", {
+              method: "DELETE", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: user.id, plantName: p }),
+            })),
+          ]);
+        }
+      }
+
       onSaved({
-        defaultLocation: fields.includes("location") ? location || null : user.defaultLocation,
+        defaultLocation: fields.includes("location") ? newDefaultLocation : user.defaultLocation,
         brand: fields.includes("brand") ? brand || null : user.brand,
         approverId: fields.includes("approver") ? approverId || null : user.approverId,
         approver: fields.includes("approver")
-          ? approverId ? (approvers.find(a => a.id === approverId) ? { id: approverId, name: approvers.find(a => a.id === approverId)!.name } : null) : null
+          ? approverId ? (approverOptions.find(a => a.id === approverId) ? { id: approverId, name: approverOptions.find(a => a.id === approverId)!.name } : null) : null
           : user.approver,
         backupApproverId: fields.includes("approver") ? backupApproverId || null : user.backupApproverId,
         backupApprover: fields.includes("approver")
-          ? backupApproverId ? (approvers.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approvers.find(a => a.id === backupApproverId)!.name } : null) : null
+          ? backupApproverId ? (approverOptions.find(a => a.id === backupApproverId) ? { id: backupApproverId, name: approverOptions.find(a => a.id === backupApproverId)!.name } : null) : null
           : user.backupApprover,
+        mappedPlants: fields.includes("location") ? (isSecurity ? [] : selectedLocations) : user.mappedPlants,
       });
       onClose();
     } catch {
@@ -208,17 +261,28 @@ function AssignAttributesModal({
           {fields.includes("location") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Location <span className="text-red-500">*</span>
+                {isSecurity ? "Select Location" : "Select Locations"} <span className="text-red-500">*</span>
               </label>
               <div ref={locationRef} className="relative">
                 <div
-                  className="w-full border rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 cursor-pointer"
-                  style={{ background: "var(--surface2)", borderColor: !location.trim() ? "#f87171" : locationOpen ? "#3b82f6" : "var(--border)", color: "var(--text)", boxShadow: locationOpen ? "0 0 0 2px #bfdbfe" : undefined }}
+                  className="w-full border rounded-xl px-3 py-2.5 text-sm flex items-center gap-2 cursor-pointer min-h-[42px] flex-wrap"
+                  style={{ background: "var(--surface2)", borderColor: selectedLocations.length === 0 ? "#f87171" : locationOpen ? "#3b82f6" : "var(--border)", boxShadow: locationOpen ? "0 0 0 2px #bfdbfe" : undefined }}
                   onClick={() => { setLocationOpen(o => !o); setLocationSearch(""); }}
                 >
-                  <span className="flex-1 truncate" style={{ color: location ? "var(--text)" : "var(--text-muted)" }}>
-                    {location || "— Select location —"}
-                  </span>
+                  {selectedLocations.length === 0 ? (
+                    <span className="flex-1 text-sm" style={{ color: "var(--text-muted)" }}>— Select locations —</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 flex-1">
+                      {selectedLocations.map(l => (
+                        <span key={l} className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold"
+                          style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}>
+                          {l}
+                          <button type="button" onClick={e => { e.stopPropagation(); setSelectedLocations(prev => prev.filter(x => x !== l)); setError(""); }}
+                            className="ml-0.5 hover:opacity-70">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <svg className="w-4 h-4 flex-shrink-0 transition-transform" style={{ color: "var(--text-muted)", transform: locationOpen ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -251,29 +315,47 @@ function AssignAttributesModal({
                       </div>
                     </div>
                     <ul className="max-h-52 overflow-y-auto py-1">
-                      {locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
+                      {locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
                         <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No locations found</li>
                       ) : (
-                        locations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => (
-                          <li key={l}
-                            className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
-                            style={{ background: l === location ? "#eff6ff" : "transparent", color: l === location ? "#1d4ed8" : "var(--text)", fontWeight: l === location ? 600 : 400 }}
-                            onMouseDown={e => { e.preventDefault(); setLocation(l); setError(""); setLocationOpen(false); setLocationSearch(""); }}
-                          >
-                            {l === location && (
-                              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                            <span className={l === location ? "" : "ml-5"}>{l}</span>
-                          </li>
-                        ))
+                        locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => {
+                          const checked = selectedLocations.includes(l);
+                          return (
+                            <li key={l}
+                              className="flex items-center gap-2 px-4 py-2.5 text-sm cursor-pointer transition-colors hover:opacity-80"
+                              style={{ background: checked ? "#eff6ff" : "transparent", color: checked ? "#1d4ed8" : "var(--text)", fontWeight: checked ? 600 : 400 }}
+                              onMouseDown={e => {
+                                e.preventDefault();
+                                if (isSecurity) {
+                                  setSelectedLocations([l]);
+                                  setLocationOpen(false);
+                                  setLocationSearch("");
+                                } else {
+                                  setSelectedLocations(prev => checked ? prev.filter(x => x !== l) : [...prev, l]);
+                                }
+                                setError("");
+                              }}
+                            >
+                              {checked ? (
+                                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : <span className="w-3.5 h-3.5 flex-shrink-0" />}
+                              {l}
+                            </li>
+                          );
+                        })
                       )}
                     </ul>
                   </div>
                 )}
               </div>
-              {!location.trim() && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
+              {selectedLocations.length === 0 && <p className="text-red-500 text-xs mt-1">Required for this role</p>}
+              <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                {isSecurity
+                  ? "Security Officer can only be assigned one location."
+                  : "This user will see and receive data only for the locations selected here."}
+              </p>
             </div>
           )}
 
@@ -374,7 +456,7 @@ function AssignAttributesModal({
           {fields.includes("approver") && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                {role === "CASHIER" ? "Payment Override Approver" : "Approver"}{" "}
+                {role === "CASHIER" ? "Payment Override Approver" : role === "APPROVER" ? "Special Approver" : "Approver"}{" "}
                 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
               <select
@@ -382,8 +464,8 @@ function AssignAttributesModal({
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               >
-                <option value="">{approvers.length === 0 ? "No approvers yet" : "None"}</option>
-                {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <option value="">{approverOptions.length === 0 ? "No approvers yet" : "None"}</option>
+                {approverOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               {role === "CASHIER" && (
                 <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
@@ -403,7 +485,7 @@ function AssignAttributesModal({
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               >
                 <option value="">No Approver 2 assigned</option>
-                {approvers.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.filter(a => a.id !== approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Initiators can select this approver if Approver 1 is unavailable.
@@ -441,15 +523,25 @@ function AssignAttributesModal({
 }
 
 /* ─── Add User Modal ──────────────────────────────────────────────── */
-function AddUserModal({ onClose, onCreated, approvers }: {
+function AddUserModal({ onClose, onCreated, approvers, specialApprovers }: {
   onClose: () => void;
   onCreated: (u: User) => void;
   approvers: User[];
+  specialApprovers: User[];
 }) {
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
+  const [form, setForm] = useState({ name: "", email: "", role: "", approverId: "", backupApproverId: "", defaultLocation: "", brand: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locations, setLocations] = useState<string[]>([]);
+
+  // Active Directory user picker — replaces manual Name/Email/Password entry. The
+  // selected AD user's name/email are stored straight into `form`; no password is
+  // collected since these accounts sign in via Microsoft SSO (see lib/auth.ts ensureAzureUser).
+  const [adQuery, setAdQuery] = useState("");
+  const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [adLoading, setAdLoading] = useState(false);
+  const [adOpen, setAdOpen] = useState(false);
+  const adBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/locations")
@@ -461,11 +553,39 @@ function AddUserModal({ onClose, onCreated, approvers }: {
   const set = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
   const selectedRole = form.role;
   const fields = ROLE_ATTRS[selectedRole] ?? [];
+  // An Approver initiating their own gate pass must be routed to a Special Approver,
+  // never another normal Approver.
+  const approverOptions = selectedRole === "APPROVER" ? specialApprovers : approvers;
+
+  function searchAd(q: string) {
+    setAdQuery(q);
+    setAdOpen(true);
+    if (!q.trim()) { setAdOptions([]); return; }
+    setAdLoading(true);
+    fetch(`/api/ad-users?q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then((d: { users?: { id: string; name: string; email: string }[] }) => setAdOptions(d.users ?? []))
+      .catch(() => setAdOptions([]))
+      .finally(() => setAdLoading(false));
+  }
+
+  function selectAdUser(u: { id: string; name: string; email: string }) {
+    setForm(p => ({ ...p, name: u.name, email: u.email }));
+    setAdQuery("");
+    setAdOptions([]);
+    setAdOpen(false);
+  }
+
+  function clearAdSelection() {
+    setForm(p => ({ ...p, name: "", email: "" }));
+    setAdQuery("");
+    setAdOptions([]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
-      setError("Name, email and password are required"); return;
+    if (!form.name.trim() || !form.email.trim()) {
+      setError("Search and select a user from Active Directory first"); return;
     }
     if (fields.includes("location") && !form.defaultLocation.trim()) {
       setError(`Location is required for ${ROLE_LABELS[selectedRole] || selectedRole}.`); return;
@@ -505,11 +625,11 @@ function AddUserModal({ onClose, onCreated, approvers }: {
         brand: form.brand || null,
         approverId: form.approverId || null,
         approver: form.approverId
-          ? (approvers.find(a => a.id === form.approverId) ?? null)
+          ? (approverOptions.find(a => a.id === form.approverId) ?? null)
           : null,
         backupApproverId: form.backupApproverId || null,
         backupApprover: form.backupApproverId
-          ? (approvers.find(a => a.id === form.backupApproverId) ?? null)
+          ? (approverOptions.find(a => a.id === form.backupApproverId) ?? null)
           : null,
       });
       onClose();
@@ -546,22 +666,62 @@ function AddUserModal({ onClose, onCreated, approvers }: {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Full Name <span className="text-red-500">*</span></label>
-            <input value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Malmi Perera"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Email Address <span className="text-red-500">*</span></label>
-            <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="e.g. malmi@dimo.lk"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Password <span className="text-red-500">*</span></label>
-            <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters"
-              className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }} />
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+              Active Directory User <span className="text-red-500">*</span>
+            </label>
+            {form.email ? (
+              <div className="flex items-center justify-between rounded-xl border px-4 py-2.5"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)" }}>
+                <div>
+                  <p className="text-sm font-medium" style={{ color: "var(--text)" }}>{form.name}</p>
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{form.email}</p>
+                </div>
+                <button type="button" onClick={clearAdSelection} className="text-xs font-semibold" style={{ color: "#dc2626" }}>
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  value={adQuery}
+                  onChange={e => searchAd(e.target.value)}
+                  onFocus={() => { if (adBlurTimer.current) clearTimeout(adBlurTimer.current); setAdOpen(true); }}
+                  onBlur={() => { adBlurTimer.current = setTimeout(() => setAdOpen(false), 200); }}
+                  placeholder="Search by name or email..."
+                  className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                />
+                {adOpen && (
+                  <div className="absolute z-50 mt-1 w-full max-h-52 overflow-auto rounded-xl border shadow-lg"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                    {adLoading ? (
+                      <p className="px-3 py-2.5 text-sm flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        Searching…
+                      </p>
+                    ) : adQuery.trim() && adOptions.length === 0 ? (
+                      <p className="px-3 py-2.5 text-sm" style={{ color: "var(--text-muted)" }}>No matching AD user found</p>
+                    ) : (
+                      adOptions.map(u => (
+                        <button key={u.id} type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-blue-500/10"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectAdUser(u)}>
+                          <p className="font-medium" style={{ color: "var(--text)" }}>{u.name}</p>
+                          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{u.email}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Name and email are loaded from Active Directory — the user signs in with Microsoft, no password needed.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
@@ -601,20 +761,20 @@ function AddUserModal({ onClose, onCreated, approvers }: {
               {!form.brand.trim() && <p className="text-red-500 text-xs mt-1">Required for {ROLE_LABELS[selectedRole] || selectedRole}</p>}
             </div>
           )}
-          {fields.includes("approver") && approvers.length > 0 && (
+          {fields.includes("approver") && approverOptions.length > 0 && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                Approver <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
+                {selectedRole === "APPROVER" ? "Special Approver" : "Approver"} <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
               </label>
               <select value={form.approverId} onChange={e => set("approverId", e.target.value)}
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No approver assigned</option>
-                {approvers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           )}
-          {fields.includes("approver") && approvers.length > 0 && selectedRole !== "CASHIER" && (
+          {fields.includes("approver") && approverOptions.length > 0 && selectedRole !== "CASHIER" && (
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
                 Approver 2 <span className="text-xs font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span>
@@ -623,7 +783,7 @@ function AddUserModal({ onClose, onCreated, approvers }: {
                 className="w-full border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}>
                 <option value="">No Approver 2 assigned</option>
-                {approvers.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {approverOptions.filter(a => a.id !== form.approverId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           )}
@@ -702,6 +862,7 @@ export default function AdminPage() {
   }, []);
 
   const approvers = users.filter(u => u.role === "APPROVER");
+  const specialApprovers = users.filter(u => u.role === "SPECIAL_APPROVER");
 
   async function assignRole(userId: string, role: string) {
     setAssigning(userId);
@@ -741,6 +902,7 @@ export default function AdminPage() {
     { label: "Total Users",      value: users.filter(u => !!u.role).length,                        color: "#6366f1", bg: "#eef2ff" },
     { label: "Initiators",       value: users.filter(u => u.role === "INITIATOR").length,           color: "#2563eb", bg: "#eff6ff" },
     { label: "Approvers",        value: users.filter(u => u.role === "APPROVER").length,            color: "#7c3aed", bg: "#f5f3ff" },
+    { label: "Special Approvers", value: users.filter(u => u.role === "SPECIAL_APPROVER").length,   color: "#9333ea", bg: "#faf5ff" },
     { label: "Admins",           value: users.filter(u => u.role === "ADMIN").length,               color: "#dc2626", bg: "#fef2f2" },
     { label: "Cashiers",         value: users.filter(u => u.role === "CASHIER").length,             color: "#b45309", bg: "#fffbeb" },
     { label: "Area Sales",       value: users.filter(u => u.role === "AREA_SALES_OFFICER").length,  color: "#15803d", bg: "#f0fdf4" },
@@ -774,12 +936,13 @@ export default function AdminPage() {
 
       <AnimatePresence>
         {showAddUser && (
-          <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} />
+          <AddUserModal onClose={() => setShowAddUser(false)} onCreated={(u) => setUsers(prev => [u, ...prev])} approvers={approvers} specialApprovers={specialApprovers} />
         )}
         {attrModal && (ROLE_ATTRS[attrModal.role ?? ""] ?? []).length > 0 && (
           <AssignAttributesModal
             user={attrModal}
             approvers={approvers}
+            specialApprovers={specialApprovers}
             onClose={() => setAttrModal(null)}
             onSaved={(updated) => {
               setUsers(prev => prev.map(u => u.id === attrModal.id ? { ...u, ...updated } : u));
@@ -991,13 +1154,23 @@ export default function AdminPage() {
                       {user.role && (ROLE_ATTRS[user.role] ?? []).length > 0 ? (
                         <div className="flex items-center gap-2">
                           <div className="min-w-0">
-                            {user.defaultLocation ? (
-                              <p className="text-xs font-medium truncate max-w-[140px]" style={{ color: "var(--text)" }} title={user.defaultLocation}>
-                                📍 {user.defaultLocation}
-                              </p>
-                            ) : (
-                              <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
-                            )}
+                            {(() => {
+                              const allLocations = [...new Set([
+                                ...(user.defaultLocation ? [user.defaultLocation] : []),
+                                ...(user.mappedPlants ?? []),
+                              ])];
+                              return allLocations.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {allLocations.map(p => (
+                                    <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }} title={p}>
+                                      📍 {p}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
+                              );
+                            })()}
                             {ROLE_ATTRS[user.role].includes("brand") && (
                               user.brand ? (
                                 <div className="flex flex-wrap gap-1 mt-0.5">

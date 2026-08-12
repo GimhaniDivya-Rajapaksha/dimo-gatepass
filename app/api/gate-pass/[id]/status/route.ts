@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
+import { isApproverRole } from "@/lib/roles";
+import { getUserPlantPrefixes, plantsWhereOr, findExtraMappedUserIds } from "@/lib/user-plants";
 
 function ciLocation(value: string | null | undefined) {
   const normalized = value?.trim();
@@ -26,6 +28,9 @@ function ciStartsWithPlant(value: string | null | undefined) {
 async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string }[]> {
   if (!fromLoc) return prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
 
+  // Security Officers additionally mapped to this plant (beyond their primary defaultLocation).
+  const extraIds = await findExtraMappedUserIds("SECURITY_OFFICER", fromLoc);
+
   const allOpts = await prisma.locationOption.findMany();
   const needle = fromLoc.trim().toLowerCase();
   const srcOpt = allOpts.find(
@@ -34,7 +39,10 @@ async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string 
 
   if (!srcOpt) {
     return prisma.user.findMany({
-      where: { role: "SECURITY_OFFICER" as any, defaultLocation: ciStartsWithPlant(fromLoc) },
+      where: {
+        role: "SECURITY_OFFICER" as any,
+        OR: [{ defaultLocation: ciStartsWithPlant(fromLoc) }, ...(extraIds.length > 0 ? [{ id: { in: extraIds } }] : [])],
+      },
     });
   }
 
@@ -42,6 +50,7 @@ async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string 
   // If the SO's defaultLocation is not in LocationOption, fall back to plant-prefix comparison.
   const allSOs = await prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any } });
   return allSOs.filter((so) => {
+    if (extraIds.includes(so.id)) return true;
     const soLower = (so.defaultLocation ?? "").toLowerCase();
     const soOpt = allOpts.find(
       (o) => `${o.plantDescription} - ${o.storageDescription}`.toLowerCase() === soLower
@@ -51,6 +60,45 @@ async function findSOsAtSamePlant(fromLoc: string | null): Promise<{ id: string 
     const soPlant = (so.defaultLocation ?? "").split(" - ")[0].trim().toLowerCase();
     return soPlant === srcOpt.plantDescription.toLowerCase();
   });
+}
+
+// LT Return Gate Pass: the return leg's own "please approve" email is deliberately
+// suppressed at creation time (see app/api/gate-pass/route.ts) because it's locked and not
+// yet actionable. Call this right after unlocking it (its parent just completed) to send
+// that email now, matching the same approver-resolution logic used at initial submission.
+async function sendReturnLegApprovalEmails(parentPassId: string) {
+  const returnPasses = await prisma.gatePass.findMany({
+    where: { parentPassId, returnPassLocked: false, status: "PENDING_APPROVAL" },
+    include: { createdBy: { select: { name: true, role: true } } },
+  });
+  if (returnPasses.length === 0) return;
+
+  const { sendApprovalRequestEmail } = await import("@/lib/email");
+  for (const rp of returnPasses) {
+    const creatorRole = (rp as any).createdBy?.role as string | undefined;
+    const approverRole = creatorRole === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+    const rpApproverName = rp.intendedApprover;
+    let rpApprovers = rpApproverName
+      ? await prisma.user.findMany({ where: { role: approverRole as any, name: { equals: rpApproverName, mode: "insensitive" } } })
+      : await prisma.user.findMany({ where: { role: approverRole as any } });
+    if (rpApproverName && rpApprovers.length === 0 && creatorRole !== "APPROVER") {
+      rpApprovers = await prisma.user.findMany({ where: { role: approverRole as any } });
+    }
+    for (const approverUser of rpApprovers) {
+      sendApprovalRequestEmail(approverUser.email, approverUser.name, rp.id, {
+        gatePassNumber: rp.gatePassNumber,
+        passType: rp.passType,
+        passSubType: rp.passSubType,
+        vehicle: rp.vehicle ?? "",
+        chassis: rp.chassis,
+        toLocation: rp.toLocation,
+        fromLocation: rp.fromLocation,
+        departureDate: rp.departureDate,
+        departureTime: rp.departureTime,
+        createdByName: (rp as any).createdBy?.name || "Initiator",
+      }, approverUser.id).catch((e: unknown) => console.error("[email] return leg approval email failed:", e));
+    }
+  }
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -63,6 +111,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const gatePass = await (prisma.gatePass as any).findUnique({ where: { id } });
   if (!gatePass) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // LT Return Gate Pass: locked until the original (parent) transfer completes — but the
+  // Initiator must always be able to cancel a Return leg they no longer need, regardless of
+  // lock state, so "cancel" is exempt. returnPassLocked defaults to false for every other
+  // pass, so this never affects anything else.
+  if (gatePass.returnPassLocked && action !== "cancel") {
+    return NextResponse.json({ error: "This Return Gate Pass is locked until the original Location Transfer is completed." }, { status: 400 });
+  }
 
   // APPROVER: approve credit portion of MAIN_OUT (parallel with cashier)
   if (action === "credit_approve") {
@@ -196,9 +252,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         },
       });
 
+      const creditRejectExtraCashierIds = gatePass.fromLocation ? await findExtraMappedUserIds("CASHIER", gatePass.fromLocation) : [];
       const cashiers = await prisma.user.findMany({
         where: gatePass.fromLocation
-          ? { role: "CASHIER" as any, defaultLocation: gatePass.fromLocation }
+          ? { role: "CASHIER" as any, OR: [{ defaultLocation: gatePass.fromLocation }, ...(creditRejectExtraCashierIds.length > 0 ? [{ id: { in: creditRejectExtraCashierIds } }] : [])] }
           : { role: "CASHIER" as any },
       });
       if (cashiers.length > 0) {
@@ -217,10 +274,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // APPROVER: approve or reject
+  // APPROVER (or SPECIAL_APPROVER): approve or reject
   if (action === "approve" || action === "reject") {
-    if (session.user.role !== "APPROVER") {
+    if (!isApproverRole(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+    if (gatePass.createdById === session.user.id) {
+      return NextResponse.json({ error: "You cannot approve or reject a gate pass you initiated yourself." }, { status: 403 });
     }
 
     // If the pass was originally created by a Security Officer, the vehicle is already
@@ -249,6 +309,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         rejectionReason: action === "reject" ? (rejectionReason || null) : null,
       },
     });
+
+    // LT Return Gate Pass: rejecting the outbound leg means the linked return leg (still
+    // locked, never itself approved) can never proceed — reject it too, automatically.
+    // Rejecting the return leg itself (handled elsewhere, once unlocked) never reaches here
+    // and never touches the outbound leg — this cascade only ever runs outbound → return.
+    if (action === "reject" && gatePass.passType === "LOCATION_TRANSFER") {
+      const linkedReturnPass = await prisma.gatePass.findFirst({
+        where: { parentPassId: gatePass.id, returnPassLocked: true, status: "PENDING_APPROVAL" },
+      });
+      if (linkedReturnPass) {
+        await prisma.gatePass.update({
+          where: { id: linkedReturnPass.id },
+          data: {
+            status: "REJECTED",
+            approvedById: session.user.id,
+            approvedAt: new Date(),
+            rejectionReason: `Automatically rejected — the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+          },
+        });
+        await prisma.notification.create({
+          data: {
+            userId: linkedReturnPass.createdById,
+            type: "GATE_PASS_REJECTED",
+            title: "Return Gate Pass Rejected",
+            message: `Your return gate pass ${linkedReturnPass.gatePassNumber} was automatically rejected because the original gate pass ${gatePass.gatePassNumber} was rejected.`,
+            gatePassId: linkedReturnPass.id,
+          },
+        });
+      }
+    }
 
     // Notify the pass creator (security officer or initiator)
     await prisma.notification.create({
@@ -322,9 +412,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // For security-initiated passes: also notify admins & the initiator who completed the form
     if (isSecurityInitiated && action === "approve") {
+      const secInitExtraInitiatorIds = await findExtraMappedUserIds("INITIATOR", gatePass.fromLocation);
       const [admins, initiators] = await Promise.all([
         prisma.user.findMany({ where: { role: "ADMIN" } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", defaultLocation: ciLocation(gatePass.fromLocation) } }),
+        prisma.user.findMany({
+          where: {
+            role: "INITIATOR",
+            OR: [{ defaultLocation: ciLocation(gatePass.fromLocation) }, ...(secInitExtraInitiatorIds.length > 0 ? [{ id: { in: secInitExtraInitiatorIds } }] : [])],
+          },
+        }),
       ]);
       const extraRecipients = [...admins, ...initiators].filter((u: { id: string }) => u.id !== gatePass.createdById);
       if (extraRecipients.length > 0) {
@@ -454,8 +550,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Notify Security Officers at toLocation (where the vehicle is arriving)
     const toLoc = gatePass.toLocation as string | null;
+    const initInExtraSecIds = toLoc ? await findExtraMappedUserIds("SECURITY_OFFICER", toLoc) : [];
     const securityWhere = toLoc
-      ? { role: "SECURITY_OFFICER" as any, defaultLocation: ciLocation(toLoc) }
+      ? { role: "SECURITY_OFFICER" as any, OR: [{ defaultLocation: ciLocation(toLoc) }, ...(initInExtraSecIds.length > 0 ? [{ id: { in: initInExtraSecIds } }] : [])] }
       : { role: "SECURITY_OFFICER" as any };
     const securityOfficers = await prisma.user.findMany({ where: securityWhere });
     if (securityOfficers.length > 0) {
@@ -483,15 +580,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const isSubOutIn = gatePass.passSubType === "SUB_OUT_IN";
     const isSubIn    = gatePass.passSubType === "SUB_IN";
     const isLT       = gatePass.passType === "LOCATION_TRANSFER";
+    const isTestDrive = gatePass.passType === "TEST_DRIVE";
 
     // SUB_IN: confirmed at APPROVED (Security B confirms vehicle entered ASO compound)
     // MAIN_IN: confirmed at APPROVED directly (no initiator step) or INITIATOR_IN (legacy) or GATE_OUT (legacy)
     // SUB_OUT: destination Security confirms Gate IN at GATE_OUT or INITIATOR_OUT status
     //   (INITIATOR_OUT = Initiator confirmed departure but no source SO processed Gate OUT)
+    // Test Drive: same-plant return, confirmed at GATE_OUT (same as LT)
     // Others: confirmed at GATE_OUT
     const validSubIn          = isSubIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
     const validApprovedMainIn = isMainIn && gatePass.passType === "AFTER_SALES" && gatePass.status === "APPROVED";
-    const validGateOut        = gatePass.status === "GATE_OUT" && (isMainIn || isSubOut || isSubOutIn || isLT);
+    const validGateOut        = gatePass.status === "GATE_OUT" && (isMainIn || isSubOut || isSubOutIn || isLT || isTestDrive);
     const validInitiatorIn    = gatePass.status === "INITIATOR_IN" && isMainIn;
     if (!validSubIn && !validApprovedMainIn && !validGateOut && !validInitiatorIn) {
       return NextResponse.json({ error: "Not eligible for Security Gate IN confirmation" }, { status: 400 });
@@ -509,6 +608,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(body.mismatchNote ? { comments: `[MISMATCH] ${body.mismatchNote}` } : {}),
       },
     });
+
+    // LT Return Gate Pass: unlock the linked return pass now that the original has completed.
+    if (isLT) {
+      await prisma.gatePass.updateMany({
+        where: { parentPassId: gatePass.id, returnPassLocked: true },
+        data: { returnPassLocked: false },
+      });
+      await sendReturnLegApprovalEmails(gatePass.id);
+    }
 
     const targetLabel = gatePass.toLocation as string | null;
     if ((isSubOut || isSubOutIn || validApprovedMainIn || validSubIn) && targetLabel) {
@@ -605,8 +713,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (isSubOut) {
       const toLoc = gatePass.toLocation as string | null;
       if (toLoc) {
+        const subOutExtraInitiatorIds = await findExtraMappedUserIds("INITIATOR", toLoc);
         const destInitiators = await prisma.user.findMany({
-          where: { role: "INITIATOR", defaultLocation: ciLocation(toLoc) },
+          where: { role: "INITIATOR", OR: [{ defaultLocation: ciLocation(toLoc) }, ...(subOutExtraInitiatorIds.length > 0 ? [{ id: { in: subOutExtraInitiatorIds } }] : [])] },
         });
         const destInitiatorsToNotify = destInitiators.filter((u) => u.id !== gatePass.createdById);
         if (destInitiatorsToNotify.length > 0) {
@@ -646,8 +755,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (isLT && gatePass.fromLocation) {
       const fromAsoFilterSec = ciStartsWithPlant(gatePass.fromLocation as string);
       if (fromAsoFilterSec) {
+        const ltSecExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation as string);
         const fromAsosSec = await prisma.user.findMany({
-          where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilterSec },
+          where: { role: "AREA_SALES_OFFICER" as any, OR: [{ defaultLocation: fromAsoFilterSec }, ...(ltSecExtraAsoIds.length > 0 ? [{ id: { in: ltSecExtraAsoIds } }] : [])] },
           select: { id: true, email: true, name: true },
         });
         if (fromAsosSec.length > 0) {
@@ -738,10 +848,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         : toCode  ? { defaultLocation: { contains: toCode,  mode: "insensitive" as const } }
         : {};
 
+      const [destSecExtraIds, destInitExtraIds, destAsoExtraIds] = await Promise.all([
+        findExtraMappedUserIds("SECURITY_OFFICER", toLoc),
+        findExtraMappedUserIds("INITIATOR", toLoc),
+        findExtraMappedUserIds("AREA_SALES_OFFICER", toLoc),
+      ]);
       const [destSecurity, destInitiators, asoUsers] = await Promise.all([
-        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destLocationWhere } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", ...destLocationWhere } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...destLocationWhere } }),
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [destLocationWhere, ...(destSecExtraIds.length > 0 ? [{ id: { in: destSecExtraIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", OR: [destLocationWhere, ...(destInitExtraIds.length > 0 ? [{ id: { in: destInitExtraIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", OR: [destLocationWhere, ...(destAsoExtraIds.length > 0 ? [{ id: { in: destAsoExtraIds } }] : [])] } }),
       ]);
 
       const allDestUsers = [...new Map([...destSecurity, ...destInitiators, ...asoUsers].map(u => [u.id, u])).values()];
@@ -787,9 +902,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)
       if (!gatePass.asoCreated && gatePass.fromLocation) {
-        const fromAsoFilter = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+        const gateOutExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation);
         const fromAsos = await prisma.user.findMany({
-          where: { role: "AREA_SALES_OFFICER" as any, ...fromAsoFilter },
+          where: {
+            role: "AREA_SALES_OFFICER" as any,
+            OR: [{ defaultLocation: ciStartsWithPlant(gatePass.fromLocation) }, ...(gateOutExtraAsoIds.length > 0 ? [{ id: { in: gateOutExtraAsoIds } }] : [])],
+          },
           select: { id: true, email: true, name: true },
         });
         if (fromAsos.length > 0) {
@@ -866,6 +984,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers,
+    // Initiators, and Area Sales Officers at the same plant that the vehicle is out and
+    // awaiting return confirmation. ASO plants typically have no Security/Initiator users,
+    // so including AREA_SALES_OFFICER here is what actually reaches anyone at those plants.
+    if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
+      const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+      const [tdExtraSecIds, tdExtraInitIds, tdExtraAsoIds] = await Promise.all([
+        findExtraMappedUserIds("SECURITY_OFFICER", gatePass.fromLocation),
+        findExtraMappedUserIds("INITIATOR", gatePass.fromLocation),
+        findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation),
+      ]);
+      const [tdSecurity, tdInitiators, tdAsos] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [plantWhere, ...(tdExtraSecIds.length > 0 ? [{ id: { in: tdExtraSecIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", OR: [plantWhere, ...(tdExtraInitIds.length > 0 ? [{ id: { in: tdExtraInitIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, OR: [plantWhere, ...(tdExtraAsoIds.length > 0 ? [{ id: { in: tdExtraAsoIds } }] : [])] } }),
+      ]);
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators, ...tdAsos].map((u) => [u.id, u])).values()];
+      if (tdRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: tdRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_RECEIVED",
+            title: "Test Drive Vehicle Out — Awaiting Return",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle left for a Test Drive. Check Vehicle Arrivals to confirm when it returns.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+    }
+
     // For After Sales MAIN_OUT: notify RECIPIENTs
     if (gatePass.passType === "AFTER_SALES" && gatePass.passSubType === "MAIN_OUT") {
       const recipients = await prisma.user.findMany({ where: { role: "RECIPIENT" } });
@@ -887,11 +1035,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
       const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
+      const [subOutExtraSecIds, subOutExtraInitIds, subOutExtraAsoIds] = toLoc ? await Promise.all([
+        findExtraMappedUserIds("SECURITY_OFFICER", toLoc),
+        findExtraMappedUserIds("INITIATOR", toLoc),
+        findExtraMappedUserIds("AREA_SALES_OFFICER", toLoc),
+      ]) : [[], [], []];
 
       const [destSecurity, destInitiators, asoUsers] = await Promise.all([
-        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...asoPlantFilter } }),
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [locationFilter, ...(subOutExtraSecIds.length > 0 ? [{ id: { in: subOutExtraSecIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", OR: [locationFilter, ...(subOutExtraInitIds.length > 0 ? [{ id: { in: subOutExtraInitIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", OR: [asoPlantFilter, ...(subOutExtraAsoIds.length > 0 ? [{ id: { in: subOutExtraAsoIds } }] : [])] } }),
       ]);
 
       const destUsers = [...destSecurity, ...destInitiators, ...asoUsers];
@@ -926,25 +1079,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Print Gate OUT: initiator printing the gate pass counts as Gate OUT confirmation.
   // Security no longer needs to confirm Gate OUT for LT and CD when initiator prints.
   if (action === "print_gate_out") {
-    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR" || session.user.role === "AREA_SALES_OFFICER";
+    // An Approver who created their own pass (Approver-initiated gate passes) can print/
+    // release it exactly like an Initiator would — the isCreator ownership check below still
+    // applies, so this only ever allows printing their own pass, never someone else's.
+    const canPrintRelease = session.user.role === "INITIATOR" || session.user.role === "SERVICE_ADVISOR"
+      || session.user.role === "AREA_SALES_OFFICER" || session.user.role === "APPROVER";
     if (!canPrintRelease) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     const isCreator = gatePass.createdById === session.user.id;
-    const asoDefaultLoc = (session.user as { defaultLocation?: string | null }).defaultLocation;
-    const isFromLocationAso =
-      session.user.role === "AREA_SALES_OFFICER" &&
-      !!asoDefaultLoc &&
-      !!gatePass.fromLocation &&
-      plantPrefix(asoDefaultLoc) === plantPrefix(gatePass.fromLocation as string);
+    let isFromLocationAso = false;
+    if (session.user.role === "AREA_SALES_OFFICER" && gatePass.fromLocation) {
+      const asoPlants = await getUserPlantPrefixes(session.user.id);
+      isFromLocationAso = asoPlants.includes(plantPrefix(gatePass.fromLocation as string));
+    }
     if (!isCreator && !isFromLocationAso) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (!["APPROVED", "GATE_OUT", "COMPLETED"].includes(gatePass.status)) {
       return NextResponse.json({ error: "Gate pass must be approved first" }, { status: 400 });
     }
-    if (gatePass.passType !== "LOCATION_TRANSFER" && gatePass.passType !== "CUSTOMER_DELIVERY") {
-      return NextResponse.json({ error: "Print Gate OUT is only available for Location Transfer and Customer Delivery" }, { status: 400 });
+    if (gatePass.passType !== "LOCATION_TRANSFER" && gatePass.passType !== "CUSTOMER_DELIVERY" && gatePass.passType !== "TEST_DRIVE") {
+      return NextResponse.json({ error: "Print Gate OUT is only available for Location Transfer, Customer Delivery, and Test Drive" }, { status: 400 });
     }
 
     // Already past APPROVED — just return, status is fine
@@ -990,10 +1146,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         : toPlant2 ? { defaultLocation: { startsWith: toPlant2, mode: "insensitive" as const } }
         : toCode2  ? { defaultLocation: { contains: toCode2,  mode: "insensitive" as const } }
         : {};
+      const [destSecExtraIds2, destInitExtraIds2, destAsoExtraIds2] = await Promise.all([
+        findExtraMappedUserIds("SECURITY_OFFICER", toLoc),
+        findExtraMappedUserIds("INITIATOR", toLoc),
+        findExtraMappedUserIds("AREA_SALES_OFFICER", toLoc),
+      ]);
       const [destSecurity, destInitiators, destAsos] = await Promise.all([
-        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destLocationWhere2 } }),
-        prisma.user.findMany({ where: { role: "INITIATOR", ...destLocationWhere2 } }),
-        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", ...destLocationWhere2 } }),
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [destLocationWhere2, ...(destSecExtraIds2.length > 0 ? [{ id: { in: destSecExtraIds2 } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", OR: [destLocationWhere2, ...(destInitExtraIds2.length > 0 ? [{ id: { in: destInitExtraIds2 } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER", OR: [destLocationWhere2, ...(destAsoExtraIds2.length > 0 ? [{ id: { in: destAsoExtraIds2 } }] : [])] } }),
       ]);
       const allDestUsers = [...new Map([...destSecurity, ...destInitiators, ...destAsos].map(u => [u.id, u])).values()];
       if (allDestUsers.length > 0) {
@@ -1036,9 +1197,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       // NEW: Notify FROM-location ASOs when gate pass was created by an Initiator (not ASO)
       if (!gatePass.asoCreated && gatePass.fromLocation) {
-        const fromAsoFilterPrint = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+        const printExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation);
         const fromAsosPrint = await prisma.user.findMany({
-          where: { role: "AREA_SALES_OFFICER" as any, ...fromAsoFilterPrint },
+          where: {
+            role: "AREA_SALES_OFFICER" as any,
+            OR: [{ defaultLocation: ciStartsWithPlant(gatePass.fromLocation) }, ...(printExtraAsoIds.length > 0 ? [{ id: { in: printExtraAsoIds } }] : [])],
+          },
           select: { id: true, email: true, name: true },
         });
         if (fromAsosPrint.length > 0) {
@@ -1113,6 +1277,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           printLiveUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
           console.error("[print_gate_out] SAP location update failed:", error);
         }
+      }
+    }
+
+    // Test Drive: no SAP write, no destination transfer — just notify Security Officers,
+    // Initiators, and Area Sales Officers at the same plant that the vehicle is out and
+    // awaiting return confirmation. ASO plants typically have no Security/Initiator users,
+    // so including AREA_SALES_OFFICER here is what actually reaches anyone at those plants.
+    if (gatePass.passType === "TEST_DRIVE" && gatePass.fromLocation) {
+      const plantWhere = { defaultLocation: ciStartsWithPlant(gatePass.fromLocation) };
+      const [tdExtraSecIds, tdExtraInitIds, tdExtraAsoIds] = await Promise.all([
+        findExtraMappedUserIds("SECURITY_OFFICER", gatePass.fromLocation),
+        findExtraMappedUserIds("INITIATOR", gatePass.fromLocation),
+        findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation),
+      ]);
+      const [tdSecurity, tdInitiators, tdAsos] = await Promise.all([
+        prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [plantWhere, ...(tdExtraSecIds.length > 0 ? [{ id: { in: tdExtraSecIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "INITIATOR", OR: [plantWhere, ...(tdExtraInitIds.length > 0 ? [{ id: { in: tdExtraInitIds } }] : [])] } }),
+        prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, OR: [plantWhere, ...(tdExtraAsoIds.length > 0 ? [{ id: { in: tdExtraAsoIds } }] : [])] } }),
+      ]);
+      const tdRecipients = [...new Map([...tdSecurity, ...tdInitiators, ...tdAsos].map((u) => [u.id, u])).values()];
+      if (tdRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: tdRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_RECEIVED",
+            title: "Test Drive Vehicle Out — Awaiting Return",
+            message: `Gate pass ${gatePass.gatePassNumber} (${gatePass.vehicle}) — vehicle left for a Test Drive. Check Vehicle Arrivals to confirm when it returns.`,
+            gatePassId: gatePass.id,
+          })),
+        });
       }
     }
 
@@ -1192,10 +1386,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       // Notify destination SO, ASOs and initiators
       if (gatePass.toLocation) {
+        const [gateOutDestExtraSec, gateOutDestExtraAso, gateOutDestExtraInit] = await Promise.all([
+          findExtraMappedUserIds("SECURITY_OFFICER", gatePass.toLocation),
+          findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.toLocation),
+          findExtraMappedUserIds("INITIATOR", gatePass.toLocation),
+        ]);
+        const gateOutDestExtraIds = [...gateOutDestExtraSec, ...gateOutDestExtraAso, ...gateOutDestExtraInit];
         const destUsers = await prisma.user.findMany({
           where: {
             role: { in: ["SECURITY_OFFICER", "AREA_SALES_OFFICER", "INITIATOR"] as any[] },
-            defaultLocation: ciStartsWithPlant(gatePass.toLocation),
+            OR: [{ defaultLocation: ciStartsWithPlant(gatePass.toLocation) }, ...(gateOutDestExtraIds.length > 0 ? [{ id: { in: gateOutDestExtraIds } }] : [])],
           },
           select: { id: true, role: true },
         });
@@ -1284,10 +1484,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         const toLoc = gatePass.toLocation as string | null;
         const destFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
         const asoPlantFilter = toLoc ? { defaultLocation: ciStartsWithPlant(toLoc) } : {};
+        const [noSoDestExtraSec, noSoDestExtraInit, noSoDestExtraAso] = toLoc ? await Promise.all([
+          findExtraMappedUserIds("SECURITY_OFFICER", toLoc),
+          findExtraMappedUserIds("INITIATOR", toLoc),
+          findExtraMappedUserIds("AREA_SALES_OFFICER", toLoc),
+        ]) : [[], [], []];
         const [destSOs, destInitiators, destASOs] = await Promise.all([
-          prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, ...destFilter } }),
-          prisma.user.findMany({ where: { role: "INITIATOR", ...destFilter } }),
-          prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, ...asoPlantFilter } }),
+          prisma.user.findMany({ where: { role: "SECURITY_OFFICER" as any, OR: [destFilter, ...(noSoDestExtraSec.length > 0 ? [{ id: { in: noSoDestExtraSec } }] : [])] } }),
+          prisma.user.findMany({ where: { role: "INITIATOR", OR: [destFilter, ...(noSoDestExtraInit.length > 0 ? [{ id: { in: noSoDestExtraInit } }] : [])] } }),
+          prisma.user.findMany({ where: { role: "AREA_SALES_OFFICER" as any, OR: [asoPlantFilter, ...(noSoDestExtraAso.length > 0 ? [{ id: { in: noSoDestExtraAso } }] : [])] } }),
         ]);
         const allDest = [...destSOs, ...destInitiators, ...destASOs];
         if (allDest.length > 0) {
@@ -1420,7 +1625,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Non-AFTER_SALES (LT): notify INITIATORs at toLocation
       const toLoc = gatePass.toLocation as string | null;
       const locationFilter = toLoc ? { defaultLocation: ciLocation(toLoc) } : {};
-      const destInitiators = await prisma.user.findMany({ where: { role: "INITIATOR", ...locationFilter } });
+      const ltGateOutExtraInitIds = toLoc ? await findExtraMappedUserIds("INITIATOR", toLoc) : [];
+      const destInitiators = await prisma.user.findMany({ where: { role: "INITIATOR", OR: [locationFilter, ...(ltGateOutExtraInitIds.length > 0 ? [{ id: { in: ltGateOutExtraInitIds } }] : [])] } });
       if (destInitiators.length > 0) {
         await prisma.notification.createMany({
           data: destInitiators.map((r) => ({
@@ -1445,11 +1651,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const recipientAllowed = session.user.role === "RECIPIENT"
       && (gatePass.passType !== "AFTER_SALES"
           || ["MAIN_IN", "MAIN_OUT", "SUB_OUT"].includes(gatePass.passSubType ?? ""));
-    // INITIATOR can confirm gate_in for LT passes heading to their location, and AFTER_SALES
+    // INITIATOR can confirm gate_in for LT passes heading to their location, AFTER_SALES, and TEST_DRIVE
     const initiatorAllowed = session.user.role === "INITIATOR"
-      && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES");
+      && (gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "AFTER_SALES" || gatePass.passType === "TEST_DRIVE");
     const asoAllowed = session.user.role === "AREA_SALES_OFFICER"
-      && (gatePass.passType === "AFTER_SALES" || gatePass.passType === "LOCATION_TRANSFER");
+      && (gatePass.passType === "AFTER_SALES" || gatePass.passType === "LOCATION_TRANSFER" || gatePass.passType === "TEST_DRIVE");
     const canGateIn = recipientAllowed
       || initiatorAllowed
       || asoAllowed;
@@ -1476,6 +1682,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(mismatchNote ? { comments: `[MISMATCH] ${mismatchNote}` } : {}),
       },
     });
+
+    // LT Return Gate Pass: unlock the linked return pass now that the original has completed.
+    if (gatePass.passType === "LOCATION_TRANSFER") {
+      await prisma.gatePass.updateMany({
+        where: { parentPassId: gatePass.id, returnPassLocked: true },
+        data: { returnPassLocked: false },
+      });
+      await sendReturnLegApprovalEmails(gatePass.id);
+    }
 
     await prisma.notification.create({
       data: {
@@ -1507,8 +1722,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (gatePass.passType === "LOCATION_TRANSFER" && gatePass.fromLocation) {
       const fromAsoFilter = ciStartsWithPlant(gatePass.fromLocation as string);
       if (fromAsoFilter) {
+        const gateInExtraAsoIds = await findExtraMappedUserIds("AREA_SALES_OFFICER", gatePass.fromLocation as string);
         const fromAsos = await prisma.user.findMany({
-          where: { role: "AREA_SALES_OFFICER" as any, defaultLocation: fromAsoFilter },
+          where: { role: "AREA_SALES_OFFICER" as any, OR: [{ defaultLocation: fromAsoFilter }, ...(gateInExtraAsoIds.length > 0 ? [{ id: { in: gateInExtraAsoIds } }] : [])] },
           select: { id: true, email: true, name: true },
         });
         if (fromAsos.length > 0) {
@@ -1546,7 +1762,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // INITIATOR / AREA_SALES_OFFICER: resubmit a rejected pass
   if (action === "resubmit") {
-    const canResubmit = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER";
+    // An Approver who created their own pass (Approver-initiated gate passes) can resubmit
+    // it exactly like an Initiator/ASO would — every other role's access is unchanged.
+    const canResubmit = session.user.role === "INITIATOR" || session.user.role === "AREA_SALES_OFFICER"
+      || isApproverRole(session.user.role);
     if (!canResubmit) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
@@ -1568,6 +1787,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       transportMode, carrierName, carrierRegNo, companyName,
       driverName, driverNIC, driverContact,
       mileage, insurance, garagePlate,
+      remarks,
       requestedBy,
     } = body;
 
@@ -1601,6 +1821,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(mileage        !== undefined ? { mileage }        : {}),
         ...(insurance      !== undefined ? { insurance }      : {}),
         ...(garagePlate    !== undefined ? { garagePlate }    : {}),
+        ...(remarks        !== undefined ? { remarks }        : {}),
         ...(requestedBy    !== undefined ? { requestedBy }    : {}),
         ...(approver !== undefined ? { intendedApprover: (typeof approver === "string" ? approver.trim() || null : null) } : {}),
       },
@@ -1609,8 +1830,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // CD CASHIER_REVIEW edit: notify cashier of updated details, skip approver notifications
     if (isCdCashierReviewEdit) {
       const plantPrefix = gatePass.fromLocation ? gatePass.fromLocation.split(" - ")[0].trim() : null;
+      const cdEditExtraCashierIds = plantPrefix ? await findExtraMappedUserIds("CASHIER", plantPrefix) : [];
       const cashiers = plantPrefix
-        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } } })
+        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, OR: [{ defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } }, ...(cdEditExtraCashierIds.length > 0 ? [{ id: { in: cdEditExtraCashierIds } }] : [])] } })
         : await prisma.user.findMany({ where: { role: "CASHIER" as any } });
       if (cashiers.length > 0) {
         await prisma.notification.createMany({
@@ -1640,7 +1862,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         targetApprovers = await prisma.user.findMany({ where: { role: "APPROVER" } });
       }
     } else {
-      targetApprovers = await findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make);
+      // Approver-initiated passes must route resubmission back to their Special Approver,
+      // never a normal Approver — same rule as initial submission. Only the creator can
+      // resubmit (enforced above), so session.user.role here is the creator's own role.
+      const resubmitApproverRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+      targetApprovers = await findApproversForLocationBrand(gatePass.fromLocation, newIntendedApprover ?? undefined, gatePass.make, resubmitApproverRole);
     }
     const resubmitRecipients = [...targetApprovers, ...admins];
     if (resubmitRecipients.length > 0) {
@@ -1681,15 +1907,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // INITIATOR / AREA_SALES_OFFICER: cancel their own PENDING_APPROVAL pass
   if (action === "cancel") {
-    if (session.user.role !== "INITIATOR" && session.user.role !== "ADMIN" && session.user.role !== "AREA_SALES_OFFICER") {
+    // An Approver who created their own pass (Approver-initiated gate passes) can cancel it
+    // exactly like an Initiator/ASO would — every other role's access is unchanged.
+    const canCancelRole = session.user.role === "INITIATOR" || session.user.role === "ADMIN"
+      || session.user.role === "AREA_SALES_OFFICER" || session.user.role === "APPROVER";
+    if (!canCancelRole) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (gatePass.createdById !== session.user.id && session.user.role !== "ADMIN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const isCdCashierReview = gatePass.passType === "CUSTOMER_DELIVERY" && gatePass.status === "CASHIER_REVIEW";
-    if (gatePass.status !== "PENDING_APPROVAL" && !isCdCashierReview) {
-      return NextResponse.json({ error: "Only pending passes can be cancelled" }, { status: 400 });
+    // Cancellable up until the vehicle actually leaves: PENDING_APPROVAL, APPROVED (before
+    // Security Gate Out / print), or the existing CD CASHIER_REVIEW exception.
+    const cancellableStatuses = ["PENDING_APPROVAL", "APPROVED"];
+    if (!cancellableStatuses.includes(gatePass.status) && !isCdCashierReview) {
+      return NextResponse.json({ error: "This gate pass can no longer be cancelled — it has already been gated out." }, { status: 400 });
     }
 
     const updated = await prisma.gatePass.update({
@@ -1698,11 +1931,64 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data: { status: "CANCELLED" as any },
     });
 
+    // Notify + email the approver and the creator that this pass was cancelled.
+    try {
+      const creator = await prisma.user.findUnique({
+        where: { id: gatePass.createdById },
+        select: { id: true, name: true, email: true },
+      });
+      let approverUser: { id: string; name: string; email: string } | null = null;
+      if (gatePass.approvedById) {
+        approverUser = await prisma.user.findUnique({
+          where: { id: gatePass.approvedById },
+          select: { id: true, name: true, email: true },
+        });
+      } else if (gatePass.intendedApprover) {
+        approverUser = await prisma.user.findFirst({
+          where: { name: { equals: gatePass.intendedApprover, mode: "insensitive" } },
+          select: { id: true, name: true, email: true },
+        });
+      }
+
+      const recipients = [creator, approverUser].filter(
+        (u): u is { id: string; name: string; email: string } => !!u
+      );
+      const uniqueRecipients = [...new Map(recipients.map((u) => [u.id, u])).values()];
+
+      if (uniqueRecipients.length > 0) {
+        await prisma.notification.createMany({
+          data: uniqueRecipients.map((u) => ({
+            userId: u.id,
+            type: "GATE_PASS_CANCELLED",
+            title: "Gate Pass Cancelled",
+            message: `${gatePass.gatePassNumber} (${gatePass.vehicle}) was cancelled by ${session.user.name ?? "the initiator"}.`,
+            gatePassId: gatePass.id,
+          })),
+        });
+      }
+
+      const { sendGatePassCancelledEmail } = await import("@/lib/email");
+      for (const u of uniqueRecipients) {
+        sendGatePassCancelledEmail(u.email, u.name, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          cancelledByName: session.user.name ?? "the initiator",
+          initiatedByName: creator?.name ?? null,
+          fromLocation: gatePass.fromLocation,
+          toLocation: gatePass.toLocation,
+        }).catch((e: unknown) => console.error("[email] Gate Pass Cancelled notification failed:", e));
+      }
+    } catch (e) {
+      console.error("[cancel] notify approver/creator failed:", e);
+    }
+
     // Notify cashiers when a CD pass in CASHIER_REVIEW is cancelled
     if (isCdCashierReview) {
       const plantPrefix = gatePass.fromLocation ? gatePass.fromLocation.split(" - ")[0].trim() : null;
+      const cdEditExtraCashierIds = plantPrefix ? await findExtraMappedUserIds("CASHIER", plantPrefix) : [];
       const cashiers = plantPrefix
-        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } } })
+        ? await prisma.user.findMany({ where: { role: "CASHIER" as any, OR: [{ defaultLocation: { startsWith: plantPrefix, mode: "insensitive" as const } }, ...(cdEditExtraCashierIds.length > 0 ? [{ id: { in: cdEditExtraCashierIds } }] : [])] } })
         : await prisma.user.findMany({ where: { role: "CASHIER" as any } });
       if (cashiers.length > 0) {
         await prisma.notification.createMany({
@@ -1928,8 +2214,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // Notify cashiers at this location
       const fromLocEsc = gatePass.fromLocation as string | null;
       const plantPrefixEsc = fromLocEsc ? fromLocEsc.split(" - ")[0].trim() : null;
+      const escExtraCashierIds = plantPrefixEsc ? await findExtraMappedUserIds("CASHIER", plantPrefixEsc) : [];
       const cashierWhereEsc = plantPrefixEsc
-        ? { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefixEsc } }
+        ? { role: "CASHIER" as any, OR: [{ defaultLocation: { startsWith: plantPrefixEsc } }, ...(escExtraCashierIds.length > 0 ? [{ id: { in: escExtraCashierIds } }] : [])] }
         : { role: "CASHIER" as any };
       const cashiersEsc = await prisma.user.findMany({ where: cashierWhereEsc });
       if (cashiersEsc.length > 0) {
@@ -2049,8 +2336,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Notify cashiers at this location
     const fromLocRej = gatePass.fromLocation as string | null;
     const plantPrefixRej = fromLocRej ? fromLocRej.split(" - ")[0].trim() : null;
+    const rejExtraCashierIds = plantPrefixRej ? await findExtraMappedUserIds("CASHIER", plantPrefixRej) : [];
     const cashierWhereRej = plantPrefixRej
-      ? { role: "CASHIER" as any, defaultLocation: { startsWith: plantPrefixRej } }
+      ? { role: "CASHIER" as any, OR: [{ defaultLocation: { startsWith: plantPrefixRej } }, ...(rejExtraCashierIds.length > 0 ? [{ id: { in: rejExtraCashierIds } }] : [])] }
       : { role: "CASHIER" as any };
     const cashiersRej = await prisma.user.findMany({ where: cashierWhereRej });
     if (cashiersRej.length > 0) {

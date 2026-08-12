@@ -49,6 +49,18 @@ type MyPass = {
   parentPass: { id: string; gatePassNumber: string } | null;
 };
 
+// Test Drive — fully isolated from the AFTER_SALES/LOCATION_TRANSFER "incoming" state above,
+// same pattern used everywhere else in the app for this pass type.
+type TestDriveRow = {
+  id: string;
+  gatePassNumber: string;
+  vehicle: string;
+  chassis: string | null;
+  departureDate: string | null;
+  departureTime: string | null;
+  createdBy: { name: string };
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const statusCfg: Record<string, { label: string; bg: string; color: string; dot: string }> = {
@@ -114,6 +126,11 @@ export default function ASODashboardClient({ user }: Props) {
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ id: string; action: "gate_out" | "gate_in"; label: string } | null>(null);
   const [subInConfirmVehicle, setSubInConfirmVehicle] = useState<IncomingVehicle | null>(null);
+
+  // Test Drive vehicles this ASO's plant currently has out — awaiting return confirmation.
+  const [testDriveOut, setTestDriveOut] = useState<TestDriveRow[]>([]);
+  const [testDriveLoading, setTestDriveLoading] = useState(true);
+  const [tdConfirmingId, setTdConfirmingId] = useState<string | null>(null);
 
   // ── Stats derived from incoming + myPasses ─────────────────────────────────
   const incomingCount = incoming.length;
@@ -313,9 +330,49 @@ export default function ASODashboardClient({ user }: Props) {
     }
   }, [subInConfirmVehicle, fetchIncoming, fetchMyPasses]);
 
+  // Test Drive vehicles out from this ASO's plant, awaiting return — same GATE_OUT/locationView
+  // pattern the shared Initiator "Vehicle Arrivals" page (/gate-pass/receive) already uses for Test Drive.
+  const fetchTestDriveOut = useCallback(async () => {
+    setTestDriveLoading(true);
+    try {
+      const params = new URLSearchParams({ passType: "TEST_DRIVE", status: "GATE_OUT", limit: "50", locationView: "true" });
+      const plant = user.defaultLocation?.split(" - ")[0]?.trim();
+      if (plant) params.set("toLocationPlant", plant);
+      else if (user.defaultLocation) params.set("toLocation", user.defaultLocation);
+      const res = await fetch(`/api/gate-pass?${params}`);
+      setTestDriveOut(res.ok ? ((await res.json()).passes ?? []) : []);
+    } catch {
+      setTestDriveOut([]);
+    } finally {
+      setTestDriveLoading(false);
+    }
+  }, [user.defaultLocation]);
+
+  const handleConfirmTestDriveReturn = useCallback(async (id: string) => {
+    setTdConfirmingId(id);
+    try {
+      const res = await fetch(`/api/gate-pass/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "gate_in" }),
+      });
+      if (res.ok) {
+        setTestDriveOut(prev => prev.filter(p => p.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Action failed: ${err.error || res.statusText}`);
+      }
+    } catch {
+      alert("Network error — please try again.");
+    } finally {
+      setTdConfirmingId(null);
+    }
+  }, []);
+
   useEffect(() => { void fetchIncoming(); }, [fetchIncoming]);
   useEffect(() => { void fetchMyPasses(); }, [fetchMyPasses]);
   useEffect(() => { void fetchPendingApprovalTotal(); }, [fetchPendingApprovalTotal]);
+  useEffect(() => { void fetchTestDriveOut(); }, [fetchTestDriveOut]);
   useEffect(() => { setMyPage(1); }, [subTypeFilter, statusFilter]);
 
   // Auto-refresh incoming vehicles when a new GATE_PASS_RECEIVED notification arrives
@@ -770,6 +827,81 @@ export default function ASODashboardClient({ user }: Props) {
                     </svg>
                   )}
                   Create SUB IN
+                </button>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Test Drive Vehicles — awaiting return ──────────────────────────────
+          Fully separate from the AFTER_SALES/LOCATION_TRANSFER sections above:
+          Test Drive has no destination plant (it returns to the same plant it left),
+          so this is simply "vehicles this plant currently has out on test drive." */}
+      {!testDriveLoading && testDriveOut.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.31, type: "spring", stiffness: 160, damping: 22 }}
+          className="rounded-2xl border overflow-hidden"
+          style={{ background: "var(--surface)", borderColor: "#f59e0b66", boxShadow: "var(--card-shadow)" }}>
+
+          <div className="flex items-center justify-between px-5 py-4 border-b"
+            style={{ background: "linear-gradient(135deg,#fffbeb,#fef3c722)", borderColor: "#fde68a" }}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "#fef3c7" }}>
+                <svg className="w-5 h-5" style={{ color: "#b45309" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17l4-9 4 9M9.5 14h5M3 17h18M5 17v2m14-2v2" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="font-bold text-base" style={{ color: "#92400e" }}>Test Drive Vehicles — Awaiting Return</h2>
+                <p className="text-xs" style={{ color: "#b45309" }}>Out on test drive from your plant</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-bold"
+              style={{ background: "#fef3c7", color: "#b45309" }}>
+              {testDriveOut.length} vehicle{testDriveOut.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          <div className="p-4 flex flex-col gap-3">
+            {testDriveOut.map((v) => (
+              <motion.div key={v.id}
+                initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                className="rounded-xl border p-4 flex items-center gap-4"
+                style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-mono font-bold text-sm" style={{ color: "var(--accent)" }}>{v.gatePassNumber}</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "#dbeafe", color: "#1d4ed8" }}>
+                      Test Drive
+                    </span>
+                  </div>
+                  <p className="font-bold text-sm" style={{ color: "var(--text)" }}>{v.vehicle}</p>
+                  {v.chassis && <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{v.chassis}</p>}
+                  {v.departureDate && (
+                    <p className="text-xs mt-1" style={{ color: "#b45309" }}>
+                      Departed: {fmtDate(v.departureDate)}{v.departureTime ? ` ${v.departureTime}` : ""}
+                    </p>
+                  )}
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>Created by: {v.createdBy.name}</p>
+                </div>
+                <button
+                  onClick={() => void handleConfirmTestDriveReturn(v.id)}
+                  disabled={tdConfirmingId === v.id}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-bold flex-shrink-0 disabled:opacity-60 transition-all hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)" }}>
+                  {tdConfirmingId === v.id ? (
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  Confirm Return
                 </button>
               </motion.div>
             ))}

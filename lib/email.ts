@@ -194,7 +194,7 @@ table.vt thead tr{background:#f4f6fb;border-bottom:1px solid #d0d8e8}
 table.vt thead th{font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#555;padding:9px 13px;text-align:left}
 table.vt tbody tr{border-bottom:1px solid #d0d8e8}
 table.vt tbody tr:last-child{border-bottom:none}
-table.vt td{padding:10px 13px;color:#333;vertical-align:middle}
+table.vt td{padding:10px 13px;color:#333;vertical-align:middle;text-align:left}
 table.vt td.m{font-weight:700;color:#111;letter-spacing:0.03em}
 .rn{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;background:#1E4FA0;color:#fff;font-size:9.5px;font-weight:800;border-radius:50%}
 .dtag{display:inline-block;background:#f0f8e2;color:#6ea02f;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:3px;border:1px solid rgba(141,198,63,0.28);letter-spacing:0.02em}
@@ -203,11 +203,11 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
 .action-head{background:#000;padding:11px 18px;display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;color:#fff;letter-spacing:0.04em;text-transform:uppercase}
 .action-body{background:#f4f6fb;padding:16px 18px 18px}
 .action-desc{font-size:13px;font-weight:300;color:#555;line-height:1.6;margin-bottom:16px}
-.btn-row{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;align-items:center}
-.btn-ok{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)}
-.btn-no{display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)}
+.btn-row{display:flex;gap:60px;flex-wrap:wrap;justify-content:center;align-items:center;text-align:center}
+.btn-ok{display:inline-block;padding:16px 36px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
+.btn-no{display:inline-block;padding:16px 36px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap}
 .btn-view{display:inline-block;padding:10px 22px;background:#e4ecf8;color:#1E4FA0;border-radius:3px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;text-decoration:none}
-.expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:14px;font-size:11.5px;color:#92400e}
+.expiry-note{background:#fffbf0;border:1px solid #fde68a;border-radius:4px;padding:10px 14px;margin-top:16px;font-size:11.5px;color:#92400e}
 .status-box{border:1px solid rgba(141,198,63,0.35);background:linear-gradient(180deg,#f6fbe9 0%,#edf7dd 100%);border-radius:4px;padding:16px 16px 14px;margin-bottom:22px}
 .status-top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .status-icon{width:34px;height:34px;border-radius:50%;background:#8DC63F;display:flex;align-items:center;justify-content:center;color:#000;font-size:18px;font-weight:800;flex-shrink:0}
@@ -235,30 +235,70 @@ hr.div{border:none;border-top:1px solid #d0d8e8;margin:20px 0}
   .header-gp{border-left:none;border-top:1px solid rgba(255,255,255,0.12);align-items:flex-start}
   .info-grid{grid-template-columns:1fr 1fr}
   .sched-grid{grid-template-columns:1fr}
-  .btn-row{flex-direction:column}
+  .btn-row{flex-direction:column;gap:0}
+  .btn-ok,.btn-no{width:100%;text-align:center;box-sizing:border-box;margin-right:0 !important}
+  .btn-ok{margin-bottom:24px}
+  .btn-cell-l,.btn-cell-r{display:block !important;width:100% !important}
+  .btn-cell-l{padding:0 0 24px 0 !important}
+  .btn-cell-r{padding:0 !important}
   .body{padding:18px 14px}
   .footer{flex-direction:column;gap:10px}
+  .desktop-hd{display:none !important}
+  .mobile-hd{display:block !important;max-height:none !important;overflow:visible !important}
+  .vtable-wrap{overflow-x:auto}
+  table.vt{font-size:11px}
+  table.vt thead th{font-size:8.5px;padding:8px 9px}
+  table.vt td{padding:9px}
 }`;
 }
 
 function emailHeader(title: string, subtitle: string, gpNumber: string): string {
   return `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse;table-layout:fixed">
+  <!-- Desktop: 3-column single row (hidden on mobile via media query) -->
+  <table width="100%" class="desktop-hd" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
     <tr>
-      <td width="145" style="padding:18px 20px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:145px">
-        <img src="cid:logo@dimo" alt="DIMO" style="width:105px;height:auto;display:block;margin:0 auto">
+      <td width="80" style="padding:18px 14px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:80px">
+        <img src="cid:logo@dimo" alt="DIMO" width="72" height="72" style="width:72px;height:72px;display:block;margin:0 auto">
       </td>
-      <td style="padding:18px 22px;vertical-align:middle">
+      <td style="padding:18px 16px;vertical-align:middle">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
-        <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.15;margin-bottom:4px">${title}</div>
-        <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em">${subtitle}</div>
+        <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:4px;word-break:break-word">${title}</div>
+        <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
       </td>
-      <td width="140" style="padding:18px 20px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:140px">
+      <td width="120" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:120px;white-space:nowrap">
         <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Gate Pass No.</div>
-        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em;white-space:nowrap">${gpNumber}</div>
       </td>
     </tr>
   </table>
+  <!-- Mobile: 2-row layout (hidden by default, shown on mobile via media query). Outlook
+       desktop (Word rendering engine) doesn't reliably honor the display:none below, so it's
+       also wrapped in an Outlook-only conditional comment — Outlook (mso) always excludes
+       this block outright, guaranteeing it never renders alongside desktop-hd above. Every
+       other client (web/mobile mail apps) ignores the conditional syntax and falls back to
+       the existing CSS-driven responsive behavior, unchanged. -->
+  <!--[if !mso]><!-->
+  <div class="mobile-hd" style="display:none;max-height:0;overflow:hidden;background:#1E4FA0">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
+      <tr>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
+          <img src="cid:logo@dimo" alt="DIMO" width="64" height="64" style="width:64px;height:64px;display:block">
+        </td>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
+          <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Gate Pass No.</div>
+          <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${gpNumber}</div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:14px 16px;vertical-align:middle">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:5px">Diesel &amp; Motor Engineering Plc.</div>
+          <div style="font-size:19px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:3px;word-break:break-word">${title}</div>
+          <div style="font-size:11px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+  <!--<![endif]-->
   <div style="height:4px;background:#8DC63F"></div>`;
 }
 
@@ -266,7 +306,6 @@ function emailFooter(gpNumber: string): string {
   return `
   <div class="footer">
     <div class="ft-left">
-      <strong>Diesel &amp; Motor Engineering Plc.</strong> &mdash; Fleet Operations System<br>
       Automated notification. Do not reply to this email directly.
     </div>
     <div class="ft-ref">REF: ${gpNumber}</div>
@@ -308,18 +347,20 @@ export async function sendApprovalRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Your approval is required for this gate pass.
-  <span>Review all details carefully before taking action.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Your approval is required for this gate pass.
+  </div>
+  <div style="font-weight:300">Review all details carefully before taking action.</div>
 </div>
 <div class="body">
   <div class="greeting">
     Dear <strong>${approverName}</strong>,<br>
-    A vehicle gate pass has been submitted and requires your authorisation before departure. Please review the information below in full before making your decision.
+    A vehicle gate pass has been submitted and requires your authorisation before departure.
   </div>
   <div class="sec">
     ${secLabel("Pass Information")}
@@ -337,7 +378,7 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
     ${secLabel("Departure Schedule")}
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #d0d8e8;border-radius:4px;border-collapse:collapse;overflow:hidden">
       <tr>
-        <td width="50%" style="background:#fff;padding:13px 15px;border-right:1px solid #d0d8e8;vertical-align:middle">
+        <td style="background:#fff;padding:13px 15px;vertical-align:middle">
           <table cellpadding="0" cellspacing="0">
             <tr>
               <td width="47" style="vertical-align:middle;padding-right:13px">
@@ -353,32 +394,18 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
             </tr>
           </table>
         </td>
-        <td width="50%" style="background:#fff;padding:13px 15px;vertical-align:middle">
-          <table cellpadding="0" cellspacing="0">
-            <tr>
-              <td width="47" style="vertical-align:middle;padding-right:13px">
-                <table cellpadding="0" cellspacing="0"><tr>
-                  <td width="34" height="34" align="center" valign="middle" style="width:34px;height:34px;background:#dbeafe;border-radius:17px;text-align:center;vertical-align:middle;font-size:18px;line-height:34px">&#128663;</td>
-                </tr></table>
-              </td>
-              <td style="vertical-align:middle">
-                <div style="font-size:8.5px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:#888;margin-bottom:4px">Vehicle</div>
-                <div style="font-size:13px;font-weight:700;color:#111">${pass.vehicle}</div>
-                ${pass.chassis ? `<div style="font-size:12.5px;font-weight:500;color:#1E4FA0;margin-top:2px;letter-spacing:0.04em">${pass.chassis}</div>` : ""}
-              </td>
-            </tr>
-          </table>
-        </td>
       </tr>
     </table>
   </div>` : ""}
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar">
-        <span>Vehicle on this pass</span>
-        <span class="vtable-badge">1</span>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead>
           <tr>
@@ -417,17 +444,31 @@ ${emailHeader("Gate Pass Approval", "Vehicle Gate Pass &middot; Action Required"
           <td align="center" style="padding:0">
             <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
               <tr>
-                <td style="padding:0 16px 0 0">
-                  <a href="${approveUrl}" class="btn-ok" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Approve Gate Pass
+                <td class="btn-cell-l" style="padding:0 16px 0 0">
+                  <!--[if mso]>
+                  <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+                  <td align="center" bgcolor="#4a8c1c" style="padding:16px 36px;background:#4a8c1c;border-radius:8px;mso-padding-alt:16px 36px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap">
+                  <a href="${approveUrl}" style="color:#ffffff;text-decoration:none;font-weight:700">Approve Gate Pass</a>
+                  </td></tr></table>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <a href="${approveUrl}" class="btn-ok" style="display:inline-block;padding:16px 36px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Gate Pass</span>
                   </a>
+                  <!--<![endif]-->
                 </td>
-                <td style="padding:0 0 0 16px">
-                  <a href="${rejectUrl}" class="btn-no" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
-                    Reject Gate Pass
+                <td class="btn-cell-r" style="padding:0 0 0 16px">
+                  <!--[if mso]>
+                  <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+                  <td align="center" bgcolor="#dc2626" style="padding:16px 36px;background:#dc2626;border-radius:8px;mso-padding-alt:16px 36px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap">
+                  <a href="${rejectUrl}" style="color:#ffffff;text-decoration:none;font-weight:700">Reject Gate Pass</a>
+                  </td></tr></table>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <a href="${rejectUrl}" class="btn-no" style="display:inline-block;padding:16px 36px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:14px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="18" height="18" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Gate Pass</span>
                   </a>
+                  <!--<![endif]-->
                 </td>
               </tr>
             </table>
@@ -485,13 +526,15 @@ export async function sendRequestedByNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Information", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M7.5 5v4M7.5 10.5h.01" stroke="#496d10" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Gate pass created and sent for approval.
-  <span>No action is required from you at this stage.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M7.5 5v4M7.5 10.5h.01" stroke="#496d10" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Gate pass created and sent for approval.
+  </div>
+  <div style="font-weight:400;color:#5e6b46">No action is required from you at this stage.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -525,10 +568,12 @@ ${emailHeader("Gate Pass Created", "Vehicle Gate Pass &middot; For Your Informat
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar">
-        <span>Vehicle on this pass</span>
-        <span class="vtable-badge">1</span>
-      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead>
           <tr>
@@ -605,13 +650,15 @@ export async function sendRejectionNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Rejected", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  This gate pass has been rejected by ${pass.approverName}.
-  <span>Please review the reason below and resubmit if required.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This gate pass has been rejected by ${pass.approverName}.
+  </div>
+  <div style="font-weight:300">Please review the reason below and resubmit if required.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -698,13 +745,15 @@ export async function sendApprovalNotificationEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Gate Pass Approved", "Vehicle Gate Pass &middot; Status Update", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  This gate pass has been approved by ${pass.approverName}.
-  <span>The vehicle is cleared for movement.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    This gate pass has been approved by ${pass.approverName}.
+  </div>
+  <div style="font-weight:400;color:#5e6b46">The vehicle is cleared for movement.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -792,13 +841,15 @@ export async function sendAsoTransferOutEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Transferred Out", "Vehicle Gate Pass &middot; Transfer Notification", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  A vehicle has been transferred out of your location by an Initiator.
-  <span>Please review the transfer details below.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A vehicle has been transferred out of your location by an Initiator.
+  </div>
+  <div style="font-weight:300">Please review the transfer details below.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -885,13 +936,15 @@ export async function sendEscalationRequestEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier Escalation", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  Your sign-off is required before this vehicle can be released.
-  <span>The Cashier has escalated an unpaid order to you.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Your sign-off is required before this vehicle can be released.
+  </div>
+  <div style="font-weight:300">The Cashier has escalated an unpaid order to you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -911,7 +964,12 @@ ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier E
   <div class="sec">
     ${secLabel("Vehicle Details")}
     <div class="vtable-wrap">
-      <div class="vtable-bar"><span>Vehicle on this pass</span><span class="vtable-badge">1</span></div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000;border-collapse:collapse">
+        <tr>
+          <td style="padding:7px 13px;font-size:9px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.6);text-align:left">Vehicle on this pass</td>
+          <td style="padding:7px 13px;text-align:right"><span class="vtable-badge">1</span></td>
+        </tr>
+      </table>
       <table class="vt">
         <thead><tr><th>#</th><th>Vehicle No.</th>${pass.chassis ? "<th>Chassis No.</th>" : ""}<th>Location</th></tr></thead>
         <tbody>
@@ -952,15 +1010,13 @@ ${emailHeader("Payment Sign-off Required", "Customer Delivery &middot; Cashier E
             <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto">
               <tr>
                 <td style="padding:0 16px 0 0">
-                  <a href="${approveUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14)">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    Approve Sign-off
+                  <a href="${approveUrl}" style="display:inline-block;padding:14px 32px;background:#4a8c1c;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(74,140,28,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Approve Sign-off</span>
                   </a>
                 </td>
                 <td style="padding:0 0 0 16px">
-                  <a href="${rejectUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14)">
-                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>
-                    Reject Sign-off
+                  <a href="${rejectUrl}" style="display:inline-block;padding:14px 32px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(220,38,38,0.38),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+                    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M4.5 4.5l8 8M12.5 4.5l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg><span style="vertical-align:middle">Reject Sign-off</span>
                   </a>
                 </td>
               </tr>
@@ -1130,13 +1186,15 @@ export async function sendEscalationApprovedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Approver Signed Off", "Customer Delivery &middot; Generate Invoice Now", pass.gatePassNumber)}
-<div class="notice-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
-    <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  ${pass.approverName} approved the remaining orders. Please generate the invoice.
-  <span>Action required from you.</span>
+<div class="notice-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:700">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#496d10" stroke-width="1.3"/>
+      <path d="M5 7.5l2 2 3.5-3.5" stroke="#496d10" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    ${pass.approverName} approved the remaining orders. Please generate the invoice.
+  </div>
+  <div style="font-weight:400;color:#5e6b46">Action required from you.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1212,13 +1270,15 @@ export async function sendEscalationRejectedEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Sign-off Rejected", "Customer Delivery &middot; Action Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  ${pass.approverName} rejected the sign-off request.
-  <span>Please resolve the pending orders and re-escalate if needed.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    ${pass.approverName} rejected the sign-off request.
+  </div>
+  <div style="font-weight:300">Please resolve the pending orders and re-escalate if needed.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1296,13 +1356,15 @@ export async function sendAsoArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Arrived at Destination", "Vehicle Gate Pass &middot; Arrival Notification", pass.gatePassNumber)}
-<div class="alert-bar" style="background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
-    <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>
-  The vehicle you transferred out has arrived safely at its destination.
-  <span>Transfer complete.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    The vehicle you transferred out has arrived safely at its destination.
+  </div>
+  <div style="font-weight:300;color:#065f46">Transfer complete.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1383,13 +1445,15 @@ export async function sendAsoConfirmArrivalEmail(
 <body>
 <div class="wrap"><div class="card">
 ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot; Arrival Confirmation Required", pass.gatePassNumber)}
-<div class="alert-bar">
-  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-    <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
-    <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
-  </svg>
-  A vehicle is on its way to your plant and requires arrival confirmation.
-  <span>Please confirm once the vehicle has arrived.</span>
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A vehicle is on its way to your plant and requires arrival confirmation.
+  </div>
+  <div style="font-weight:300">Please confirm once the vehicle has arrived.</div>
 </div>
 <div class="body">
   <div class="greeting">
@@ -1435,9 +1499,8 @@ ${emailHeader("Vehicle Incoming — Confirm Arrival", "Location Transfer &middot
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
         <tr>
           <td align="center" style="padding:0">
-            <a href="${confirmUrl}" style="display:inline-flex;align-items:center;gap:9px;padding:14px 36px;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(21,128,61,0.40),0 1px 3px rgba(0,0,0,0.14)">
-              <svg width="17" height="17" viewBox="0 0 17 17" fill="none"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Confirm Arrival
+            <a href="${confirmUrl}" style="display:inline-block;padding:14px 36px;background:#15803d;color:#fff;border:none;border-radius:8px;font-family:'Gotham','Century Gothic','Futura',sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;text-decoration:none;box-shadow:0 4px 14px rgba(21,128,61,0.40),0 1px 3px rgba(0,0,0,0.14);white-space:nowrap">
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none" style="vertical-align:middle;margin-right:9px"><path d="M3.5 8.5l4 4 6-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span style="vertical-align:middle">Confirm Arrival</span>
             </a>
           </td>
         </tr>
@@ -1459,6 +1522,350 @@ ${emailFooter(pass.gatePassNumber)}
   await sendGraphMail(
     asoEmail,
     `[Action Required] Confirm Vehicle Arrival — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+// ─── Test Drive: Return Time exceeds the 1-hour cap (informational only, not a block) ───
+export async function sendTestDriveReturnTimeExceededEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    departureDate?: string | null;
+    departureTime?: string | null;
+    returnTime?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Return Time Exceeds 1 Hour &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive — Return Time Notice", "Test Drive &middot; Informational", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    The scheduled Return Time for this Test Drive exceeds the 1-hour limit.
+  </div>
+  <div style="font-weight:300">No action is required to block the pass — this is for your awareness.</div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was created with a scheduled Return Time more than 1 hour after the Gate Out Time.
+  </div>
+  <div class="sec">
+    ${secLabel("Schedule")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.departureDate ? `<div class="ic"><div class="ic-lbl">Gate Out</div><div class="ic-val">${pass.departureDate} ${pass.departureTime ?? ""}</div></div>` : ""}
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Return Time Exceeds 1 Hour — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+type TestDriveOverdueDetails = {
+  gatePassNumber: string;
+  passId?: string | null;
+  vehicle: string;
+  customerName?: string | null;
+  driverName?: string | null;
+  initiatorName: string;
+  returnTime?: string | null;
+};
+
+// ─── Test Drive overdue: reminder to the Initiator (send-once) ───
+export async function sendTestDriveOverdueInitiatorEmail(
+  toEmail: string,
+  toName: string,
+  pass: TestDriveOverdueDetails
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Vehicle Return Pending &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive Vehicle Return Pending", "Test Drive &middot; Action Required", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This Test Drive vehicle has not yet been marked as returned.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Our records indicate that the Test Drive vehicle below has not yet been marked as returned.
+  </div>
+  <div class="sec">
+    ${secLabel("Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.customerName ? `<div class="ic"><div class="ic-lbl">Customer</div><div class="ic-val">${pass.customerName}</div></div>` : ""}
+      ${pass.driverName ? `<div class="ic"><div class="ic-lbl">Driver</div><div class="ic-val">${pass.driverName}</div></div>` : ""}
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div class="greeting" style="margin-top:16px">
+    Please verify whether the vehicle has returned to the premises and update the Gate Pass System accordingly.
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Vehicle Return Pending — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+// ─── Test Drive overdue: reminder to the Initiator's Reporting Manager (send-once) ───
+export async function sendTestDriveOverdueManagerEmail(
+  toEmail: string,
+  toName: string,
+  pass: TestDriveOverdueDetails
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive Vehicle Return Pending &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Test Drive Vehicle Return Pending", "Test Drive &middot; Follow-up Required", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    A Test Drive vehicle has not been marked as returned after the scheduled return time.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    The following Test Drive vehicle has not been marked as returned after the scheduled return time.
+  </div>
+  <div class="sec">
+    ${secLabel("Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Initiator</div><div class="ic-val">${pass.initiatorName}</div></div>
+      ${pass.driverName ? `<div class="ic"><div class="ic-lbl">Driver</div><div class="ic-val">${pass.driverName}</div></div>` : ""}
+      ${pass.customerName ? `<div class="ic"><div class="ic-lbl">Customer</div><div class="ic-val">${pass.customerName}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Vehicle Number</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.returnTime ? `<div class="ic"><div class="ic-lbl">Scheduled Return Time</div><div class="ic-val">${pass.returnTime}</div></div>` : ""}
+    </div>
+  </div>
+  <div class="greeting" style="margin-top:16px">
+    Please follow up with the initiator and ensure the vehicle has safely returned to the premises. Once confirmed, kindly request the initiator to update the Gate Pass System.
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Test Drive Vehicle Return Pending — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+// ─── Gate Pass Cancelled — sent to both the approver and the creator ───
+export async function sendGatePassCancelledEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    cancelledByName: string;
+    initiatedByName?: string | null;
+    fromLocation?: string | null;
+    toLocation?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gate Pass Cancelled &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Gate Pass Cancelled", "Status Update", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    This gate pass has been cancelled.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting" style="color:#1a1a1a">
+    Dear <strong>${toName}</strong>,<br>
+    Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) was cancelled by <strong>${pass.cancelledByName}</strong>. No further action is required.
+  </div>
+  <div class="sec">
+    ${secLabel("Pass Information")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.fromLocation ? `<div class="ic"><div class="ic-lbl">From Location</div><div class="ic-val">${pass.fromLocation}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">To Location</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+      ${pass.initiatedByName ? `<div class="ic"><div class="ic-lbl">Initiated By</div><div class="ic-val">${pass.initiatedByName}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Cancelled By</div><div class="ic-val">${pass.cancelledByName}</div></div>
+    </div>
+  </div>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Gate Pass Cancelled — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendDriverChangedEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    previousDriverName: string;
+    previousDriverNIC: string;
+    newDriverName: string;
+    newDriverNIC: string;
+    previousCompanyName?: string | null;
+    newCompanyName?: string | null;
+    changedByName: string;
+    reason?: string | null;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+  const carrierChanged = !!pass.previousCompanyName && !!pass.newCompanyName;
+  const heading = carrierChanged ? "Driver / Carrier Changed" : "Driver Changed";
+  const bannerText = carrierChanged
+    ? "The driver and carrier on this gate pass were changed."
+    : "The driver on this gate pass was changed.";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${heading} &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader(heading, "Status Update", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5L13.5 13H1.5L7.5 1.5Z" stroke="#92610a" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M7.5 5.5V9M7.5 11h.01" stroke="#92610a" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    ${bannerText}
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    ${pass.changedByName} updated gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}).
+  </div>
+  <table class="vt" style="width:100%;margin-top:14px;border-collapse:collapse">
+    <tr><td style="padding:6px 0;color:#6b7280;text-align:left">Previous Driver</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.previousDriverName} (${pass.previousDriverNIC})</td></tr>
+    <tr><td style="padding:6px 0;color:#6b7280;text-align:left">New Driver</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.newDriverName} (${pass.newDriverNIC})</td></tr>
+    ${carrierChanged ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">Previous Carrier</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.previousCompanyName}</td></tr>` : ""}
+    ${carrierChanged ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">New Carrier</td><td style="padding:6px 0;font-weight:600;text-align:left">${pass.newCompanyName}</td></tr>` : ""}
+    ${pass.reason ? `<tr><td style="padding:6px 0;color:#6b7280;text-align:left">Reason</td><td style="padding:6px 0;text-align:left">${pass.reason}</td></tr>` : ""}
+  </table>
+  <div style="margin-top:16px;text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `${heading} — ${pass.gatePassNumber}`,
     html
   );
 }

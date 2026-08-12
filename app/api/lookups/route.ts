@@ -11,6 +11,18 @@ function normalize(text: string) {
   return text.trim();
 }
 
+// Same format rules already enforced on the Gate Pass creation form's driver fields.
+function isValidNIC(v: string) {
+  return /^[0-9]{9}[VvXx]$/.test(v.trim()) || /^[0-9]{12}$/.test(v.trim());
+}
+function isValidPhone(v: string) {
+  return /^[0-9+\-\s]{7,15}$/.test(v.trim());
+}
+// Sri Lankan driving licence number: 1 letter followed by 7 digits (e.g. B1234567).
+function isValidLicenceNo(v: string) {
+  return /^[A-Za-z][0-9]{7}$/.test(v.trim());
+}
+
 function inferLocationType(loc: { storageLocation: string; storageDescription: string }): string {
   if (loc.storageLocation.toUpperCase().startsWith("D")) return "DEALER";
   const desc = loc.storageDescription.trim().toLowerCase();
@@ -73,6 +85,10 @@ export async function GET(req: NextRequest) {
   const locationType = searchParams.get("locationType") ?? undefined;
   const chassisNo = searchParams.get("chassisNo") ?? undefined;
 
+  // An Approver initiating their own gate pass must only ever find their mapped Special
+  // Approver here, never a normal Approver — every other creator role is unaffected.
+  const approverLookupRole = session.user.role === "APPROVER" ? "SPECIAL_APPROVER" : "APPROVER";
+
   const fieldsParam = searchParams.get("fields");
   if (fieldsParam) {
     const fields = fieldsParam.split(",").map((f) => f.trim()) as LookupField[];
@@ -83,7 +99,7 @@ export async function GET(req: NextRequest) {
       const [apiLocations, outReasons, approvers, companies, carriers] = await Promise.all([
         fetchPlantLocationOptions().catch(() => []),
         fields.includes("outReason") ? prisma.outReasonOption.findMany({ orderBy: { value: "asc" }, take: 50 }) : Promise.resolve([]),
-        fields.includes("approver") ? prisma.user.findMany({ where: { role: "APPROVER" }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
+        fields.includes("approver") ? prisma.user.findMany({ where: { role: approverLookupRole as any }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("companyName") ? prisma.carrierOption.findMany({ orderBy: { companyName: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("carrierRegNo") ? prisma.carrierOption.findMany({ orderBy: { registrationNo: "asc" }, take: 50 }) : Promise.resolve([]),
       ]);
@@ -184,79 +200,21 @@ export async function GET(req: NextRequest) {
         // Filter by locationType FIRST (while storageDescription still has the raw SAP value
         // so inferType can correctly classify "Promo location" → PROMOTION, etc.).
         // Overlaying custom DB labels before this step would break inferType for renamed entries.
-        let filteredOptions = filterApiLocations(options, q, locationType);
-
-        // For PROMOTION/FINANCE: if this vehicle has no matching ext_sloc entries,
-        // fall back to all locations of that type from the already-fetched allRows.
-        if (filteredOptions.length === 0 && (locationType === "PROMOTION" || locationType === "FINANCE")) {
-          const allSeen = new Set<string>();
-          const allOptions: LocationOption[] = [];
-          for (const row of allRows) {
-            if (!row.extPlant || !row.extSloc) continue;
-            const id = `${row.extPlant}|${row.extSloc}`;
-            if (allSeen.has(id)) continue;
-            allSeen.add(id);
-            const plantDesc = row.extPlantDesc || row.extPlant;
-            const slocDesc  = row.extSlocDesc  || row.extSloc;
-            allOptions.push({
-              id, value: `${plantDesc} - ${slocDesc}`, label: `${plantDesc} - ${slocDesc}`,
-              plantCode: row.extPlant, plantDescription: plantDesc,
-              storageLocation: row.extSloc, storageDescription: slocDesc,
-              source: "api",
-            });
-          }
-          filteredOptions = filterApiLocations(allOptions, q, locationType);
-        }
+        // Cross-vehicle fallback removed per explicit instruction — if this vehicle has no
+        // matching ext_sloc entries of the requested type, the list is empty (no other
+        // vehicle's SAP history is searched).
+        const filteredOptions = filterApiLocations(options, q, locationType);
 
         return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
 
-      // No vehicle selected — use SAP current-location data for all types.
-      // DEALER gets a DB fallback for slots with no vehicles currently parked.
-      // PROMO/FINANCE: SAP live only (no DB fallback per user instruction).
-      const isDealer = locationType === "DEALER";
-      const [apiLocations, dbRows] = await Promise.all([
-        fetchPlantLocationOptions().catch(() => []),
-        isDealer ? prisma.locationOption.findMany() : Promise.resolve([]),
-      ]);
-
-      // SAP live — filtered by type + query
+      // No vehicle selected — SAP live data only for all types (DIMO/DEALER/PROMOTION/FINANCE).
+      // DEALER's DB fallback (locationOption additions) has been removed per explicit instruction —
+      // every type now sources purely from SAP's ext_plant/ext_sloc destinations, no DB additions.
+      const apiLocations = await fetchPlantLocationOptions().catch(() => []);
       const filteredApi = filterApiLocations(apiLocations, q, locationType);
-      const apiKeys = new Set(filteredApi.map((l) => `${l.plantCode}|${l.storageLocation}`));
 
-      // DB fallback for DEALER only: adds dealer slocs that are in the DB but currently have no
-      // vehicles in SAP so they're invisible in the live feed.
-      // PROMO/FINANCE: DB fallback disabled — only API data used (see above).
-      const dbAdditions: typeof filteredApi = [];
-      if (isDealer) {
-        for (const dbloc of dbRows) {
-          const key = `${dbloc.plantCode}|${dbloc.storageLocation}`;
-          if (apiKeys.has(key)) continue;
-          const storageDesc = dbloc.storageDescription || dbloc.storageLocation;
-          const value = [dbloc.plantDescription, storageDesc].filter(Boolean).join(" - ");
-          if (!value) continue;
-
-          // Only DEALER entries (D-prefix sloc)
-          if (!dbloc.storageLocation.toUpperCase().startsWith("D")) continue;
-          if (dbloc.locationType && dbloc.locationType !== "DEALER") continue;
-
-          if (q && ![value, dbloc.plantCode, dbloc.storageLocation].join(" ").toLowerCase().includes(q.toLowerCase())) continue;
-
-          dbAdditions.push({
-            id: key,
-            value,
-            label: value,
-            plantCode: dbloc.plantCode,
-            plantDescription: dbloc.plantDescription,
-            storageLocation: dbloc.storageLocation,
-            storageDescription: storageDesc,
-            source: "db" as const,
-          });
-        }
-      }
-
-      const allOptions = [...filteredApi, ...dbAdditions];
-      return NextResponse.json({ options: (await expandByLocationLabels(prisma, allOptions)).slice(0, take) });
+      return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredApi)).slice(0, take) });
     }
 
     if (field === "requestedBy") {
@@ -435,21 +393,41 @@ export async function GET(req: NextRequest) {
       // CD only: exclude vehicles that already have an active or completed CD gate pass.
       // REJECTED and CANCELLED are the only statuses where a new CD is allowed.
       // LT vehicles are unaffected — they stay visible until their CD is completed.
+      let alreadyDeliveredInfo: { gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null } | null = null;
       if (rawPassType === "CUSTOMER_DELIVERY") {
         const usedCdPasses = await prisma.gatePass.findMany({
           where: { passType: "CUSTOMER_DELIVERY", status: { notIn: ["REJECTED", "CANCELLED"] } },
-          select: { vehicle: true, chassis: true },
+          select: { vehicle: true, chassis: true, status: true, gatePassNumber: true, gateOutBy: true, departureDate: true, departureTime: true },
         });
         const usedPlates  = new Set(usedCdPasses.map(p => (p.vehicle  ?? "").toUpperCase()).filter(Boolean));
         const usedChassis = new Set(usedCdPasses.map(p => (p.chassis  ?? "").toUpperCase()).filter(Boolean));
         sorted = sorted.filter(v =>
           !usedPlates.has(v.value.toUpperCase()) && !usedChassis.has(v.chassisNo.toUpperCase())
         );
+
+        // Informational only: surface details when the search matches a vehicle that
+        // was already Customer Delivered, so the empty result isn't mistaken for a bug.
+        const needle = q.trim().toUpperCase();
+        if (needle) {
+          const delivered = usedCdPasses.find(p =>
+            p.status === "COMPLETED" &&
+            ((p.vehicle ?? "").toUpperCase().includes(needle) || (p.chassis ?? "").toUpperCase().includes(needle))
+          );
+          if (delivered) {
+            alreadyDeliveredInfo = {
+              gatePassNumber: delivered.gatePassNumber,
+              gateOutBy: delivered.gateOutBy,
+              departureDate: delivered.departureDate,
+              departureTime: delivered.departureTime,
+            };
+          }
+        }
       }
 
       return NextResponse.json({
         options: sorted.slice(0, take),
         source: "combined",
+        ...(alreadyDeliveredInfo ? { alreadyDeliveredInfo } : {}),
       });
     }
 
@@ -485,37 +463,40 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    if (field === "driverNIC") {
-      const drivers = await (prisma as any).driverOption.findMany({
-        where: q ? { OR: [{ nic: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : undefined,
-        orderBy: { nic: "asc" },
-        take,
-      });
-      return NextResponse.json({
-        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
-          id: d.id, value: d.nic, label: `${d.nic} — ${d.name}`,
-          driverName: d.name, driverContact: d.contact ?? "",
-        })),
-      });
-    }
+    if (field === "driverNIC" || field === "driverName") {
+      // Filters the driver list to whichever Carrier is currently selected on the form —
+      // resolved either from an already-known CarrierOption id (the post-approval
+      // Change Driver / Carrier screen) or from a raw registration no. string (the LT/CD/
+      // After Sales creation forms, which only hold free-text Carrier fields in state).
+      // Falls back to the full unfiltered list when the carrier isn't resolvable, so an
+      // unmapped/new carrier never results in a dead-end empty dropdown.
+      let carrierIdFilter = searchParams.get("carrierId") ?? undefined;
+      const carrierRegNoParam = searchParams.get("carrierRegNo") ?? undefined;
+      if (!carrierIdFilter && carrierRegNoParam) {
+        const resolvedCarrier = await prisma.carrierOption.findUnique({ where: { registrationNo: carrierRegNoParam } });
+        if (resolvedCarrier) carrierIdFilter = resolvedCarrier.id;
+      }
 
-    if (field === "driverName") {
       const drivers = await (prisma as any).driverOption.findMany({
-        where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { nic: { contains: q, mode: "insensitive" } }] } : undefined,
-        orderBy: { name: "asc" },
+        where: {
+          ...(q ? { OR: [{ nic: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } : {}),
+          ...(carrierIdFilter ? { carrierId: carrierIdFilter } : {}),
+        },
+        orderBy: field === "driverNIC" ? { nic: "asc" } : { name: "asc" },
         take,
       });
       return NextResponse.json({
-        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null }) => ({
-          id: d.id, value: d.name, label: `${d.name} (${d.nic})`,
-          driverNIC: d.nic, driverContact: d.contact ?? "",
-        })),
+        options: drivers.map((d: { id: string; name: string; nic: string; contact: string | null; licenceNo: string | null }) =>
+          field === "driverNIC"
+            ? { id: d.id, value: d.nic, label: `${d.nic} — ${d.name}`, driverName: d.name, driverContact: d.contact ?? "", driverLicenceNo: d.licenceNo ?? "" }
+            : { id: d.id, value: d.name, label: `${d.name} (${d.nic})`, driverNIC: d.nic, driverContact: d.contact ?? "", driverLicenceNo: d.licenceNo ?? "" }
+        ),
       });
     }
 
     const options = await prisma.user.findMany({
       where: {
-        role: "APPROVER",
+        role: approverLookupRole as any,
         ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
       },
       orderBy: { name: "asc" },
@@ -533,7 +514,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR", "AREA_SALES_OFFICER"];
+  // An Approver creating their own gate pass (Approver-initiated gate passes) needs the same
+  // inline "Add New Carrier / Driver / Location label" capability as an Initiator does.
+  const allowedToPost = ["INITIATOR", "ADMIN", "SECURITY_OFFICER", "SERVICE_ADVISOR", "AREA_SALES_OFFICER", "APPROVER"];
   if (!session || !allowedToPost.includes(session.user.role ?? "")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
@@ -621,15 +604,40 @@ export async function POST(req: NextRequest) {
   if (field === "driver") {
     const name = normalize(body.name ?? "");
     const nic  = normalize(body.nic  ?? "");
+    const licenceNo = normalize(body.licenceNo ?? "");
     const contact = normalize(body.contact ?? "") || null;
-    if (!name || !nic) return NextResponse.json({ error: "name and nic are required" }, { status: 400 });
+    const carrierId = normalize(body.carrierId ?? "") || null;
+    if (!name || !nic || !licenceNo) {
+      return NextResponse.json({ error: "Name, NIC, and Driving Licence No. are all required." }, { status: 400 });
+    }
+    if (!carrierId) {
+      return NextResponse.json({ error: "A driver must be assigned to a Carrier Company." }, { status: 400 });
+    }
+    if (!isValidNIC(nic)) {
+      return NextResponse.json({ error: "Invalid NIC format (e.g. 123456789V or 200012345678)." }, { status: 400 });
+    }
+    if (!isValidLicenceNo(licenceNo)) {
+      return NextResponse.json({ error: "Invalid Driving Licence No. format (e.g. B1234567 — 1 letter followed by 7 digits)." }, { status: 400 });
+    }
+    if (contact && !isValidPhone(contact)) {
+      return NextResponse.json({ error: "Invalid contact number format." }, { status: 400 });
+    }
     try {
-      const created = await (prisma as any).driverOption.upsert({
-        where: { nic },
-        update: { name, contact },
-        create: { name, nic, contact },
+      const [existingByNic, existingByLicence] = await Promise.all([
+        (prisma as any).driverOption.findUnique({ where: { nic } }),
+        (prisma as any).driverOption.findUnique({ where: { licenceNo } }),
+      ]);
+      if (existingByNic || existingByLicence) {
+        return NextResponse.json({
+          error: existingByNic
+            ? `A driver with NIC ${nic} already exists (${existingByNic.name}).`
+            : `A driver with Driving Licence No. ${licenceNo} already exists (${existingByLicence.name}).`,
+        }, { status: 409 });
+      }
+      const created = await (prisma as any).driverOption.create({
+        data: { name, nic, licenceNo, contact, carrierId },
       });
-      return NextResponse.json({ option: { id: created.id, name: created.name, nic: created.nic, contact: created.contact } });
+      return NextResponse.json({ option: { id: created.id, name: created.name, nic: created.nic, licenceNo: created.licenceNo, contact: created.contact, carrierId: created.carrierId } });
     } catch (e) {
       console.error("Driver save error:", e);
       return NextResponse.json({ error: "Failed to save driver." }, { status: 500 });

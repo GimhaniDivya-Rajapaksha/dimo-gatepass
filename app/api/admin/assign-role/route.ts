@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 const VALID_ROLES = [
   "INITIATOR", "APPROVER", "RECIPIENT", "ADMIN",
   "CASHIER", "AREA_SALES_OFFICER", "SECURITY_OFFICER",
-  "SERVICE_ADVISOR", "DELIVERY_COORDINATOR",
+  "SERVICE_ADVISOR", "DELIVERY_COORDINATOR", "SPECIAL_APPROVER",
 ];
 
 export async function POST(req: NextRequest) {
@@ -40,6 +40,13 @@ export async function POST(req: NextRequest) {
 
   // Use raw SQL so Prisma's compile-time enum validation doesn't block new values
   await prisma.$executeRaw`UPDATE "User" SET role = ${role}::"Role" WHERE id = ${userId}`;
+
+  // Security Officer must always have exactly one assigned plant/location — if this user
+  // carried over multiple plant mappings from a previous role, drop them now. Their existing
+  // defaultLocation remains their one location. No other role is affected by this.
+  if (role === "SECURITY_OFFICER") {
+    await prisma.$executeRaw`DELETE FROM "UserPlantMapping" WHERE "userId" = ${userId}`;
+  }
 
   return NextResponse.json({ success: true });
 }

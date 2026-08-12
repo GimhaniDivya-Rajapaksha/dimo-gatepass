@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isApproverRole } from "@/lib/roles";
 
 // Same rank table as collapseJourneyRows on the client — higher = more active/urgent
 const STATUS_RANK: Record<string, number> = {
@@ -43,8 +44,12 @@ export async function GET() {
         { parentPass: { createdById: userId } },
       ],
     };
+  } else if (isApproverRole(role)) {
+    // Test Drive is auto-approved with no Approver workflow — must never count
+    // toward or appear in an Approver's stats (e.g. the Approved card).
+    scopeWhere = { passType: { not: "TEST_DRIVE" } };
   }
-  // APPROVER, CASHIER, SECURITY_OFFICER, ADMIN → all passes for Approved/Rejected/Completed
+  // CASHIER, SECURITY_OFFICER, ADMIN → all passes for Approved/Rejected/Completed
 
   try {
     const all = await prisma.gatePass.findMany({
@@ -93,7 +98,7 @@ export async function GET() {
     // CASHIER_REVIEW passes with credit that need special approval.
     // Approved/Rejected/Completed remain system-wide to match what the queue
     // table shows when those cards are clicked.
-    if (role === "APPROVER") {
+    if (isApproverRole(role)) {
       const approverName = (session.user as { name?: string | null }).name ?? "";
       const approverWhere = approverName
         ? { OR: [
@@ -106,7 +111,10 @@ export async function GET() {
           AND: [
             approverWhere,
             { OR: [
-              { status: "PENDING_APPROVAL" },
+              // LT Return Gate Pass: the return leg is created locked and isn't actually
+              // approvable until its outbound leg completes — exclude it from this count
+              // so it doesn't show up until it's ready, matching the queue list above.
+              { status: "PENDING_APPROVAL", returnPassLocked: false },
               { AND: [
                 { status: "CASHIER_REVIEW" },
                 { hasCredit: true },

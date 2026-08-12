@@ -123,6 +123,7 @@ function PassCard({ p, mode, onConfirmed }: {
 
   const passTypeLabel = p.passType === "LOCATION_TRANSFER" ? "Location Transfer"
     : p.passType === "CUSTOMER_DELIVERY" ? "Customer Delivery"
+    : p.passType === "TEST_DRIVE" ? "Test Drive"
     : p.passSubType ? p.passSubType.replace(/_/g, " ") : "After Sales";
 
   const payLabel = p.paymentType === "CREDIT" ? "Credit"
@@ -181,7 +182,7 @@ function PassCard({ p, mode, onConfirmed }: {
           </svg>
         </div>
         <p className="font-bold text-sm" style={{ color: "var(--text)" }}>Gate {isOut ? "OUT" : "IN"} Confirmed!</p>
-        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{p.parentPass?.gatePassNumber ?? p.gatePassNumber}</p>
+        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{(p.passType === "AFTER_SALES" ? p.parentPass?.gatePassNumber : null) ?? p.gatePassNumber}</p>
       </motion.div>
     );
   }
@@ -206,7 +207,7 @@ function PassCard({ p, mode, onConfirmed }: {
         <div className="flex items-center gap-2 mb-3 flex-wrap relative z-10">
           <span className="text-[10px] font-black px-2.5 py-1 rounded-lg tracking-widest uppercase"
             style={{ background: pillBg, color: pillColor, border: `1px solid ${accentLight}30` }}>
-            {isOut ? "▶ OUT" : "◀ IN"} · {p.parentPass?.gatePassNumber ?? p.gatePassNumber}
+            {isOut ? "▶ OUT" : "◀ IN"} · {(p.passType === "AFTER_SALES" ? p.parentPass?.gatePassNumber : null) ?? p.gatePassNumber}
           </span>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md"
             style={{ background: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.8)" }}>
@@ -596,7 +597,8 @@ export default function SecurityGateDashboard() {
         ...allGateOut.filter((p) =>
           (p.passType === "AFTER_SALES" && (p.passSubType === "MAIN_IN" || p.passSubType === "SUB_OUT_IN" || p.passSubType === "SUB_OUT")) ||
           p.passType === "LOCATION_TRANSFER" ||
-          p.passType === "CUSTOMER_DELIVERY"
+          p.passType === "CUSTOMER_DELIVERY" ||
+          p.passType === "TEST_DRIVE"
         ),
       ].sort(sortNewestFirst));
 
