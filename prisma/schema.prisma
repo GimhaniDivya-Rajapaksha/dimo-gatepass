@@ -66,6 +66,7 @@ model User {
   notifications    Notification[]
   gatePassChanges  GatePassChangeLog[]
   plantMappings    UserPlantMapping[]
+  sapReconciliationWrites SapReconciliation[]
 }
 
 // Additional plants a user can access data for, on top of their primary `defaultLocation`.
@@ -174,6 +175,7 @@ model GatePass {
   notifications  Notification[]
   serviceOrders  ServiceOrder[]
   changeLogs     GatePassChangeLog[]
+  sapReconciliation SapReconciliation?
 
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -298,6 +300,60 @@ model LocationBrandMapping {
   @@unique([location, brand])
 }
 
+// Admin-configurable status codes controlling which vehicles appear in the Location
+// Transfer vehicle dropdown. "QV*"/"VMM*"/"VMS*" are catch-all rows — see lib/lt-status-config.ts.
+model LtVehicleStatusOption {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// Location Transfer passes that completed without an SAP write (vehicle wasn't eligible
+// per the MMSTA=QP60 / SDSTA blank-or-QS20 rule at the time). Tracked here so Admin can
+// later re-check SAP and manually write the vehicle once it becomes eligible. One row per
+// GatePass — created only going forward from when this feature shipped (no backfill of
+// older completed passes, since there's no reliable record of their SAP-write outcome).
+model SapReconciliation {
+  id            String    @id @default(cuid())
+  gatePassId    String    @unique
+  gatePass      GatePass  @relation(fields: [gatePassId], references: [id])
+  ltCompletedAt DateTime
+  mmstaAtCompletion String
+  sdstaAtCompletion String
+  latestMmsta   String?
+  latestSdsta   String?
+  eligibility   String    @default("PENDING") // PENDING | READY | WRITTEN | FAILED
+  lastCheckedAt DateTime?
+  writtenAt     DateTime?
+  writtenById   String?
+  writtenBy     User?     @relation(fields: [writtenById], references: [id])
+  notifiedAt    DateTime? // Initiator "now eligible" notification — sent once
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  auditLogs     SapReconciliationAuditLog[]
+}
+
+// Full history of every reconciliation check and SAP write attempt for a pending vehicle —
+// kept because SAP writes here are manually triggered later, sometimes long after the
+// original Location Transfer completed.
+model SapReconciliationAuditLog {
+  id               String   @id @default(cuid())
+  reconciliationId String
+  reconciliation   SapReconciliation @relation(fields: [reconciliationId], references: [id])
+  gatePassId       String
+  action           String   // CHECK | WRITE_ATTEMPT
+  mode             String   // AUTO | MANUAL | INDIVIDUAL | BULK
+  triggeredById    String?  // null when performed by the system (daily job)
+  triggeredByName  String
+  mmstaAtCheck     String?
+  sdstaAtCheck     String?
+  success          Boolean?
+  responseMessage  String?
+  createdAt        DateTime @default(now())
+}
+
 model Notification {
   id         String    @id @default(cuid())
   userId     String
@@ -309,4 +365,15 @@ model Notification {
   gatePass   GatePass? @relation(fields: [gatePassId], references: [id])
   read       Boolean   @default(false)
   createdAt  DateTime  @default(now())
+}
+
+// Admin-managed recipient list for the "Customer Delivery Completed" email notification
+// (sent after Initiator Print or Security Gate Out completes a Customer Delivery pass).
+// Not tied to any User account — recipients are picked from Active Directory via
+// /api/ad-users and stored here purely as name+email.
+model CdNotificationRecipient {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
 }
