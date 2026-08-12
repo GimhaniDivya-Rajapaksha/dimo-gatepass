@@ -1,17 +1,20 @@
 /**
  * Manually fires the SAP Reconciliation jobs on demand, for testing — without waiting for
- * the real schedule (hourly check, daily write at 11:59 PM).
+ * the real schedule (hourly check, daily list email at 3 PM, daily write at 11:59 PM).
  *
  * Run one at a time:
- *   npx tsx scripts/test-sap-reconciliation-jobs.ts check   — re-check SAP status for all pending; automatically emails
- *                                                              the fixed Admin list "pending write tonight" for anything
- *                                                              newly Ready (same as the real hourly job)
+ *   npx tsx scripts/test-sap-reconciliation-jobs.ts check   — re-check SAP status for all pending; notifies the
+ *                                                              Initiator (once) for anything newly Ready
+ *   npx tsx scripts/test-sap-reconciliation-jobs.ts email   — send the "Ready for SAP Write" list email now,
+ *                                                              to the fixed Admin list (same as the real 3 PM job)
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts write   — run the auto-write pass now (ignores the 11:59 PM gate —
  *                                                              writes whatever is currently Ready, for testing)
- *   npx tsx scripts/test-sap-reconciliation-jobs.ts cycle   — check, then write immediately after (for testing only —
- *                                                              the real schedule keeps these hours apart)
+ *   npx tsx scripts/test-sap-reconciliation-jobs.ts cycle   — check, then email, then write, all immediately (for
+ *                                                              testing only — the real schedule keeps these apart)
  */
-import { runReconciliationCheck, runAutoWriteReadyVehicles } from "../lib/sap-reconciliation";
+import { runReconciliationCheck, runAutoWriteReadyVehicles, sendPendingWriteTonightDigest } from "../lib/sap-reconciliation";
+
+const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindhi.pathirana@dimolanka.com"];
 
 async function main() {
   const job = process.argv[2];
@@ -23,7 +26,9 @@ async function main() {
       mode: "MANUAL",
     });
     console.log("Check result:", result);
-    if (result.newlyReady > 0) console.log(`${result.newlyReady} vehicle(s) newly ready — "pending write tonight" email sent to the fixed Admin list.`);
+  } else if (job === "email") {
+    const sent = await sendPendingWriteTonightDigest(DIGEST_RECIPIENTS);
+    console.log(sent ? "List email sent." : "Nothing ready — no email sent.");
   } else if (job === "write") {
     const result = await runAutoWriteReadyVehicles();
     console.log("Auto-write result:", result);
@@ -34,10 +39,12 @@ async function main() {
       mode: "MANUAL",
     });
     console.log("Check result:", checkResult);
+    const sent = await sendPendingWriteTonightDigest(DIGEST_RECIPIENTS);
+    console.log(sent ? "List email sent." : "Nothing ready — no email sent.");
     const writeResult = await runAutoWriteReadyVehicles();
     console.log("Auto-write result:", writeResult);
   } else {
-    console.log('Usage: npx tsx scripts/test-sap-reconciliation-jobs.ts <check|write|cycle>');
+    console.log('Usage: npx tsx scripts/test-sap-reconciliation-jobs.ts <check|email|write|cycle>');
   }
 }
 

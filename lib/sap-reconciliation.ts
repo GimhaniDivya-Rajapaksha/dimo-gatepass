@@ -25,10 +25,6 @@ import { fetchVehicleSapStatus, isSapWriteEligible } from "@/lib/sap";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
 import { sendSapReconciliationReadyEmail, sendSapReadyDigestEmail, sendSapAutoWriteDigestEmail, sendSapPendingWriteTonightEmail } from "@/lib/email";
 
-// Fixed Admin recipient list for SAP Reconciliation notifications (not tied to any user
-// account — set directly per instruction).
-const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindhi.pathirana@dimolanka.com"];
-
 export type SapEligibility = "PENDING" | "READY" | "WRITTEN" | "FAILED";
 
 export const ELIGIBILITY_LABEL: Record<SapEligibility, string> = {
@@ -115,11 +111,10 @@ async function notifyInitiatorNewlyReady(
 /**
  * Check-only pass over every non-WRITTEN pending row: re-fetches each vehicle's latest SAP
  * status, updates eligibility, and notifies the Initiator (once) on a PENDING/FAILED → READY
- * transition. Also sends a single batched "will be written tonight" email to the fixed
- * Admin recipient list, listing every vehicle that just became newly Ready this run — sent
- * BEFORE any SAP write happens (the actual write runs separately, once daily). Never writes
- * to SAP itself — used by both the automatic hourly job and the Admin "Check Now" button
- * (mode distinguishes them in the audit trail).
+ * transition. Never writes to SAP itself — used by both the automatic hourly job and the
+ * Admin "Check Now" button (mode distinguishes them in the audit trail). The Gimhani/
+ * Tharindhi "pending write tonight" list is a separate, fixed-time daily send — see
+ * sendPendingWriteTonightDigest — not tied to this check's own cadence.
  */
 export async function runReconciliationCheck(params: {
   triggeredById: string | null;
@@ -131,7 +126,6 @@ export async function runReconciliationCheck(params: {
   `.catch(() => []);
 
   let newlyReady = 0;
-  const newlyReadyVehicles: DigestVehicle[] = [];
 
   for (const row of pending) {
     const gatePass = await prisma.gatePass.findUnique({
@@ -165,26 +159,27 @@ export async function runReconciliationCheck(params: {
     if (eligible && !row.notifiedAt) {
       newlyReady++;
       await notifyInitiatorNewlyReady(row.id, gatePass);
-      newlyReadyVehicles.push({
-        gatePassNumber: gatePass.gatePassNumber,
-        vehicle: gatePass.vehicle,
-        fromLocation: gatePass.fromLocation ?? "",
-        toLocation: gatePass.toLocation ?? "",
-        mmsta: sapStatus?.mmsta ?? "",
-        sdsta: sapStatus?.sdsta ?? "",
-      });
-    }
-  }
-
-  if (newlyReadyVehicles.length > 0) {
-    for (const email of DIGEST_RECIPIENTS) {
-      await sendSapPendingWriteTonightEmail(email, newlyReadyVehicles).catch((e) =>
-        console.error(`[sap-reconciliation] pending-write-tonight email to ${email} failed:`, e)
-      );
     }
   }
 
   return { checked: pending.length, newlyReady };
+}
+
+/**
+ * Fixed-time daily send (see lib/sapReconciliationScheduler.ts, ~3 PM) to the Gimhani/
+ * Tharindhi recipient list — lists every vehicle currently "Ready for SAP Write" at send
+ * time, regardless of which hourly check found it. Skips sending if nothing is ready.
+ */
+export async function sendPendingWriteTonightDigest(recipients: string[]): Promise<boolean> {
+  const vehicles = await getReadyVehiclesForDigest();
+  if (vehicles.length === 0) return false;
+
+  for (const email of recipients) {
+    await sendSapPendingWriteTonightEmail(email, vehicles).catch((e) =>
+      console.error(`[sap-reconciliation] pending-write-tonight email to ${email} failed:`, e)
+    );
+  }
+  return true;
 }
 
 type WriteResult = { success: boolean; alreadyWritten?: boolean; notEligible?: boolean; message: string };
