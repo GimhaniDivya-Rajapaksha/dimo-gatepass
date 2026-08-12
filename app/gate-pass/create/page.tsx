@@ -677,6 +677,8 @@ export default function CreateGatePassPage() {
   const [cdDeliveredWarning, setCdDeliveredWarning] = useState<{ gatePassNumber: string; id: string } | null>(null);
   // Search-time info: vehicle searched isn't found because it was already Customer Delivered
   const [cdSearchDeliveredInfo, setCdSearchDeliveredInfo] = useState<{ gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null } | null>(null);
+  // Search-time info: vehicle searched isn't found because its SAP status is excluded from the admin-configured LT allowlist
+  const [ltSearchExcludedInfo, setLtSearchExcludedInfo] = useState<{ vehicle: string; chassisNo: string; status: string } | null>(null);
 
   async function checkActivePass(chassis: string) {
     setActivePassWarning(null);
@@ -1247,10 +1249,14 @@ export default function CreateGatePassPage() {
       const data = (await res.json()) as {
         options?: LookupOption[];
         alreadyDeliveredInfo?: { gatePassNumber: string; gateOutBy: string | null; departureDate: string | null; departureTime: string | null };
+        excludedVehicleInfo?: { vehicle: string; chassisNo: string; status: string };
       };
       setLookupOptions((prev) => ({ ...prev, [field]: data.options ?? [] }));
       if (field === "vehicle" && passType === "CUSTOMER_DELIVERY") {
         setCdSearchDeliveredInfo(data.alreadyDeliveredInfo ?? null);
+      }
+      if (field === "vehicle" && (passType === "LOCATION_TRANSFER" || passType === "TEST_DRIVE")) {
+        setLtSearchExcludedInfo((data.options?.length ?? 0) === 0 ? (data.excludedVehicleInfo ?? null) : null);
       }
     } catch {
       // silently keep existing options
@@ -2684,6 +2690,50 @@ export default function CreateGatePassPage() {
               {/* Close */}
               <button
                 onClick={() => setCdSearchDeliveredInfo(null)}
+                className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
+                style={{ color: "#6b7280" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* LT/Test Drive search: vehicle excluded by admin-configured status popup — fixed, centered, stays until closed */}
+      <AnimatePresence>
+        {ltSearchExcludedInfo && (
+          <motion.div
+            initial={{ opacity: 0, y: -70, scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.94 }}
+            transition={{ type: "spring", stiffness: 380, damping: 28 }}
+            style={{ position: "fixed", top: 24, left: "50%", x: "-50%", zIndex: 9999, width: "100%", maxWidth: 480 }}
+          >
+            <div className="mx-4 flex items-start gap-3 px-5 py-4 rounded-2xl"
+              style={{
+                background: "linear-gradient(135deg, #18122B 0%, #1e1b2e 100%)",
+                border: "1px solid rgba(239,68,68,0.35)",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(239,68,68,0.15), inset 0 1px 0 rgba(255,255,255,0.05)",
+              }}>
+              <div className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5"
+                style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)" }}>
+                <svg className="w-5 h-5" style={{ color: "#f87171" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#f87171" }}>Status Excluded</p>
+                <p className="text-sm leading-snug" style={{ color: "#fca5a5" }}>
+                  This vehicle is currently in status <strong>{ltSearchExcludedInfo.status || "unknown"}</strong>. This status has been excluded from the system by the Admin, so it doesn&apos;t appear in the search.
+                </p>
+              </div>
+              <button
+                onClick={() => setLtSearchExcludedInfo(null)}
                 className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
                 style={{ color: "#6b7280" }}
                 onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}

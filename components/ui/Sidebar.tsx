@@ -49,6 +49,7 @@ export default function Sidebar({ user, role }: SidebarProps) {
   const [rejectedCount, setRejectedCount] = useState(0);
   const [arrivalsCount, setArrivalsCount] = useState(0);
   const [completedCount, setCompletedCount] = useState(0);
+  const [sapReconCount, setSapReconCount] = useState(0);
 
   useEffect(() => setMounted(true), []);
   useEffect(() => { setMobileOpen(false); }, [pathname]);
@@ -143,6 +144,19 @@ export default function Sidebar({ user, role }: SidebarProps) {
     };
     void fetchArrivals();
     const id = setInterval(() => void fetchArrivals(), 60_000);
+    return () => clearInterval(id);
+  }, [role]);
+
+  useEffect(() => {
+    if (role !== "ADMIN") return;
+    const fetchSapRecon = () => {
+      fetch("/api/admin/sap-reconciliation?eligibility=READY")
+        .then(r => r.json())
+        .then(d => setSapReconCount(Array.isArray(d.data) ? d.data.length : 0))
+        .catch(() => {});
+    };
+    fetchSapRecon();
+    const id = setInterval(fetchSapRecon, 60_000);
     return () => clearInterval(id);
   }, [role]);
 
@@ -314,7 +328,13 @@ export default function Sidebar({ user, role }: SidebarProps) {
                     {completedCount > 99 ? "99+" : completedCount}
                   </span>
                 )}
-                {isActive && !item.showDraftBadge && !item.showOverrideBadge && !item.showPendingCompletionBadge && !item.showMyPassesBadge && !item.showPendingBadge && !item.showRejectedBadge && !item.showArrivalsBadge && !item.showCompletedBadge && (
+                {item.showSapReconciliationBadge && sapReconCount > 0 && (
+                  <span className="relative z-10 ml-auto text-[12px] font-extrabold tabular-nums leading-none"
+                    style={{ color: "#22c55e", textShadow: "0 0 8px rgba(34,197,94,0.55)" }}>
+                    {sapReconCount > 99 ? "99+" : sapReconCount}
+                  </span>
+                )}
+                {isActive && !item.showDraftBadge && !item.showOverrideBadge && !item.showPendingCompletionBadge && !item.showMyPassesBadge && !item.showPendingBadge && !item.showRejectedBadge && !item.showArrivalsBadge && !item.showCompletedBadge && !item.showSapReconciliationBadge && (
                   <motion.span layoutId="nav-dot" className="relative z-10 ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lime }} />
                 )}
               </Link>

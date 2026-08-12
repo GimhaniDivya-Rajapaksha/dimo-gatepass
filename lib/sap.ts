@@ -12,8 +12,13 @@
  * Response: { "data": [ { ...fields (all lowercase) } ] }
  */
 
+import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
+
 const APIM_BASE = "https://gatepassproxy.azure-api.net";
 const APIM_KEY  = process.env.SAP_APIM_KEY ?? "";
+// Defaults to "qa" (unchanged behavior) unless SAP_APIM_ENV is explicitly set — e.g. "dev"
+// for local/Dev-branch use, without affecting QA/Prod deployments that never set it.
+const APIM_ENV  = process.env.SAP_APIM_ENV || "qa";
 
 function apimHeaders(): Record<string, string> {
   return {
@@ -28,7 +33,7 @@ async function apimPost(
   endpoint: string,
   filter: string
 ): Promise<Record<string, unknown>[]> {
-  const url = `${APIM_BASE}/dimogatepass/qa/${endpoint}`;
+  const url = `${APIM_BASE}/dimogatepass/${APIM_ENV}/${endpoint}`;
 
   const res = await fetch(url, {
     method:  "POST",
@@ -151,27 +156,11 @@ function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
   );
 }
 
-// ── Location Transfer vehicle status allowlist ──────────────────────────────────
-// Prefixes match ANY code starting with them (e.g. "QP*" matches QP03, QP60, QP99, ...).
-const LT_STATUS_PREFIXES = ["QE", "QP", "QR", "QS", "QV", "VMM", "VMS"];
-// Codes with no wildcard prefix given — matched literally only.
-const LT_STATUS_EXACT = new Set(["INITIAL", "QT05", "QT10", "QT20", "QT30", "QT40"]);
-// Customer Delivery's own statuses — must never appear in Location Transfer, even
-// though they'd otherwise match the "QS" prefix above.
-const LT_EXCLUDED_STATUSES = new Set(["QS40", "QS4X", "QS50", "QS5X", "QS60"]);
-
-function isLocationTransferEligibleStatus(mmsta: string): boolean {
-  const code = mmsta.trim().toUpperCase();
-  if (!code) return false;
-  if (LT_EXCLUDED_STATUSES.has(code)) return false;
-  if (LT_STATUS_EXACT.has(code)) return true;
-  return LT_STATUS_PREFIXES.some((prefix) => code.startsWith(prefix));
-}
-
 /**
  * Search vehicles from SAP via Azure APIM proxy.
  *
- * passType = "LOCATION_TRANSFER" → /in, filtered to the LT status allowlist (mmsta)
+ * passType = "LOCATION_TRANSFER" → /in, filtered to the admin-configurable LT status
+ *                                    allowlist (mmsta) — see lib/lt-status-config.ts
  * passType = "CUSTOMER_DELIVERY" → /out (sdsta eq 'QS60' — Sales Order Completed)
  * passType = "both"              → both endpoints in parallel, deduplicated by VIN
  */
@@ -198,7 +187,8 @@ export async function fetchSapVehicles(
 
   if (passType === "LOCATION_TRANSFER" || passType === "TEST_DRIVE") {
     // Test Drive reuses the exact same vehicle search/filter as Location Transfer.
-    raw = (await fetchIN()).filter((v) => isLocationTransferEligibleStatus(v.primaryStatus));
+    const [inVehicles, ltStatusSets] = await Promise.all([fetchIN(), getEnabledLtStatusSets()]);
+    raw = inVehicles.filter((v) => isLtStatusEligible(v.primaryStatus, ltStatusSets));
   } else if (passType === "CUSTOMER_DELIVERY") {
     raw = await fetchOUT();
   } else {
@@ -219,6 +209,18 @@ export async function fetchSapVehicles(
 
   const all = [...seen.values()].filter((v) => v.vehicleNo || v.chassisNo);
   return jsVehicleFilter(all, q);
+}
+
+/**
+ * Raw, unfiltered /in results — no LT status-eligibility filtering applied. Used only to
+ * detect vehicles that DO have a business status in SAP but which the admin-configured LT
+ * allowlist excludes, so callers (app/api/lookups/route.ts) can tell "excluded by status"
+ * apart from "no business status at all" and explain why a vehicle isn't showing.
+ */
+export async function fetchRawInVehicles(q: string): Promise<SapVehicle[]> {
+  const chassisQ = q.trim().length >= 3 ? q.trim().replace(/'/g, "''") : null;
+  const rows = await apimPost("in", chassisQ ? `substringof('${chassisQ}', vhvin)` : "");
+  return rows.map(mapVehicle);
 }
 
 /**

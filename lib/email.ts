@@ -1869,3 +1869,327 @@ ${emailFooter(pass.gatePassNumber)}
     html
   );
 }
+
+export async function sendSapReconciliationReadyEmail(
+  toEmail: string,
+  toName: string,
+  pass: {
+    gatePassNumber: string;
+    vehicle: string;
+    passId: string;
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = `${baseUrl}/gate-pass/${pass.passId}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vehicle Ready for SAP Write &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Vehicle Ready for SAP Write", "Vehicle Gate Pass &middot; SAP Reconciliation", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    This vehicle's SAP status has now reached an eligible state.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Dear <strong>${toName}</strong>,<br>
+    Your Location Transfer for vehicle <strong>${pass.vehicle}</strong> (Gate Pass <strong>${pass.gatePassNumber}</strong>) completed earlier without an SAP write, because the vehicle wasn't yet eligible at that time.
+  </div>
+  <div class="status-box" style="border-color:#6ee7b7;background:#f0fdf4">
+    <table cellpadding="0" cellspacing="0" style="margin-bottom:8px"><tr>
+      <td width="44" style="vertical-align:middle;padding-right:10px">
+        <div style="width:34px;height:34px;border-radius:17px;background:#10b981;text-align:center;line-height:34px;color:#fff;font-size:18px;font-weight:800">&#10003;</div>
+      </td>
+      <td style="vertical-align:middle">
+        <div class="status-title" style="font-size:17px;font-weight:800;color:#065f46">Now Eligible for SAP Write</div>
+      </td>
+    </tr></table>
+    <div class="status-desc">
+      SAP write is pending Admin action — no further action is needed from you.
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Vehicle Ready for SAP Write — ${pass.gatePassNumber}`,
+    html
+  );
+}
+
+export async function sendSapReadyDigestEmail(
+  toEmail: string,
+  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[]
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const reconUrl = `${baseUrl}/admin/sap-reconciliation`;
+
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const rows = vehicles.map((v) => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.gatePassNumber}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.vehicle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.fromLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.toLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.mmsta || "—"} / ${v.sdsta || "—"}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP Reconciliation — Ready for SAP Write (${today})</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("SAP Reconciliation — Daily Digest", "Vehicles Ready for SAP Write", today)}
+<div class="body">
+  <div class="greeting">
+    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} currently ready for SAP write as of ${today}.
+  </div>
+  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+    <thead>
+      <tr style="background:#f9fafb">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Vehicle</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">From</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">To</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">MMSTA/SDSTA</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="text-align:center;margin-top:20px">
+    <a href="${reconUrl}" class="btn-view">Open SAP Reconciliation &rarr;</a>
+  </div>
+</div>
+${emailFooter("")}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(toEmail, `SAP Reconciliation — ${vehicles.length} Ready for SAP Write (${today})`, html);
+}
+
+export async function sendSapAutoWriteDigestEmail(
+  toEmail: string,
+  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[]
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const reconUrl = `${baseUrl}/admin/sap-reconciliation`;
+
+  const now = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const rows = vehicles.map((v) => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.gatePassNumber}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.vehicle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.fromLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.toLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.mmsta || "—"} / ${v.sdsta || "—"}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP Reconciliation — Automatically Written (${now})</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("SAP Reconciliation — Automatic Write Complete", "Vehicles Written to SAP", now)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    These vehicles reached QP60 and were automatically written to SAP.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} automatically written to SAP as of ${now}.
+  </div>
+  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+    <thead>
+      <tr style="background:#f9fafb">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Vehicle</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">From</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">To</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">MMSTA/SDSTA</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="text-align:center;margin-top:20px">
+    <a href="${reconUrl}" class="btn-view">Open SAP Reconciliation &rarr;</a>
+  </div>
+</div>
+${emailFooter("")}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(toEmail, `SAP Reconciliation — ${vehicles.length} Automatically Written to SAP`, html);
+}
+
+export async function sendSapPendingWriteTonightEmail(
+  toEmail: string,
+  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[]
+): Promise<void> {
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const rows = vehicles.map((v) => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.gatePassNumber}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.vehicle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.fromLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.toLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.mmsta || "—"} / ${v.sdsta || "—"}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP Reconciliation — Pending Write Tonight (${today})</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached QP60", today)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#fffbeb;border-color:#fcd34d;color:#92400e">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#d97706" stroke-width="1.3"/>
+      <path d="M7.5 4.5V8L9.8 9.3" stroke="#d97706" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    These vehicles have reached QP60 and are scheduled to be automatically written to SAP today at 11:59 PM.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} will be written to SAP today at 11:59 PM.
+  </div>
+  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+    <thead>
+      <tr style="background:#f9fafb">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Vehicle</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">From</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">To</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">MMSTA/SDSTA</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+${emailFooter("")}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(toEmail, `SAP Reconciliation — ${vehicles.length} Vehicle(s) Pending Write Tonight (11:59 PM)`, html);
+}
+
+export async function sendCustomerDeliveryCompletedEmail(
+  toEmail: string,
+  pass: {
+    gatePassNumber: string;
+    passId?: string | null;
+    vehicle: string;
+    chassis?: string | null;
+    toLocation?: string | null;
+    requestedBy?: string | null;
+    driverName?: string | null;
+    completedByName: string;
+    completedVia: string; // "Initiator Print" | "Security Gate Out"
+  }
+): Promise<void> {
+  const baseUrl = (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
+  const viewUrl = pass.passId ? `${baseUrl}/gate-pass/${pass.passId}` : `${baseUrl}/gate-pass`;
+
+  const now = new Date().toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Customer Delivery Completed &mdash; ${pass.gatePassNumber}</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("Customer Delivery Completed", "Vehicle Gate Pass &middot; Delivery Notification", pass.gatePassNumber)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#ecfdf5;border-color:#6ee7b7;color:#065f46">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#059669" stroke-width="1.3"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="#059669" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    This vehicle has been delivered to the customer.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    Gate pass <strong>${pass.gatePassNumber}</strong> (${pass.vehicle}) is now complete — the vehicle was released via <strong>${pass.completedVia}</strong> by <strong>${pass.completedByName}</strong> on ${now}.
+  </div>
+  <div class="sec">
+    ${secLabel("Delivery Details")}
+    <div class="info-grid">
+      <div class="ic"><div class="ic-lbl">Gate Pass No.</div><div class="ic-val mono">${pass.gatePassNumber}</div></div>
+      <div class="ic"><div class="ic-lbl">Vehicle</div><div class="ic-val mono">${pass.vehicle}</div></div>
+      ${pass.chassis ? `<div class="ic"><div class="ic-lbl">Chassis No.</div><div class="ic-val mono">${pass.chassis}</div></div>` : ""}
+      ${pass.toLocation ? `<div class="ic"><div class="ic-lbl">Delivered To</div><div class="ic-val">${pass.toLocation}</div></div>` : ""}
+      ${pass.requestedBy ? `<div class="ic"><div class="ic-lbl">Requested By</div><div class="ic-val">${pass.requestedBy}</div></div>` : ""}
+      ${pass.driverName ? `<div class="ic"><div class="ic-lbl">Driver</div><div class="ic-val">${pass.driverName}</div></div>` : ""}
+      <div class="ic"><div class="ic-lbl">Completed Via</div><div class="ic-val">${pass.completedVia}</div></div>
+      <div class="ic"><div class="ic-lbl">Completed By</div><div class="ic-val">${pass.completedByName}</div></div>
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <a href="${viewUrl}" class="btn-view">View Gate Pass in System &rarr;</a>
+  </div>
+</div>
+${emailFooter(pass.gatePassNumber)}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(
+    toEmail,
+    `Customer Delivery Completed — ${pass.gatePassNumber}`,
+    html
+  );
+}
