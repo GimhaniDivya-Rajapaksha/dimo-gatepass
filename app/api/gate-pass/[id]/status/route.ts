@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
 import { fetchVehicleSapStatus, isSapWriteEligible } from "@/lib/sap";
+import { recordSkippedSapWrite } from "@/lib/sap-reconciliation";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 import { isApproverRole } from "@/lib/roles";
 import { getUserPlantPrefixes, plantsWhereOr, findExtraMappedUserIds } from "@/lib/user-plants";
@@ -835,6 +836,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    if (isCdPass) {
+      const { sendCustomerDeliveryCompletedEmail } = await import("@/lib/email");
+      const { getCdNotificationRecipients } = await import("@/lib/cd-notifications");
+      const cdRecipients = await getCdNotificationRecipients().catch(() => []);
+      for (const recipient of cdRecipients) {
+        sendCustomerDeliveryCompletedEmail(recipient.email, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          chassis: gatePass.chassis,
+          toLocation: gatePass.toLocation,
+          requestedBy: gatePass.requestedBy,
+          driverName: gatePass.driverName,
+          completedByName: session.user.name ?? "Security Officer",
+          completedVia: "Security Gate Out",
+        }).catch((e: unknown) => console.error("[email] Customer Delivery completed notification (security_gate_out) failed:", e));
+      }
+    }
+
     // Notify destination security, initiators, and plant ASOs for Location Transfer.
     let liveLocationUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
     let liveLocationUpdateError: string | null = null;
@@ -985,6 +1005,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else {
             console.log("[security_gate_out] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
           }
         } catch (error) {
           liveLocationUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
@@ -1143,6 +1169,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    if (isCdPass) {
+      const { sendCustomerDeliveryCompletedEmail } = await import("@/lib/email");
+      const { getCdNotificationRecipients } = await import("@/lib/cd-notifications");
+      const cdRecipients = await getCdNotificationRecipients().catch(() => []);
+      for (const recipient of cdRecipients) {
+        sendCustomerDeliveryCompletedEmail(recipient.email, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          chassis: gatePass.chassis,
+          toLocation: gatePass.toLocation,
+          requestedBy: gatePass.requestedBy,
+          driverName: gatePass.driverName,
+          completedByName: session.user.name ?? "Initiator",
+          completedVia: "Initiator Print",
+        }).catch((e: unknown) => console.error("[email] Customer Delivery completed notification (print_gate_out) failed:", e));
+      }
+    }
+
     // For LT: notify destination security + initiators that vehicle is en route
     let printLiveUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
     let printLiveUpdateError: string | null = null;
@@ -1289,6 +1334,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else {
             console.log("[print_gate_out] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
           }
         } catch (error) {
           printLiveUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
@@ -1384,6 +1435,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             console.log("[gate_out ASO LT] SAP location updated:", liveLocationUpdate.message);
           } else {
             console.log("[gate_out ASO LT] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
           }
         } catch (error) {
           liveLocationUpdateError = error instanceof Error ? error.message : "SAP location update failed.";

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, fetchPlantVehicleRows, findPlantVehicleRow } from "@/lib/location-api";
+import { getPendingDbLocationsByChassis } from "@/lib/sap-reconciliation";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -66,11 +67,19 @@ export async function GET(req: NextRequest) {
     vehicleMaster?.chassisNo ?? null,
   ]);
 
-  const currentLocation = currentPlantLocation
+  // Vehicles with an outstanding (un-written) SAP reconciliation record show their DB-known
+  // destination instead of SAP's stale current-location — SAP hasn't been updated for them
+  // yet. Every other vehicle is unaffected and keeps showing live SAP data as before.
+  const chassisForPendingLookup = chassisNo || vehicleMaster?.chassisNo || "";
+  const pendingLocation = chassisForPendingLookup
+    ? (await getPendingDbLocationsByChassis([chassisForPendingLookup]).catch(() => new Map<string, string>())).get(chassisForPendingLookup.trim().toUpperCase())
+    : undefined;
+
+  const currentLocation = pendingLocation ?? (currentPlantLocation
     ? [currentPlantLocation.plantDescription, currentPlantLocation.storageDescription]
         .filter(Boolean)
         .join(" - ")
-    : passes.find(p => p.status === "COMPLETED" && p.toLocation)?.toLocation ?? null;
+    : passes.find(p => p.status === "COMPLETED" && p.toLocation)?.toLocation ?? null);
 
   return NextResponse.json({
     vehicleMaster,

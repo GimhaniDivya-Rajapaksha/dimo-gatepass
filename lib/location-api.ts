@@ -1,5 +1,8 @@
 const APIM_BASE = "https://gatepassproxy.azure-api.net";
 const APIM_KEY = process.env.SAP_APIM_KEY ?? "";
+// Dev branch defaults to "dev" (matching its prior hardcoded behavior, unchanged unless
+// SAP_APIM_ENV is explicitly set) — QA/Prod branches default to "qa" instead.
+const APIM_ENV = process.env.SAP_APIM_ENV || "dev";
 
 export type LocationOption = {
   id: string;
@@ -196,13 +199,13 @@ export function findPlantLocationOption(
 export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<PlantVehicleRow[]> {
   // QAS requires OData-style filter: Vhvin eq 'value'
   const url = vehicleFilter
-    ? `${APIM_BASE}/dimogatepass/dev/plant?filter=${encodeURIComponent(`Vhvin eq '${vehicleFilter}'`)}`
-    : `${APIM_BASE}/dimogatepass/dev/plant`;
+    ? `${APIM_BASE}/dimogatepass/${APIM_ENV}/plant?filter=${encodeURIComponent(`Vhvin eq '${vehicleFilter}'`)}`
+    : `${APIM_BASE}/dimogatepass/${APIM_ENV}/plant`;
   const res = await fetch(url, {
     method: "GET",
     headers: buildHeaders(),
     cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) {
@@ -322,7 +325,7 @@ export async function updateVehiclePlantLocation(params: {
 
   let lastMessage = "Vehicle location update failed.";
   let lastStatus = 0;
-  const url = `${APIM_BASE}/dimogatepass/dev/location/`;
+  const url = `${APIM_BASE}/dimogatepass/${APIM_ENV}/location/`;
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     for (const payload of uniquePayloadCandidates) {

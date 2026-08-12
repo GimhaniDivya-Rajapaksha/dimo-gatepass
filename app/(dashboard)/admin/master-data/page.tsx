@@ -4,12 +4,14 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason" | "brand";
+type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
 type OutReasonRecord = { id: string; value: string; createdAt: string };
 type BrandRecord = { id: string; name: string; createdAt: string };
+type LtStatusRecord = { code: string; enabled: boolean; isCatchAll: boolean };
+type CdRecipientRecord = { id: string; name: string; email: string; createdAt: string };
 
 type ModalState =
   | { open: false }
@@ -46,6 +48,12 @@ export default function MasterDataPage() {
   const [drivers,  setDrivers]  = useState<DriverRecord[]>([]);
   const [reasons,  setReasons]  = useState<OutReasonRecord[]>([]);
   const [brands,   setBrands]   = useState<BrandRecord[]>([]);
+  const [ltStatuses, setLtStatuses] = useState<LtStatusRecord[]>([]);
+  const [cdRecipients, setCdRecipients] = useState<CdRecipientRecord[]>([]);
+  const [adQuery, setAdQuery] = useState("");
+  const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [adLoading, setAdLoading] = useState(false);
+  const [adOpen, setAdOpen] = useState(false);
   const [loading,  setLoading]  = useState(false);
   const [modal,    setModal]    = useState<ModalState>({ open: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -79,6 +87,18 @@ export default function MasterDataPage() {
   const load = useCallback(async (t: Tab, q = "") => {
     setLoading(true);
     try {
+      if (t === "ltStatus") {
+        const res = await fetch("/api/admin/lt-status-config");
+        const json = await res.json();
+        setLtStatuses(json.data ?? []);
+        return;
+      }
+      if (t === "cdNotify") {
+        const res = await fetch("/api/admin/cd-notification-recipients");
+        const json = await res.json();
+        setCdRecipients(json.data ?? []);
+        return;
+      }
       const res = await fetch(`/api/admin/master-data?type=${t}&q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (t === "carrier")   setCarriers(json.data ?? []);
@@ -97,9 +117,72 @@ export default function MasterDataPage() {
 
   // debounced search
   useEffect(() => {
+    if (tab === "ltStatus" || tab === "cdNotify") return;
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
+
+  function searchAd(q: string) {
+    setAdQuery(q);
+    setAdOpen(true);
+    if (!q.trim()) { setAdOptions([]); return; }
+    setAdLoading(true);
+    fetch(`/api/ad-users?q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then((d: { users?: { id: string; name: string; email: string }[] }) => setAdOptions(d.users ?? []))
+      .catch(() => setAdOptions([]))
+      .finally(() => setAdLoading(false));
+  }
+
+  async function addCdRecipient(u: { name: string; email: string }) {
+    setError("");
+    const res = await fetch("/api/admin/cd-notification-recipients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: u.name, email: u.email }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Failed to add recipient");
+      return;
+    }
+    setAdQuery(""); setAdOptions([]); setAdOpen(false);
+    load("cdNotify");
+  }
+
+  async function removeCdRecipient(id: string) {
+    setError("");
+    const res = await fetch(`/api/admin/cd-notification-recipients?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Failed to remove recipient");
+      return;
+    }
+    load("cdNotify");
+  }
+
+  async function toggleLtStatus(code: string, enabled: boolean) {
+    setLtStatuses(prev => prev.map(s => s.code === code ? { ...s, enabled } : s));
+    setError("");
+    const res = await fetch("/api/admin/lt-status-config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, enabled }),
+    });
+    if (!res.ok) {
+      setLtStatuses(prev => prev.map(s => s.code === code ? { ...s, enabled: !enabled } : s));
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Failed to save");
+    }
+  }
+
+  const ltStatusGroups = ltStatuses.reduce<{ family: string; items: LtStatusRecord[] }[]>((groups, s) => {
+    const family = s.code.match(/^[A-Za-z]+/)?.[0] ?? s.code;
+    const last = groups[groups.length - 1];
+    if (last && last.family === family) last.items.push(s);
+    else groups.push({ family, items: [s] });
+    return groups;
+  }, []);
 
   function openAdd(t: Tab) {
     setError(""); setSuccess("");
@@ -200,6 +283,8 @@ export default function MasterDataPage() {
     { id: "driver",    label: "Driver Details"  },
     { id: "outReason", label: "Out Reasons"     },
     { id: "brand",     label: "Brands"          },
+    { id: "ltStatus",  label: "LT Vehicle Statuses" },
+    { id: "cdNotify",  label: "CD Notifications" },
   ];
 
   return (
@@ -237,23 +322,70 @@ export default function MasterDataPage() {
       {/* Card */}
       <div className="rounded-2xl border overflow-hidden" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         {/* Toolbar */}
-        <div className="flex items-center justify-between gap-4 px-5 py-4"
-          style={{ borderBottom: "1px solid var(--border)" }}>
-          <input
-            type="text" placeholder={`Search ${tabs.find(t => t.id === tab)?.label ?? ""}…`}
-            value={search} onChange={e => setSearch(e.target.value)}
-            className="w-64 px-3 py-2 rounded-lg text-sm border outline-none transition-colors"
-            style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
-          />
-          <button onClick={() => openAdd(tab)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{ background: "var(--accent)", color: "#fff" }}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add {tabs.find(t => t.id === tab)?.label.replace(" Details", "").replace("Out ", "Out ")}
-          </button>
-        </div>
+        {tab === "ltStatus" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Only vehicles whose SAP status is checked below will appear in the Location Transfer vehicle dropdown.
+              All statuses are selected by default. Changes save immediately and apply the next time vehicles are searched.
+            </p>
+          </div>
+        ) : tab === "cdNotify" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>
+              These recipients get emailed with vehicle/delivery details whenever a Customer Delivery gate pass completes
+              (via Initiator Print or Security Gate Out). Search Active Directory to add someone.
+            </p>
+            <div className="relative max-w-md">
+              <input
+                type="text" placeholder="Search Active Directory by name or email…"
+                value={adQuery}
+                onChange={e => searchAd(e.target.value)}
+                onFocus={() => setAdOpen(true)}
+                onBlur={() => setTimeout(() => setAdOpen(false), 150)}
+                className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              />
+              {adOpen && adQuery.trim() && (
+                <div className="absolute z-20 mt-1 w-full rounded-xl border shadow-lg max-h-64 overflow-y-auto"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                  {adLoading ? (
+                    <div className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>Searching…</div>
+                  ) : adOptions.length === 0 ? (
+                    <div className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>No matches found</div>
+                  ) : adOptions.map(u => (
+                    <button key={u.id} type="button"
+                      onMouseDown={() => addCdRecipient({ name: u.name, email: u.email })}
+                      className="w-full text-left px-4 py-2.5 text-sm transition-colors"
+                      style={{ color: "var(--text)" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <div className="font-medium">{u.name}</div>
+                      <div className="text-xs" style={{ color: "var(--text-muted)" }}>{u.email}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-5 py-4"
+            style={{ borderBottom: "1px solid var(--border)" }}>
+            <input
+              type="text" placeholder={`Search ${tabs.find(t => t.id === tab)?.label ?? ""}…`}
+              value={search} onChange={e => setSearch(e.target.value)}
+              className="w-64 px-3 py-2 rounded-lg text-sm border outline-none transition-colors"
+              style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+            />
+            <button onClick={() => openAdd(tab)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: "var(--accent)", color: "#fff" }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add {tabs.find(t => t.id === tab)?.label.replace(" Details", "").replace("Out ", "Out ")}
+            </button>
+          </div>
+        )}
 
         {/* Table */}
         {loading ? (
@@ -366,6 +498,67 @@ export default function MasterDataPage() {
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
                         <RowActions onEdit={() => openEdit("brand", r)} onDelete={() => setDeleteId(r.id)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {/* LT Vehicle Statuses tab */}
+            {tab === "ltStatus" && (
+              <div className="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {ltStatusGroups.length === 0 ? (
+                  <div className="col-span-full px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No statuses found</div>
+                ) : ltStatusGroups.map(g => (
+                  <div key={g.family} className="rounded-xl border p-4" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: "var(--text-muted)" }}>{g.family}</h3>
+                    <div className="space-y-2">
+                      {g.items.map(s => (
+                        <label key={s.code} className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "var(--text)" }}>
+                          <input
+                            type="checkbox"
+                            checked={s.enabled}
+                            onChange={e => toggleLtStatus(s.code, e.target.checked)}
+                            className="w-4 h-4"
+                          />
+                          <span className="font-mono">{s.code}</span>
+                          {s.isCatchAll && (
+                            <span className="text-xs" style={{ color: "var(--text-muted)" }}>(other {g.family} codes)</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* CD Notifications tab */}
+            {tab === "cdNotify" && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
+                    {["Name", "Email", "Added On", ""].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: "var(--text-muted)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cdRecipients.length === 0 ? (
+                    <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No recipients configured — search Active Directory above to add one</td></tr>
+                  ) : cdRecipients.map(r => (
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td className="px-4 py-3 font-medium" style={{ color: "var(--text)" }}>{r.name}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{r.email}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => removeCdRecipient(r.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                          style={{ background: "#fee2e2", color: "#dc2626" }}>
+                          Remove
+                        </button>
                       </td>
                     </tr>
                   ))}
