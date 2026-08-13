@@ -117,6 +117,7 @@ function AssignAttributesModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
 
   useEffect(() => {
     // The full, original location list (same one the old single "Location" field used) —
@@ -125,7 +126,8 @@ function AssignAttributesModal({
     fetch("/api/admin/locations")
       .then(r => r.json())
       .then(d => setLocationOptions(d.locations ?? []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLocationsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -271,6 +273,14 @@ function AssignAttributesModal({
                 >
                   {selectedLocations.length === 0 ? (
                     <span className="flex-1 text-sm" style={{ color: "var(--text-muted)" }}>— Select locations —</span>
+                  ) : selectedLocations.length > 8 ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: "linear-gradient(135deg,#1a4f9e,#2563eb)", color: "#fff" }}>
+                        {selectedLocations.length} locations selected
+                      </span>
+                      <button type="button" onClick={e => { e.stopPropagation(); setSelectedLocations([]); setError(""); }}
+                        className="text-xs font-semibold hover:underline" style={{ color: "var(--text-muted)" }}>Clear all</button>
+                    </div>
                   ) : (
                     <div className="flex flex-wrap gap-1 flex-1">
                       {selectedLocations.map(l => (
@@ -314,8 +324,37 @@ function AssignAttributesModal({
                         )}
                       </div>
                     </div>
+                    {!isSecurity && (() => {
+                      const filteredForBulk = locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase()));
+                      const allFilteredSelected = filteredForBulk.length > 0 && filteredForBulk.every(l => selectedLocations.includes(l));
+                      return (
+                        <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: "var(--border)" }}>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{selectedLocations.length} selected</span>
+                          <div className="flex items-center gap-3">
+                            <button type="button"
+                              onClick={e => { e.stopPropagation(); setSelectedLocations(prev => [...new Set([...prev, ...filteredForBulk])]); setError(""); }}
+                              disabled={allFilteredSelected}
+                              className="text-xs font-semibold hover:underline disabled:opacity-40 disabled:no-underline"
+                              style={{ color: "#2563eb" }}>Select all</button>
+                            <button type="button"
+                              onClick={e => { e.stopPropagation(); setSelectedLocations(prev => prev.filter(x => !filteredForBulk.includes(x))); setError(""); }}
+                              disabled={selectedLocations.length === 0}
+                              className="text-xs font-semibold hover:underline disabled:opacity-40 disabled:no-underline"
+                              style={{ color: "var(--text-muted)" }}>Clear all</button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <ul className="max-h-52 overflow-y-auto py-1">
-                      {locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
+                      {locationsLoading ? (
+                        <li className="flex items-center justify-center gap-2 px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>
+                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Searching locations...
+                        </li>
+                      ) : locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).length === 0 ? (
                         <li className="px-4 py-3 text-sm text-center" style={{ color: "var(--text-muted)" }}>No locations found</li>
                       ) : (
                         locationOptions.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(l => {
@@ -822,6 +861,7 @@ export default function AdminPage() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [attrModal, setAttrModal] = useState<User | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [expandedLocations, setExpandedLocations] = useState<Set<string>>(new Set());
 
   async function toggleDisabled(userId: string) {
     setTogglingId(userId);
@@ -1165,16 +1205,39 @@ export default function AdminPage() {
                                 ...(user.defaultLocation ? [user.defaultLocation] : []),
                                 ...(user.mappedPlants ?? []),
                               ])];
-                              return allLocations.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {allLocations.map(p => (
-                                    <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }} title={p}>
-                                      📍 {p}
-                                    </span>
-                                  ))}
+                              if (allLocations.length === 0) {
+                                return <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>;
+                              }
+                              const isExpanded = expandedLocations.has(user.id);
+                              const COLLAPSED_LIMIT = 4;
+                              const visible = isExpanded ? allLocations : allLocations.slice(0, COLLAPSED_LIMIT);
+                              const hiddenCount = allLocations.length - visible.length;
+                              return (
+                                <div className="max-w-xs">
+                                  <div className={isExpanded ? "flex flex-wrap gap-1 max-h-32 overflow-y-auto pr-1" : "flex flex-wrap gap-1"}>
+                                    {visible.map(p => (
+                                      <span key={p} className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: "#eff6ff", color: "#1d4ed8" }} title={p}>
+                                        📍 {p}
+                                      </span>
+                                    ))}
+                                    {!isExpanded && hiddenCount > 0 && (
+                                      <button type="button"
+                                        onClick={() => setExpandedLocations(prev => new Set(prev).add(user.id))}
+                                        className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold hover:opacity-80"
+                                        style={{ background: "#dbeafe", color: "#1e40af" }}>
+                                        +{hiddenCount} more
+                                      </button>
+                                    )}
+                                  </div>
+                                  {isExpanded && allLocations.length > COLLAPSED_LIMIT && (
+                                    <button type="button"
+                                      onClick={() => setExpandedLocations(prev => { const next = new Set(prev); next.delete(user.id); return next; })}
+                                      className="mt-1 inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-semibold hover:opacity-80"
+                                      style={{ background: "#f1f5f9", color: "#64748b" }}>
+                                      Show less
+                                    </button>
+                                  )}
                                 </div>
-                              ) : (
-                                <p className="text-xs" style={{ color: "#f59e0b" }}>⚠ No location</p>
                               );
                             })()}
                             {ROLE_ATTRS[user.role].includes("brand") && (
