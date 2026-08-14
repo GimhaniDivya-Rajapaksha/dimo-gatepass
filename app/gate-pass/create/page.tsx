@@ -925,7 +925,7 @@ export default function CreateGatePassPage() {
         if (pass.passType === "LOCATION_TRANSFER") {
           // For Gate IN drafts: fromLocation is auto-fetched from SAP at creation; only fall back to live SAP if still null
           const sapLocationResult = !pass.fromLocation
-            ? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "")
+            ? await fetchVehicleCurrentLocation(pass.vehicle ?? "", pass.chassis ?? "", { preferDbLocation: true })
             : undefined;
           if (!active) return;
           const resolvedFromLocation = pass.fromLocation ?? sapLocationResult?.location ?? "";
@@ -1475,7 +1475,12 @@ export default function CreateGatePassPage() {
     storageLocation?: string;
   };
 
-  const fetchVehicleCurrentLocation = async (vehicleNo: string, chassisNo?: string): Promise<VehicleLocationResult | undefined> => {
+  // preferDbLocation: Location Transfer / Test Drive only (see call sites) — opts into the
+  // QP60-aware `currentLocation` field from /api/vehicle-report (DB-first for non-QP60
+  // vehicles) instead of always preferring the raw live SAP `currentPlantLocation` row.
+  // Defaults to false so Customer Delivery's own call site (its fallback when
+  // sapCurrentLocation is empty) keeps its exact existing behavior, untouched.
+  const fetchVehicleCurrentLocation = async (vehicleNo: string, chassisNo?: string, opts?: { preferDbLocation?: boolean }): Promise<VehicleLocationResult | undefined> => {
     const normalizedVehicleNo = vehicleNo.trim();
     const normalizedChassisNo = chassisNo?.trim() ?? "";
     if (!normalizedVehicleNo && !normalizedChassisNo) return undefined;
@@ -1486,9 +1491,13 @@ export default function CreateGatePassPage() {
       const liveRes = await fetch(`/api/vehicle-report?${liveParams.toString()}`);
       const liveData = await liveRes.json();
       const sapRow = liveData.currentPlantLocation;
-      const liveLocation = sapRow
-        ? [sapRow.plantDescription, sapRow.storageDescription].filter(Boolean).join(" - ")
-        : liveData.currentLocation;
+      const liveLocation = opts?.preferDbLocation
+        ? (typeof liveData.currentLocation === "string" && liveData.currentLocation.trim()
+            ? liveData.currentLocation
+            : (sapRow ? [sapRow.plantDescription, sapRow.storageDescription].filter(Boolean).join(" - ") : undefined))
+        : (sapRow
+            ? [sapRow.plantDescription, sapRow.storageDescription].filter(Boolean).join(" - ")
+            : liveData.currentLocation);
 
       if (typeof liveLocation === "string" && liveLocation.trim()) {
         // When SAP places the vehicle at a Finance/Promo storage, it only records the
@@ -2875,7 +2884,7 @@ export default function CreateGatePassPage() {
                           setSelectedTestDriveVehicleDetail(detail);
                           setErrors(p => { const n = { ...p }; delete n.testDriveVehicle; return n; });
                           void checkActivePass(o.chassisNo ?? "");
-                          void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                          void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "", { preferDbLocation: true }).then((result) => {
                             if (result) {
                               setTestDrive(p => ({ ...p, fromLocation: result.location }));
                               setSelectedTestDriveVehicleDetail(prev => prev ? { ...prev, currentLocation: result.location } : prev);
@@ -4485,7 +4494,7 @@ export default function CreateGatePassPage() {
                             setSelectedLocationDetail(null);
                             if (!ltBulkMode) void checkActivePass(o.chassisNo ?? "");
                             setErrors((p) => { const n = { ...p }; delete n.fromLocation; return n; });
-                            void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "").then((result) => {
+                            void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "", { preferDbLocation: true }).then((result) => {
                               if (result) {
                                 const loc = result.location;
                                 if (ltBulkMode) {
