@@ -14,7 +14,7 @@
  */
 import { runReconciliationCheck, runAutoWriteReadyVehicles, sendPendingWriteTonightDigest } from "../lib/sap-reconciliation";
 
-const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindhi.pathirana@dimolanka.com"];
+const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindi.pathirana@dimolanka.com"];
 
 async function main() {
   const job = process.argv[2];
