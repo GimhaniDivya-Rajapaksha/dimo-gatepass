@@ -433,6 +433,35 @@ export async function getPendingDbLocationsByChassis(chassisList: string[]): Pro
   return result;
 }
 
+/**
+ * DB-first current-location source for non-QP60 vehicles (Location Transfer / Test Drive /
+ * Vehicle Report — never Customer Delivery, see call sites): the destination of the vehicle's
+ * most recently COMPLETED gate pass, for every chassis in the input list. Unlike
+ * getPendingDbLocationsByChassis (which only covers vehicles with an outstanding un-written
+ * SAP reconciliation record), this covers ANY vehicle with completed gate pass history,
+ * regardless of reconciliation status. Callers fall back to SAP when a chassis has no entry
+ * in the returned map (no completed history at all).
+ */
+export async function getLastCompletedToLocationByChassis(chassisList: string[]): Promise<Map<string, string>> {
+  const wanted = new Set(chassisList.map((c) => c.trim().toUpperCase()).filter(Boolean));
+  if (wanted.size === 0) return new Map();
+
+  const passes = await prisma.gatePass.findMany({
+    where: { status: "COMPLETED", chassis: { not: null }, toLocation: { not: null } },
+    select: { chassis: true, toLocation: true, updatedAt: true },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  const result = new Map<string, string>();
+  for (const p of passes) {
+    if (!p.chassis || !p.toLocation) continue;
+    const key = p.chassis.trim().toUpperCase();
+    if (!wanted.has(key) || result.has(key)) continue; // first hit per chassis = most recent (already sorted desc)
+    result.set(key, p.toLocation);
+  }
+  return result;
+}
+
 type DigestVehicle = { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string };
 
 async function getReadyVehiclesForDigest(): Promise<DigestVehicle[]> {
