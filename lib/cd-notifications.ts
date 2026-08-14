@@ -18,12 +18,24 @@ const DEFAULT_RECIPIENTS = [
   { name: "Tharindhi Pathirana", email: "tharindhi.pathirana@dimolanka.com" },
 ];
 
+// Sentinel row marking "defaults have already been seeded once" — stored in the same table
+// (never returned by getCdNotificationRecipients, never shown/removable in the Admin UI) so
+// that removing every real recipient down to zero does NOT look like "never seeded" and
+// trigger the defaults to silently reappear. Seeding now happens at most once, ever.
+const SEED_MARKER_EMAIL = "__cd_notify_seed_marker__";
+
 export async function ensureCdNotificationSeeded(): Promise<void> {
-  const countRows = await prisma.$queryRaw<{ count: bigint }[]>`
-    SELECT COUNT(*)::bigint AS count FROM "CdNotificationRecipient"
+  const markerRows = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT COUNT(*)::bigint AS count FROM "CdNotificationRecipient" WHERE "email" = ${SEED_MARKER_EMAIL}
   `.catch(() => null);
-  if (countRows === null) return; // migration not applied yet — nothing to seed
-  if (Number(countRows[0]?.count ?? 0) > 0) return;
+  if (markerRows === null) return; // migration not applied yet — nothing to seed
+  if (Number(markerRows[0]?.count ?? 0) > 0) return; // already seeded once, ever — never reseed
+
+  await prisma.$executeRaw`
+    INSERT INTO "CdNotificationRecipient" ("id", "name", "email")
+    VALUES (${randomUUID()}, 'Seed marker', ${SEED_MARKER_EMAIL})
+    ON CONFLICT ("email") DO NOTHING
+  `.catch(() => {});
 
   for (const r of DEFAULT_RECIPIENTS) {
     await prisma.$executeRaw`
@@ -37,6 +49,8 @@ export async function ensureCdNotificationSeeded(): Promise<void> {
 export async function getCdNotificationRecipients(): Promise<{ id: string; name: string; email: string }[]> {
   await ensureCdNotificationSeeded();
   return prisma.$queryRaw<{ id: string; name: string; email: string }[]>`
-    SELECT "id", "name", "email" FROM "CdNotificationRecipient" ORDER BY "name" ASC
+    SELECT "id", "name", "email" FROM "CdNotificationRecipient"
+    WHERE "email" != ${SEED_MARKER_EMAIL}
+    ORDER BY "name" ASC
   `.catch(() => []);
 }
