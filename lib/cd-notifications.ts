@@ -15,7 +15,7 @@ import { randomUUID } from "crypto";
 
 const DEFAULT_RECIPIENTS = [
   { name: "Gimhani Rajapaksha", email: "gimhani.rajapaksha@dimolanka.com" },
-  { name: "Tharindhi Pathirana", email: "tharindhi.pathirana@dimolanka.com" },
+  { name: "Tharindhi Pathirana", email: "tharindi.pathirana@dimolanka.com" },
 ];
 
 // Sentinel row marking "defaults have already been seeded once" — stored in the same table

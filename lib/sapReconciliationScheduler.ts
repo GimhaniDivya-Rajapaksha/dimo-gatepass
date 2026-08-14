@@ -20,7 +20,7 @@ const POLL_INTERVAL_MS = 5 * 60 * 1000; // how often we check whether it's time 
 const EMAIL_HOUR = 15, EMAIL_MINUTE = 0; // TEMPORARY test time ("3:00 PM") — change before go-live
 const WRITE_HOUR = 23, WRITE_MINUTE = 59; // TEMPORARY test time ("11:59 PM") — change before go-live
 
-const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindhi.pathirana@dimolanka.com"];
+const DIGEST_RECIPIENTS = ["gimhani.rajapaksha@dimolanka.com", "tharindi.pathirana@dimolanka.com"];
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
