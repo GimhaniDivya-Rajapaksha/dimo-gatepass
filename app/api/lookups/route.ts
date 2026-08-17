@@ -341,8 +341,12 @@ export async function GET(req: NextRequest) {
         console.warn("[lookups/vehicle] SAP /in|/out error:", sapResult.reason instanceof Error ? sapResult.reason.message : sapResult.reason);
       }
 
-      // Merge plant API vehicles — these cover vehicles not yet in business flow (no QP30/QS60)
-      if (plantResult.status === "fulfilled") {
+      // Merge plant API vehicles — these cover vehicles not yet in business flow (no QP30/QS60).
+      // Customer Delivery is excluded from this fallback entirely: /out is already filtered
+      // server-side to sdsta in {QS60,QS50,QS5X,QS40,QS4X}, and every /plant-only vehicle
+      // reaching this branch (not already deduped via seenInternalNos) is, by definition, one
+      // whose sdsta is empty or outside that set — exactly what must never show for CD.
+      if (plantResult.status === "fulfilled" && rawPassType !== "CUSTOMER_DELIVERY") {
         const safe = q.trim().toUpperCase();
         const filtered = safe
           ? plantResult.value.filter((row) =>
