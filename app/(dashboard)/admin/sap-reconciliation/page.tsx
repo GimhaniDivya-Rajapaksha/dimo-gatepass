@@ -296,6 +296,12 @@ export default function SapReconciliationPage() {
                             style={{ background: "#059669", color: "#fff" }}>
                             {writing.has(r.id) ? "Writing…" : "Write to SAP"}
                           </button>
+                        ) : r.eligibility === "FAILED" ? (
+                          <button onClick={() => handleWrite(r)} disabled={writing.has(r.id)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                            style={{ background: "#dc2626", color: "#fff" }}>
+                            {writing.has(r.id) ? "Retrying…" : "Retry Write"}
+                          </button>
                         ) : (
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>
                         )}
