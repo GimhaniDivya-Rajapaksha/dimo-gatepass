@@ -243,6 +243,35 @@ export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<Pla
   }));
 }
 
+// Short-TTL in-process cache for the UNFILTERED /plant call specifically — used only by the
+// vehicle search's fallback merge (app/api/lookups/route.ts), which otherwise re-fetches the
+// same ~1.7-2.5MB dataset on every keystroke. Every other caller of fetchPlantVehicleRows()
+// (admin locations, vehicle-report, SAP-write location resolution, etc.) is untouched and
+// keeps fetching fresh every time — this cache is additive, not a change to the underlying
+// function or its behavior. A concurrent-fetch guard prevents multiple simultaneous searches
+// from each triggering their own full fetch while the cache is cold.
+const PLANT_ROWS_CACHE_TTL_MS = 45_000;
+let plantRowsCache: { data: PlantVehicleRow[]; fetchedAt: number } | null = null;
+let plantRowsInFlight: Promise<PlantVehicleRow[]> | null = null;
+
+export async function getCachedPlantVehicleRows(): Promise<PlantVehicleRow[]> {
+  const now = Date.now();
+  if (plantRowsCache && now - plantRowsCache.fetchedAt < PLANT_ROWS_CACHE_TTL_MS) {
+    return plantRowsCache.data;
+  }
+  if (plantRowsInFlight) return plantRowsInFlight;
+
+  plantRowsInFlight = fetchPlantVehicleRows()
+    .then((data) => {
+      plantRowsCache = { data, fetchedAt: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      plantRowsInFlight = null;
+    });
+  return plantRowsInFlight;
+}
+
 export function findPlantVehicleRow(rows: PlantVehicleRow[], identifiers: Array<string | null | undefined>): PlantVehicleRow | null {
   const normalized = identifiers
     .map((value) => str(value).toUpperCase())

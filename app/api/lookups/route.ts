@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles, fetchRawInVehicles } from "@/lib/sap";
 import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
-import { fetchPlantLocationOptions, fetchPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
+import { fetchPlantLocationOptions, fetchPlantVehicleRows, getCachedPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
 import { getPendingDbLocationsByChassis } from "@/lib/sap-reconciliation";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier" | "driverNIC" | "driverName" | "driver";
@@ -268,10 +268,31 @@ export async function GET(req: NextRequest) {
       // — the /plant merge below must never re-include the former, only the latter.
       const wantsLtEligibilityCheck = passType === "LOCATION_TRANSFER" || rawPassType === "TEST_DRIVE";
 
-      // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel
+      // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel.
+      // Customer Delivery never uses /plant data (its results are SAP /out-only, and matnr —
+      // the only other thing /plant feeds — is an LT-only field), so it's skipped entirely for
+      // CD to avoid paying for a large, unused fetch on every search.
+      //
+      // For LT/Test Drive, /plant is still needed (vehicles not yet in business flow only ever
+      // show up there), but the underlying dataset is large (~1.7-2.5MB) and unfiltered — /plant
+      // only supports exact-VIN filtering, not partial search, so there's no way to ask SAP to
+      // narrow it server-side for a partial query. Instead: (1) skip it below a 4-character
+      // query — too short to be a meaningful narrow-down anyway — and (2) reuse a short-TTL
+      // server-side cache (getCachedPlantVehicleRows) instead of re-fetching the full dataset on
+      // every keystroke. The existing in-memory contains-match filter below (using `q`) still
+      // runs exactly as before against whichever data — cached or fresh — comes back, so partial
+      // matches anywhere in the VIN (e.g. last 4 digits) keep working unchanged.
+      const trimmedQ = q.trim();
+      const wantsPlant = rawPassType !== "CUSTOMER_DELIVERY" && (trimmedQ.length === 0 || trimmedQ.length >= 4);
+      // Full 17-character VIN: skip the cache entirely and ask SAP for just this one vehicle
+      // via its exact-match filter (fast, small — confirmed ~2s vs ~12-15s for the full list).
+      // Only exact-length full VINs take this path; every other length (including 4+ character
+      // partial queries) keeps using the cached full list exactly as before.
+      const isFullVin = trimmedQ.length === 17;
+      const fetchPlant = () => (!wantsPlant ? Promise.resolve([]) : isFullVin ? fetchPlantVehicleRows(trimmedQ) : getCachedPlantVehicleRows());
       let [sapResult, plantResult, rawInResult] = await Promise.allSettled([
         fetchSapVehicles(q, passType),
-        fetchPlantVehicleRows(),
+        fetchPlant(),
         wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
       ]);
 
@@ -280,7 +301,7 @@ export async function GET(req: NextRequest) {
         await new Promise<void>((r) => setTimeout(r, 1000));
         [sapResult, plantResult, rawInResult] = await Promise.allSettled([
           fetchSapVehicles(q, passType),
-          fetchPlantVehicleRows(),
+          fetchPlant(),
           wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
         ]);
       }
