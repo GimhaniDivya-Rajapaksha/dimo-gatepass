@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles, fetchRawInVehicles } from "@/lib/sap";
 import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
-import { fetchPlantLocationOptions, fetchPlantVehicleRows, getCachedPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
+import { fetchPlantLocationOptions, fetchPlantVehicleRows, getCachedPlantVehicleRows, filterApiLocations, type LocationOption, type PlantVehicleRow } from "@/lib/location-api";
 import { getPendingDbLocationsByChassis } from "@/lib/sap-reconciliation";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier" | "driverNIC" | "driverName" | "driver";
@@ -165,18 +165,28 @@ export async function GET(req: NextRequest) {
       const matnr = searchParams.get("matnr") ?? undefined;
 
       if (chassisNo || matnr) {
-        // Use the unfiltered ALL-vehicles SAP call — it returns every vehicle with its
-        // ext_plant / ext_sloc destinations included. Filter in-memory by VIN / matnr.
-        // (Previously a per-vehicle ?filter=VIN URL was tried here but that endpoint
-        //  returned wrong VINs or no ext data, causing PROMO/FINANCE to be empty.)
-        const allRows = await fetchPlantVehicleRows().catch(() => []);
+        // Exact-VIN filter first — fast (~2s vs ~12-15s+ for the full list), returns only this
+        // vehicle's rows. A prior commit (b2c66ef) found this endpoint unreliable in the past
+        // (returned wrong VINs / rows with no ext_plant/ext_sloc data, causing PROMO/FINANCE to
+        // go empty), so the result is verified before being trusted: if it comes back empty or
+        // with no usable ext destination data, fall back to the full unfiltered call exactly as
+        // before — this can never silently show an incomplete PROMO/FINANCE/Dealer list.
+        let vehicleRows: PlantVehicleRow[] = [];
+        if (chassisNo) {
+          const exactRows = await fetchPlantVehicleRows(chassisNo.toUpperCase()).catch(() => []);
+          if (exactRows.length > 0 && exactRows.some(r => r.extPlant && r.extSloc)) {
+            vehicleRows = exactRows;
+          }
+        }
 
-        // Find this vehicle's rows — prefer chassisNo (VIN), fallback to matnr
-        let vehicleRows = chassisNo
-          ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
-          : [];
-        if (!vehicleRows.length && matnr) {
-          vehicleRows = allRows.filter(r => r.materialNo === matnr);
+        if (!vehicleRows.length) {
+          const allRows = await fetchPlantVehicleRows().catch(() => []);
+          vehicleRows = chassisNo
+            ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
+            : [];
+          if (!vehicleRows.length && matnr) {
+            vehicleRows = allRows.filter(r => r.materialNo === matnr);
+          }
         }
 
         // Build one option per unique ext_plant|ext_sloc destination.
@@ -296,14 +306,23 @@ export async function GET(req: NextRequest) {
         wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
       ]);
 
-      // Retry once if Azure APIM cold start returned nothing for a real search query
+      // Retry once if Azure APIM cold start returned nothing for a real search query. Only
+      // /in|/out (sapResult) and the raw-/in eligibility check are re-fetched — /plant is only
+      // re-fetched here if it didn't already succeed the first time (e.g. it errored/timed out),
+      // never when it already resolved successfully, so a slow-but-working /plant call is never
+      // paid for twice in the same request.
       if (q.trim() && (sapResult.status === "rejected" || (sapResult.status === "fulfilled" && sapResult.value.length === 0))) {
         await new Promise<void>((r) => setTimeout(r, 1000));
-        [sapResult, plantResult, rawInResult] = await Promise.allSettled([
+        const plantRetryPromise: Promise<PlantVehicleRow[]> =
+          plantResult.status === "fulfilled" ? Promise.resolve(plantResult.value) : fetchPlant();
+        const [newSapResult, newPlantResult, newRawInResult] = await Promise.allSettled([
           fetchSapVehicles(q, passType),
-          fetchPlant(),
+          plantRetryPromise,
           wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
         ]);
+        sapResult = newSapResult;
+        plantResult = newPlantResult;
+        rawInResult = newRawInResult;
       }
 
       // Build the "excluded by admin-configured LT status" sets + a message for the search UI.
