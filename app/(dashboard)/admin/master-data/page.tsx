@@ -418,6 +418,12 @@ export default function MasterDataPage() {
                 onChange={e => searchAd(e.target.value)}
                 onFocus={() => setAdOpen(true)}
                 onBlur={() => setTimeout(() => setAdOpen(false), 150)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && adOptions.length > 0) {
+                    e.preventDefault();
+                    addSapReconRecipient({ name: adOptions[0].name, email: adOptions[0].email });
+                  }
+                }}
                 className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                 style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
               />
