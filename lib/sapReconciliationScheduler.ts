@@ -8,24 +8,23 @@ import { getSapReconciliationRecipientEmails } from "@/lib/sap-reconciliation-re
 // Schedules:
 //  - Check runs every hour: re-verifies SAP status for all pending vehicles and notifies
 //    the Initiator (once) the moment their vehicle newly reaches QP60.
-//  - The "ready to write" list email runs once daily at a fixed time (currently 1:00 PM for
+//  - The "ready to write" list email runs once daily at a fixed time (currently 8:00 PM for
 //    testing — easy to retune below). It never trusts whatever the last hourly check happened
 //    to find: it re-checks every outstanding vehicle against SAP directly first, then emails
 //    the just-refreshed list — so nothing eligible between hourly checks gets missed.
-//  - The actual SAP write runs once daily, at a fixed time (currently 1:30 PM for testing —
-//    easy to retune below, change to 23,59 before go-live). Same principle: re-checks every
-//    outstanding vehicle against SAP directly first, emails the just-refreshed "writing now"
-//    list (distinct wording from the 1:00 PM email), then writes every vehicle that's actually
-//    eligible right now (same chronological A→B→C chain-write logic as the manual "Write to
-//    SAP" button).
+//  - The actual SAP write runs once daily, at a fixed time (currently 11:00 PM for testing —
+//    easy to retune below). Same principle: re-checks every outstanding vehicle against SAP
+//    directly first, emails the just-refreshed "writing now" list (distinct wording from the
+//    8:00 PM email), then writes every vehicle that's actually eligible right now (same
+//    chronological A→B→C chain-write logic as the manual "Write to SAP" button).
 //  - Both the email and the write recipients come from the Admin-configured "SAP Reconciliation
 //    Notifications" list (Master Data page) — never the CD Notifications list, which is
 //    completely separate.
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // how often we check whether it's time for the daily email/write
 
-const EMAIL_HOUR = 13, EMAIL_MINUTE = 0; // TEMPORARY test time ("1:00 PM") — change before go-live
-const WRITE_HOUR = 13, WRITE_MINUTE = 30; // TEMPORARY test time ("1:30 PM") — change to 23,59 before go-live
+const EMAIL_HOUR = 20, EMAIL_MINUTE = 0; // TEMPORARY test time ("8:00 PM") — change before go-live
+const WRITE_HOUR = 23, WRITE_MINUTE = 0; // TEMPORARY test time ("11:00 PM") — change before go-live
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;

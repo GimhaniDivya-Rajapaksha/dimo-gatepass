@@ -1,6 +1,6 @@
 /**
  * Manually fires the SAP Reconciliation jobs on demand, for testing — without waiting for
- * the real schedule (hourly check, daily list email at 1:00 PM, daily write at 1:30 PM).
+ * the real schedule (hourly check, daily list email at 8:00 PM, daily write at 11:00 PM).
  *
  * Run one at a time:
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts check   — re-check SAP status for all pending; notifies the
@@ -8,8 +8,8 @@
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts email   — re-checks all pending vehicles against SAP fresh, then
  *                                                              sends the "Ready for SAP Write" list email now, to the
  *                                                              Admin-configured SAP Reconciliation recipient list
- *                                                              (same as the real 1:00 PM job)
- *   npx tsx scripts/test-sap-reconciliation-jobs.ts write   — run the auto-write pass now (ignores the 1:30 PM gate).
+ *                                                              (same as the real 8:00 PM job)
+ *   npx tsx scripts/test-sap-reconciliation-jobs.ts write   — run the auto-write pass now (ignores the 11:00 PM gate).
  *                                                              This itself re-checks all pending vehicles against SAP
  *                                                              fresh, emails the just-refreshed ready list, then writes
  *                                                              every vehicle that's actually eligible right now.
