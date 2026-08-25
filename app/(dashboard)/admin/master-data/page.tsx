@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify";
+type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
@@ -12,6 +12,7 @@ type OutReasonRecord = { id: string; value: string; createdAt: string };
 type BrandRecord = { id: string; name: string; createdAt: string };
 type LtStatusRecord = { code: string; enabled: boolean; isCatchAll: boolean };
 type CdRecipientRecord = { id: string; name: string; email: string; createdAt: string };
+type SapReconRecipientRecord = { id: string; name: string; email: string; createdAt: string };
 
 type ModalState =
   | { open: false }
@@ -50,6 +51,7 @@ export default function MasterDataPage() {
   const [brands,   setBrands]   = useState<BrandRecord[]>([]);
   const [ltStatuses, setLtStatuses] = useState<LtStatusRecord[]>([]);
   const [cdRecipients, setCdRecipients] = useState<CdRecipientRecord[]>([]);
+  const [sapReconRecipients, setSapReconRecipients] = useState<SapReconRecipientRecord[]>([]);
   const [adQuery, setAdQuery] = useState("");
   const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [adLoading, setAdLoading] = useState(false);
@@ -99,6 +101,12 @@ export default function MasterDataPage() {
         setCdRecipients(json.data ?? []);
         return;
       }
+      if (t === "sapReconNotify") {
+        const res = await fetch("/api/admin/sap-reconciliation-recipients");
+        const json = await res.json();
+        setSapReconRecipients(json.data ?? []);
+        return;
+      }
       const res = await fetch(`/api/admin/master-data?type=${t}&q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (t === "carrier")   setCarriers(json.data ?? []);
@@ -112,12 +120,13 @@ export default function MasterDataPage() {
 
   useEffect(() => {
     setSearch("");
+    setAdQuery(""); setAdOptions([]); setAdOpen(false);
     load(tab, "");
   }, [tab, load]);
 
   // debounced search
   useEffect(() => {
-    if (tab === "ltStatus" || tab === "cdNotify") return;
+    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify") return;
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
@@ -159,6 +168,33 @@ export default function MasterDataPage() {
       return;
     }
     load("cdNotify");
+  }
+
+  async function addSapReconRecipient(u: { name: string; email: string }) {
+    setError("");
+    const res = await fetch("/api/admin/sap-reconciliation-recipients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: u.name, email: u.email }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Failed to add recipient");
+      return;
+    }
+    setAdQuery(""); setAdOptions([]); setAdOpen(false);
+    load("sapReconNotify");
+  }
+
+  async function removeSapReconRecipient(id: string) {
+    setError("");
+    const res = await fetch(`/api/admin/sap-reconciliation-recipients?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Failed to remove recipient");
+      return;
+    }
+    load("sapReconNotify");
   }
 
   async function toggleLtStatus(code: string, enabled: boolean) {
@@ -285,6 +321,7 @@ export default function MasterDataPage() {
     { id: "brand",     label: "Brands"          },
     { id: "ltStatus",  label: "LT Vehicle Statuses" },
     { id: "cdNotify",  label: "CD Notifications" },
+    { id: "sapReconNotify", label: "SAP Reconciliation Notifications" },
   ];
 
   return (
@@ -355,6 +392,45 @@ export default function MasterDataPage() {
                   ) : adOptions.map(u => (
                     <button key={u.id} type="button"
                       onMouseDown={() => addCdRecipient({ name: u.name, email: u.email })}
+                      className="w-full text-left px-4 py-2.5 text-sm transition-colors"
+                      style={{ color: "var(--text)" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <div className="font-medium">{u.name}</div>
+                      <div className="text-xs" style={{ color: "var(--text-muted)" }}>{u.email}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : tab === "sapReconNotify" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>
+              These recipients get the SAP Reconciliation "ready to write" list email and the "writing now" notice sent
+              right before the scheduled automatic SAP write. Separate from CD Notifications above. Search Active
+              Directory to add someone.
+            </p>
+            <div className="relative max-w-md">
+              <input
+                type="text" placeholder="Search Active Directory by name or email…"
+                value={adQuery}
+                onChange={e => searchAd(e.target.value)}
+                onFocus={() => setAdOpen(true)}
+                onBlur={() => setTimeout(() => setAdOpen(false), 150)}
+                className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+              />
+              {adOpen && adQuery.trim() && (
+                <div className="absolute z-20 mt-1 w-full rounded-xl border shadow-lg max-h-64 overflow-y-auto"
+                  style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
+                  {adLoading ? (
+                    <div className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>Searching…</div>
+                  ) : adOptions.length === 0 ? (
+                    <div className="px-4 py-3 text-sm" style={{ color: "var(--text-muted)" }}>No matches found</div>
+                  ) : adOptions.map(u => (
+                    <button key={u.id} type="button"
+                      onMouseDown={() => addSapReconRecipient({ name: u.name, email: u.email })}
                       className="w-full text-left px-4 py-2.5 text-sm transition-colors"
                       style={{ color: "var(--text)" }}
                       onMouseEnter={e => (e.currentTarget.style.background = "var(--surface2)")}
@@ -555,6 +631,38 @@ export default function MasterDataPage() {
                       <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
                       <td className="px-4 py-3 text-right">
                         <button onClick={() => removeCdRecipient(r.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                          style={{ background: "#fee2e2", color: "#dc2626" }}>
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {/* SAP Reconciliation Notifications tab */}
+            {tab === "sapReconNotify" && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
+                    {["Name", "Email", "Added On", ""].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: "var(--text-muted)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sapReconRecipients.length === 0 ? (
+                    <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>No recipients configured — search Active Directory above to add one</td></tr>
+                  ) : sapReconRecipients.map(r => (
+                    <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td className="px-4 py-3 font-medium" style={{ color: "var(--text)" }}>{r.name}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{r.email}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(r.createdAt)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => removeSapReconRecipient(r.id)}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                           style={{ background: "#fee2e2", color: "#dc2626" }}>
                           Remove

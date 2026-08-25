@@ -2061,7 +2061,8 @@ ${emailFooter("")}
 
 export async function sendSapPendingWriteTonightEmail(
   toEmail: string,
-  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[]
+  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[],
+  writeTimeLabel: string = "11:59 PM"
 ): Promise<void> {
   const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
@@ -2091,12 +2092,12 @@ ${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached 
       <circle cx="7.5" cy="7.5" r="6" stroke="#d97706" stroke-width="1.3"/>
       <path d="M7.5 4.5V8L9.8 9.3" stroke="#d97706" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    These vehicles have reached QP60 and are scheduled to be automatically written to SAP today at 11:59 PM.
+    These vehicles have reached QP60 and are scheduled to be automatically written to SAP today at ${writeTimeLabel}.
   </div>
 </div>
 <div class="body">
   <div class="greeting">
-    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} will be written to SAP today at 11:59 PM.
+    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} will be written to SAP today at ${writeTimeLabel}.
   </div>
   <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
     <thead>
@@ -2116,7 +2117,72 @@ ${emailFooter("")}
 </body>
 </html>`;
 
-  await sendGraphMail(toEmail, `SAP Reconciliation — ${vehicles.length} Vehicle(s) Pending Write Tonight (11:59 PM)`, html);
+  await sendGraphMail(toEmail, `SAP Reconciliation — ${vehicles.length} Vehicle(s) Pending Write Tonight (${writeTimeLabel})`, html);
+}
+
+/**
+ * Sent immediately before the scheduled auto-write actually runs, after a fresh re-check —
+ * distinct wording from sendSapPendingWriteTonightEmail ("scheduled for later" vs "happening
+ * right now"), listing the final, just-confirmed set of vehicles about to be written.
+ */
+export async function sendSapWritingNowEmail(
+  toEmail: string,
+  vehicles: { gatePassNumber: string; vehicle: string; fromLocation: string; toLocation: string; mmsta: string; sdsta: string }[]
+): Promise<void> {
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const rows = vehicles.map((v) => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.gatePassNumber}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.vehicle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.fromLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">${v.toLocation}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:12px">${v.mmsta || "—"} / ${v.sdsta || "—"}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP Reconciliation — Writing to SAP Now (${today})</title>
+<style>${baseStyles()}</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+${emailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP60", today)}
+<div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#eff6ff;border-color:#93c5fd;color:#1e40af">
+  <div style="display:flex;align-items:center;gap:9px;font-weight:500">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <circle cx="7.5" cy="7.5" r="6" stroke="#2563eb" stroke-width="1.3"/>
+      <path d="M7.5 4.5V8L9.8 9.3" stroke="#2563eb" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    The following vehicles are now being written to SAP.
+  </div>
+</div>
+<div class="body">
+  <div class="greeting">
+    ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} are now being written to SAP.
+  </div>
+  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+    <thead>
+      <tr style="background:#f9fafb">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Vehicle</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">From</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">To</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">MMSTA/SDSTA</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+${emailFooter("")}
+</div></div>
+</body>
+</html>`;
+
+  await sendGraphMail(toEmail, `SAP Reconciliation — Writing ${vehicles.length} Vehicle(s) to SAP Now`, html);
 }
 
 export async function sendCustomerDeliveryCompletedEmail(

@@ -23,7 +23,7 @@ import { prisma } from "@/lib/prisma";
 import { randomUUID } from "crypto";
 import { fetchVehicleSapStatus, isSapWriteEligible } from "@/lib/sap";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
-import { sendSapReconciliationReadyEmail, sendSapReadyDigestEmail, sendSapAutoWriteDigestEmail, sendSapPendingWriteTonightEmail } from "@/lib/email";
+import { sendSapReconciliationReadyEmail, sendSapReadyDigestEmail, sendSapAutoWriteDigestEmail, sendSapPendingWriteTonightEmail, sendSapWritingNowEmail } from "@/lib/email";
 
 export type SapEligibility = "PENDING" | "READY" | "WRITTEN" | "FAILED";
 
@@ -139,13 +139,31 @@ export async function runReconciliationCheck(params: {
     if (!gatePass) continue;
 
     const sapStatus = await fetchVehicleSapStatus(gatePass.chassis ?? "").catch(() => null);
+
+    // fetchVehicleSapStatus returns null both when SAP genuinely has no record AND when the
+    // call itself failed/timed out (SAP is known to intermittently time out / return 503) — the
+    // two cases are indistinguishable here. Treating a failed lookup as "not eligible" would
+    // wrongly downgrade a vehicle that's still genuinely READY just because this one check
+    // happened to hit a bad moment, making eligibility appear to flicker on every refresh. So a
+    // failed/empty lookup leaves the record's eligibility exactly as it was — only a real,
+    // successful SAP response ever changes it.
+    if (sapStatus === null) {
+      await insertAuditLog({
+        reconciliationId: row.id, gatePassId: row.gatePassId, action: "CHECK", mode: params.mode,
+        triggeredById: params.triggeredById, triggeredByName: params.triggeredByName,
+        mmsta: null, sdsta: null, success: false,
+        responseMessage: "SAP status lookup failed or returned no data — eligibility left unchanged.",
+      });
+      continue;
+    }
+
     const eligible = isSapWriteEligible(sapStatus);
     const nextEligibility: SapEligibility = eligible ? "READY" : "PENDING";
     const now = new Date();
 
     await prisma.$executeRaw`
       UPDATE "SapReconciliation"
-      SET "latestMmsta" = ${sapStatus?.mmsta ?? null}, "latestSdsta" = ${sapStatus?.sdsta ?? null},
+      SET "latestMmsta" = ${sapStatus.mmsta}, "latestSdsta" = ${sapStatus.sdsta},
           "eligibility" = ${nextEligibility}, "lastCheckedAt" = ${now}
       WHERE "id" = ${row.id}
     `;
@@ -153,7 +171,7 @@ export async function runReconciliationCheck(params: {
     await insertAuditLog({
       reconciliationId: row.id, gatePassId: row.gatePassId, action: "CHECK", mode: params.mode,
       triggeredById: params.triggeredById, triggeredByName: params.triggeredByName,
-      mmsta: sapStatus?.mmsta ?? null, sdsta: sapStatus?.sdsta ?? null,
+      mmsta: sapStatus.mmsta, sdsta: sapStatus.sdsta,
     });
 
     if (eligible && !row.notifiedAt) {
@@ -169,14 +187,34 @@ export async function runReconciliationCheck(params: {
  * Fixed-time daily send (see lib/sapReconciliationScheduler.ts, ~3 PM) to the Gimhani/
  * Tharindhi recipient list — lists every vehicle currently "Ready for SAP Write" at send
  * time, regardless of which hourly check found it. Skips sending if nothing is ready.
+ * writeTimeLabel is purely cosmetic text in the email ("...written to SAP today at X") —
+ * defaults to "11:59 PM" but the scheduler passes in whatever the write time actually is.
  */
-export async function sendPendingWriteTonightDigest(recipients: string[]): Promise<boolean> {
+export async function sendPendingWriteTonightDigest(recipients: string[], writeTimeLabel?: string): Promise<boolean> {
   const vehicles = await getReadyVehiclesForDigest();
   if (vehicles.length === 0) return false;
 
   for (const email of recipients) {
-    await sendSapPendingWriteTonightEmail(email, vehicles).catch((e) =>
+    await sendSapPendingWriteTonightEmail(email, vehicles, writeTimeLabel).catch((e) =>
       console.error(`[sap-reconciliation] pending-write-tonight email to ${email} failed:`, e)
+    );
+  }
+  return true;
+}
+
+/**
+ * Sent immediately before the scheduled auto-write actually writes anything, after a fresh
+ * re-check — the final, just-confirmed list of vehicles about to be written right now (see
+ * runAutoWriteReadyVehicles). Distinct wording/email from sendPendingWriteTonightDigest, which
+ * is a "this is scheduled for later" notice, not a "this is happening now" one.
+ */
+export async function sendWritingNowDigest(recipients: string[]): Promise<boolean> {
+  const vehicles = await getReadyVehiclesForDigest();
+  if (vehicles.length === 0) return false;
+
+  for (const email of recipients) {
+    await sendSapWritingNowEmail(email, vehicles).catch((e) =>
+      console.error(`[sap-reconciliation] writing-now email to ${email} failed:`, e)
     );
   }
   return true;
@@ -205,17 +243,32 @@ async function writeOneHop(
   const sapStatus = await fetchVehicleSapStatus(gatePass.chassis ?? "").catch(() => null);
   const now = new Date();
 
+  // Same conflation as the hourly check: fetchVehicleSapStatus returns null both when SAP
+  // genuinely has no record AND when the call itself failed/timed out. A failed lookup here
+  // must never be reported as "no longer eligible," and must never downgrade the record's
+  // eligibility — that's a false negative caused by SAP not answering, not a real status change.
+  // Only a successful SAP response that actually fails isSapWriteEligible() marks PENDING.
+  if (sapStatus === null) {
+    await insertAuditLog({
+      reconciliationId: row.id, gatePassId: row.gatePassId, action: "WRITE_ATTEMPT", mode: params.mode,
+      triggeredById: params.adminId, triggeredByName: params.adminName,
+      mmsta: null, sdsta: null, success: false,
+      responseMessage: "SAP status lookup failed — write not attempted, eligibility left unchanged.",
+    });
+    return { success: false, message: "Could not confirm current SAP status right now (SAP did not respond) — eligibility unchanged, try again shortly." };
+  }
+
   if (!isSapWriteEligible(sapStatus)) {
     await prisma.$executeRaw`
       UPDATE "SapReconciliation"
-      SET "latestMmsta" = ${sapStatus?.mmsta ?? null}, "latestSdsta" = ${sapStatus?.sdsta ?? null},
+      SET "latestMmsta" = ${sapStatus.mmsta}, "latestSdsta" = ${sapStatus.sdsta},
           "eligibility" = 'PENDING', "lastCheckedAt" = ${now}
       WHERE "id" = ${row.id}
     `;
     await insertAuditLog({
       reconciliationId: row.id, gatePassId: row.gatePassId, action: "WRITE_ATTEMPT", mode: params.mode,
       triggeredById: params.adminId, triggeredByName: params.adminName,
-      mmsta: sapStatus?.mmsta ?? null, sdsta: sapStatus?.sdsta ?? null,
+      mmsta: sapStatus.mmsta, sdsta: sapStatus.sdsta,
       success: false, responseMessage: "Vehicle is no longer eligible for SAP write.",
     });
     return { success: false, notEligible: true, message: "Vehicle is no longer eligible for SAP write (status changed since last check)." };
@@ -367,10 +420,26 @@ export async function writeSingleReconciliation(params: {
  * Automatic SAP write pass — for every distinct vehicle with at least one "Ready for SAP
  * Write" record, writes that vehicle's full chronological chain of outstanding hops (see
  * writeVehicleChain), revalidating each hop fresh immediately before writing. Intended to
- * run automatically on a schedule (see lib/sapReconciliationScheduler.ts), right after a
- * check has run. Manual "Write to SAP" / "Write Selected to SAP" still work independently.
+ * run automatically on a schedule (see lib/sapReconciliationScheduler.ts). Manual "Write to
+ * SAP" / "Write Selected to SAP" still work independently.
+ *
+ * Never trusts whatever the last hourly check happened to find: re-checks every outstanding
+ * (non-WRITTEN) vehicle against SAP directly first — a vehicle that became eligible between
+ * hourly checks must still be written today, not missed until the next cycle — then emails
+ * digestRecipients the complete, just-refreshed "writing now" list (sendWritingNowDigest,
+ * distinct wording from the earlier "scheduled for later" digest), before writing any of it.
  */
-export async function runAutoWriteReadyVehicles(): Promise<{ attempted: number; written: number; failed: number; noLongerEligible: number }> {
+export async function runAutoWriteReadyVehicles(digestRecipients: string[]): Promise<{ attempted: number; written: number; failed: number; noLongerEligible: number }> {
+  await runReconciliationCheck({
+    triggeredById: null,
+    triggeredByName: "System (Automatic Reconciliation — pre-write check)",
+    mode: "AUTO",
+  });
+
+  await sendWritingNowDigest(digestRecipients).catch((e) =>
+    console.error("[sap-reconciliation] pre-write digest email failed:", e)
+  );
+
   const readyChassis = await prisma.$queryRaw<{ chassis: string }[]>`
     SELECT DISTINCT gp."chassis" as chassis
     FROM "SapReconciliation" sr
