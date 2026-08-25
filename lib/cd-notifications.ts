@@ -46,10 +46,10 @@ export async function ensureCdNotificationSeeded(): Promise<void> {
   }
 }
 
-export async function getCdNotificationRecipients(): Promise<{ id: string; name: string; email: string }[]> {
+export async function getCdNotificationRecipients(): Promise<{ id: string; name: string; email: string; createdAt: Date }[]> {
   await ensureCdNotificationSeeded();
-  return prisma.$queryRaw<{ id: string; name: string; email: string }[]>`
-    SELECT "id", "name", "email" FROM "CdNotificationRecipient"
+  return prisma.$queryRaw<{ id: string; name: string; email: string; createdAt: Date }[]>`
+    SELECT "id", "name", "email", "createdAt" FROM "CdNotificationRecipient"
     WHERE "email" != ${SEED_MARKER_EMAIL}
     ORDER BY "name" ASC
   `.catch(() => []);
