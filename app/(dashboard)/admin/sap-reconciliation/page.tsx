@@ -27,7 +27,10 @@ type BulkResult = { reconciliationId: string; success: boolean; alreadyWritten?:
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  // Explicit timeZone so display is always correct Sri Lanka local time regardless of the
+  // viewing browser's or server's own system timezone setting — the stored value itself is
+  // already correct UTC (verified directly against the database), this only fixes display.
+  return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Colombo" });
 }
 
 const eligibilityColors: Record<string, { bg: string; fg: string }> = {
