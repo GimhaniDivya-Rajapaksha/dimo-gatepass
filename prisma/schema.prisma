@@ -377,3 +377,13 @@ model CdNotificationRecipient {
   email     String   @unique
   createdAt DateTime @default(now())
 }
+
+// Admin-managed recipient list for SAP Reconciliation emails (the "ready to write" digest,
+// the "writing now" pre-write notice) — separate from CdNotificationRecipient above. Recipients
+// are picked from Active Directory via /api/ad-users and stored here purely as name+email.
+model SapReconciliationRecipient {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+}
