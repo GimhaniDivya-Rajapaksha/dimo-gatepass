@@ -1643,12 +1643,16 @@ export default function CreateGatePassPage() {
   };
 
   const loadLtBulkVehicleLocations = async (vehicle: string, matnr = "", q = "", vehicleLocationType?: string) => {
-    const effectiveLocationType = vehicleLocationType || ltBulkVehicles.find((item) => item.vehicle === vehicle)?.toLocationType || "";
+    const bulkItem = ltBulkVehicles.find((item) => item.vehicle === vehicle);
+    const effectiveLocationType = vehicleLocationType || bulkItem?.toLocationType || "";
     if (!effectiveLocationType) return;
     setLtBulkLocationLoading((prev) => ({ ...prev, [vehicle]: true }));
     try {
       const params = new URLSearchParams({ field: "location", q, limit: "300", locationType: effectiveLocationType });
       if (matnr) params.set("matnr", matnr);
+      // Scope this vehicle's own extended destinations via the exact-VIN fast path (same as
+      // the single-vehicle flow) instead of falling through to the unscoped, unfiltered lookup.
+      if (bulkItem?.chassisNo) params.set("chassisNo", bulkItem.chassisNo);
       const res = await fetch(`/api/lookups?${params.toString()}`);
       if (!res.ok) return;
       const data = (await res.json()) as { options?: LookupOption[] };
