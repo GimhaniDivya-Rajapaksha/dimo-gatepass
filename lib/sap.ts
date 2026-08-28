@@ -223,23 +223,41 @@ export async function fetchRawInVehicles(q: string): Promise<SapVehicle[]> {
   return rows.map(mapVehicle);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Fetch a single vehicle's current mmsta/sdsta from SAP's /in endpoint — used only to
  * decide whether a Location Transfer's SAP write should execute (see isSapWriteEligible).
- * Returns null if the vehicle isn't found or the lookup fails; callers must treat that as
- * "cannot confirm eligibility" and skip the SAP write rather than guess.
+ * Returns null if the vehicle isn't found or the lookup fails after retrying; callers must
+ * treat that as "cannot confirm eligibility" and skip the SAP write rather than guess.
+ *
+ * Retries up to 3 times with a short backoff — SAP intermittently times out / returns 503
+ * for a moment, and a single failed attempt here previously meant a genuinely-QP60 vehicle
+ * would be skipped at completion time and only recovered later via reconciliation. This
+ * mirrors the same retry philosophy already used for the actual SAP write
+ * (updateVehiclePlantLocation), scoped to only this function — the shared apimPost() helper
+ * used by vehicle search elsewhere is untouched, so search speed is unaffected.
  */
 export async function fetchVehicleSapStatus(vin: string): Promise<{ mmsta: string; sdsta: string } | null> {
   const safeVin = vin.trim();
   if (!safeVin) return null;
-  try {
-    const rows = await apimPost("in", `vhvin eq '${safeVin.replace(/'/g, "''")}'`);
-    const row = rows[0];
-    if (!row) return null;
-    return { mmsta: str(row["mmsta"]), sdsta: str(row["sdsta"]) };
-  } catch {
-    return null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const rows = await apimPost("in", `vhvin eq '${safeVin.replace(/'/g, "''")}'`);
+      const row = rows[0];
+      if (!row) return null; // SAP answered, vehicle genuinely not found — not a transient failure, don't retry
+      return { mmsta: str(row["mmsta"]), sdsta: str(row["sdsta"]) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isTransient = /503|noresponse|upstream|timeout|temporar|aborted/i.test(message);
+      if (!isTransient || attempt === 3) return null;
+      await sleep(attempt * 1500);
+    }
   }
+  return null;
 }
 
 /**
