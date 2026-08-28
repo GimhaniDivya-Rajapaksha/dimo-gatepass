@@ -2099,7 +2099,8 @@ ${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached 
   <div class="greeting">
     ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} will be written to SAP today at ${writeTimeLabel}.
   </div>
-  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+  <div style="width:100%;max-height:420px;overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:10px;border:1px solid #e5e7eb;border-radius:6px">
+  <table cellpadding="0" cellspacing="0" style="width:100%;min-width:600px;border-collapse:collapse">
     <thead>
       <tr style="background:#f9fafb">
         <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
@@ -2111,6 +2112,7 @@ ${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached 
     </thead>
     <tbody>${rows}</tbody>
   </table>
+  </div>
 </div>
 ${emailFooter("")}
 </div></div>
@@ -2164,7 +2166,8 @@ ${emailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP6
   <div class="greeting">
     ${vehicles.length} vehicle${vehicles.length === 1 ? "" : "s"} are now being written to SAP.
   </div>
-  <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:10px">
+  <div style="width:100%;max-height:420px;overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:10px;border:1px solid #e5e7eb;border-radius:6px">
+  <table cellpadding="0" cellspacing="0" style="width:100%;min-width:600px;border-collapse:collapse">
     <thead>
       <tr style="background:#f9fafb">
         <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280">Gate Pass</th>
@@ -2176,6 +2179,7 @@ ${emailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP6
     </thead>
     <tbody>${rows}</tbody>
   </table>
+  </div>
 </div>
 ${emailFooter("")}
 </div></div>
