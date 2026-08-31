@@ -16,6 +16,12 @@ export default async function GatePassLayout({ children }: { children: React.Rea
         <main className="flex-1 p-6 main-bg print:p-0 print:bg-white">
           {children}
         </main>
+        <footer
+          className="flex-shrink-0 text-center text-xs py-2 px-4 border-t print:hidden"
+          style={{ color: "var(--text-muted)", borderColor: "var(--border)" }}
+        >
+          Powered by DIMO Group IT Digital Technologies &copy; 2026. All rights reserved.
+        </footer>
       </div>
     </div>
   );

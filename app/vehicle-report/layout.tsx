@@ -16,6 +16,12 @@ export default async function VehicleReportLayout({ children }: { children: Reac
         <main className="flex-1 flex flex-col overflow-hidden p-6 main-bg">
           {children}
         </main>
+        <footer
+          className="flex-shrink-0 text-center text-xs py-2 px-4 border-t"
+          style={{ color: "var(--text-muted)", borderColor: "var(--border)" }}
+        >
+          Powered by DIMO Group IT Digital Technologies &copy; 2026. All rights reserved.
+        </footer>
       </div>
     </div>
   );
