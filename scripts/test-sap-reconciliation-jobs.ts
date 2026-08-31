@@ -1,7 +1,6 @@
 /**
  * Manually fires the SAP Reconciliation jobs on demand, for testing — without waiting for
- * the real schedule (hourly check, daily list email at 8:00 PM, daily writes at 4:00 PM and
- * 11:00 PM).
+ * the real schedule (hourly check, daily list email at 4:00 PM, daily write at 11:00 PM).
  *
  * Run one at a time:
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts check   — re-check SAP status for all pending; notifies the
@@ -9,13 +8,11 @@
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts email   — re-checks all pending vehicles against SAP fresh, then
  *                                                              sends the "Ready for SAP Write" list email now, to the
  *                                                              Admin-configured SAP Reconciliation recipient list
- *                                                              (same as the real 8:00 PM job)
- *   npx tsx scripts/test-sap-reconciliation-jobs.ts write   — run an auto-write pass now (same logic used by both the
- *                                                              real 4:00 PM and 11:00 PM jobs — they only differ by
- *                                                              scheduled time). This itself re-checks all pending
- *                                                              vehicles against SAP fresh, emails the just-refreshed
- *                                                              ready list, then writes every vehicle that's actually
- *                                                              eligible right now.
+ *                                                              (same as the real 4:00 PM job). Does not write to SAP.
+ *   npx tsx scripts/test-sap-reconciliation-jobs.ts write   — run the auto-write pass now (ignores the 11:00 PM gate).
+ *                                                              This itself re-checks all pending vehicles against SAP
+ *                                                              fresh, emails the just-refreshed ready list, then writes
+ *                                                              every vehicle that's actually eligible right now.
  *   npx tsx scripts/test-sap-reconciliation-jobs.ts cycle   — an explicit check + email (which itself repeats a
  *                                                              check), followed by "write" above (which repeats its
  *                                                              own check + email internally) — for testing only, the
