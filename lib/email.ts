@@ -316,6 +316,62 @@ function secLabel(text: string): string {
   return `<div class="sec-lbl">${text}<span class="sec-lbl-line"></span></div>`;
 }
 
+// Header/footer used only by the SAP Reconciliation digest emails (Pending Write Tonight /
+// Writing Now) — these emails cover multiple gate passes at once and pass a date, not a
+// gate pass number, so they get their own header (labelled "Date", not "Gate Pass No.") and
+// footer (no per-gate-pass REF badge). Every other email keeps using emailHeader()/emailFooter()
+// above, unchanged.
+function sapDigestEmailHeader(title: string, subtitle: string, dateLabel: string): string {
+  return `
+  <table width="100%" class="desktop-hd" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
+    <tr>
+      <td width="80" style="padding:18px 14px;border-right:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:center;width:80px">
+        <img src="cid:logo@dimo" alt="DIMO" width="72" height="72" style="width:72px;height:72px;display:block;margin:0 auto">
+      </td>
+      <td style="padding:18px 16px;vertical-align:middle">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:6px">Diesel &amp; Motor Engineering Plc.</div>
+        <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:4px;word-break:break-word">${title}</div>
+        <div style="font-size:12px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
+      </td>
+      <td width="120" style="padding:18px 14px;border-left:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right;width:120px;white-space:nowrap">
+        <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:6px">Date</div>
+        <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em;white-space:nowrap">${dateLabel}</div>
+      </td>
+    </tr>
+  </table>
+  <!--[if !mso]><!-->
+  <div class="mobile-hd" style="display:none;max-height:0;overflow:hidden;background:#1E4FA0">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#1E4FA0;border-collapse:collapse">
+      <tr>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:left">
+          <img src="cid:logo@dimo" alt="DIMO" width="64" height="64" style="width:64px;height:64px;display:block">
+        </td>
+        <td style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.12);vertical-align:middle;text-align:right">
+          <div style="font-size:9px;font-weight:500;letter-spacing:0.18em;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-bottom:5px">Date</div>
+          <div style="font-size:16px;font-weight:700;color:#fff;letter-spacing:0.06em">${dateLabel}</div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:14px 16px;vertical-align:middle">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;color:#8DC63F;text-transform:uppercase;margin-bottom:5px">Diesel &amp; Motor Engineering Plc.</div>
+          <div style="font-size:19px;font-weight:800;color:#fff;letter-spacing:-0.2px;line-height:1.2;margin-bottom:3px;word-break:break-word">${title}</div>
+          <div style="font-size:11px;font-weight:300;color:rgba(255,255,255,0.6);letter-spacing:0.02em;word-break:break-word">${subtitle}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+  <!--<![endif]-->
+  <div style="height:4px;background:#8DC63F"></div>`;
+}
+
+function sapDigestEmailFooter(): string {
+  return `
+  <div class="footer" style="flex-direction:column;align-items:center;gap:5px;text-align:center">
+    <div class="ft-left" style="text-align:center">This is a system-generated message &nbsp;&bull;&nbsp; Please do not reply</div>
+    <div style="font-size:10px;font-weight:300;color:rgba(255,255,255,0.35);text-align:center">Powered by DIMO Group IT Digital Technologies &copy; 2026. All rights reserved.</div>
+  </div>`;
+}
+
 export async function sendApprovalRequestEmail(
   approverEmail: string,
   approverName: string,
@@ -2085,7 +2141,7 @@ export async function sendSapPendingWriteTonightEmail(
 </head>
 <body>
 <div class="wrap"><div class="card">
-${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached QP60", today)}
+${sapDigestEmailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached QP60", today)}
 <div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#fffbeb;border-color:#fcd34d;color:#92400e">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -2114,7 +2170,7 @@ ${emailHeader("SAP Reconciliation — Pending Write Tonight", "Vehicles Reached 
   </table>
   </div>
 </div>
-${emailFooter("")}
+${sapDigestEmailFooter()}
 </div></div>
 </body>
 </html>`;
@@ -2152,7 +2208,7 @@ export async function sendSapWritingNowEmail(
 </head>
 <body>
 <div class="wrap"><div class="card">
-${emailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP60", today)}
+${sapDigestEmailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP60", today)}
 <div class="alert-bar" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 28px;text-align:center;background:#eff6ff;border-color:#93c5fd;color:#1e40af">
   <div style="display:flex;align-items:center;gap:9px;font-weight:500">
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
@@ -2181,7 +2237,7 @@ ${emailHeader("SAP Reconciliation — Writing to SAP Now", "Vehicles Reached QP6
   </table>
   </div>
 </div>
-${emailFooter("")}
+${sapDigestEmailFooter()}
 </div></div>
 </body>
 </html>`;
