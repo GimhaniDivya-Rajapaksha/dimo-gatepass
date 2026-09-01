@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlantLocationOptions, findPlantLocationOption, updateVehiclePlantLocation, type PlantLocationTarget } from "@/lib/location-api";
+import { fetchVehicleSapStatus, isSapWriteEligible } from "@/lib/sap";
+import { recordSkippedSapWrite } from "@/lib/sap-reconciliation";
 import { findApproversForLocationBrand } from "@/lib/approver-routing";
 import { isApproverRole } from "@/lib/roles";
 import { getUserPlantPrefixes, plantsWhereOr, findExtraMappedUserIds } from "@/lib/user-plants";
@@ -834,6 +836,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    if (isCdPass) {
+      const { sendCustomerDeliveryCompletedEmail } = await import("@/lib/email");
+      const { getCdNotificationRecipients } = await import("@/lib/cd-notifications");
+      const cdRecipients = await getCdNotificationRecipients().catch(() => []);
+      for (const recipient of cdRecipients) {
+        sendCustomerDeliveryCompletedEmail(recipient.email, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          chassis: gatePass.chassis,
+          toLocation: gatePass.toLocation,
+          requestedBy: gatePass.requestedBy,
+          driverName: gatePass.driverName,
+          completedByName: session.user.name ?? "Security Officer",
+          completedVia: "Security Gate Out",
+        }).catch((e: unknown) => console.error("[email] Customer Delivery completed notification (security_gate_out) failed:", e));
+      }
+    }
+
     // Notify destination security, initiators, and plant ASOs for Location Transfer.
     let liveLocationUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
     let liveLocationUpdateError: string | null = null;
@@ -936,46 +957,60 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       // SAP: update vehicle location to destination now that source Security confirmed Gate OUT
+      // — only when the vehicle's current SAP status is eligible (MMSTA=QP60 and SDSTA blank/QS20).
+      // Every other eligible Location Transfer status still completes normally above; only the
+      // SAP write itself is skipped when the vehicle doesn't currently meet this condition.
       if (toLoc) {
         try {
-          let targetLocation: PlantLocationTarget | null = null;
+          const sapStatus = await fetchVehicleSapStatus(gatePass.chassis ?? "");
+          if (isSapWriteEligible(sapStatus)) {
+            let targetLocation: PlantLocationTarget | null = null;
 
-          // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
-          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
-            targetLocation = {
-              plantCode: gatePass.toPlantCode,
-              plantDescription: gatePass.toLocation ?? "",
-              storageLocation: gatePass.toStorageLocation,
-              storageDescription: "",
-            };
-          } else {
-            // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
-            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
-            targetLocation = findPlantLocationOption(plantOptions, toLoc);
-            if (!targetLocation) {
-              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
-              targetLocation = findPlantLocationOption(
-                dbLocations.map((l) => ({
-                  plantCode: l.plantCode,
-                  plantDescription: l.plantDescription,
-                  storageLocation: l.storageLocation,
-                  storageDescription: l.storageDescription,
-                })),
-                toLoc
-              );
+            // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
+            if (gatePass.toPlantCode && gatePass.toStorageLocation) {
+              targetLocation = {
+                plantCode: gatePass.toPlantCode,
+                plantDescription: gatePass.toLocation ?? "",
+                storageLocation: gatePass.toStorageLocation,
+                storageDescription: "",
+              };
+            } else {
+              // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
+              const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+              targetLocation = findPlantLocationOption(plantOptions, toLoc);
+              if (!targetLocation) {
+                const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+                targetLocation = findPlantLocationOption(
+                  dbLocations.map((l) => ({
+                    plantCode: l.plantCode,
+                    plantDescription: l.plantDescription,
+                    storageLocation: l.storageLocation,
+                    storageDescription: l.storageDescription,
+                  })),
+                  toLoc
+                );
+              }
             }
-          }
 
-          if (targetLocation) {
-            liveLocationUpdate = await updateVehiclePlantLocation({
-              identifiers: [gatePass.vehicle, gatePass.chassis],
-              destination: targetLocation,
-              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
-            });
-            console.log("[security_gate_out] SAP location updated:", liveLocationUpdate.message);
+            if (targetLocation) {
+              liveLocationUpdate = await updateVehiclePlantLocation({
+                identifiers: [gatePass.vehicle, gatePass.chassis],
+                destination: targetLocation,
+                sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+              });
+              console.log("[security_gate_out] SAP location updated:", liveLocationUpdate.message);
+            } else {
+              liveLocationUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
+              console.warn("[security_gate_out] no matching SAP plant location for:", toLoc);
+            }
           } else {
-            liveLocationUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
-            console.warn("[security_gate_out] no matching SAP plant location for:", toLoc);
+            console.log("[security_gate_out] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
           }
         } catch (error) {
           liveLocationUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
@@ -1134,6 +1169,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
+    if (isCdPass) {
+      const { sendCustomerDeliveryCompletedEmail } = await import("@/lib/email");
+      const { getCdNotificationRecipients } = await import("@/lib/cd-notifications");
+      const cdRecipients = await getCdNotificationRecipients().catch(() => []);
+      for (const recipient of cdRecipients) {
+        sendCustomerDeliveryCompletedEmail(recipient.email, {
+          gatePassNumber: gatePass.gatePassNumber,
+          passId: gatePass.id,
+          vehicle: gatePass.vehicle,
+          chassis: gatePass.chassis,
+          toLocation: gatePass.toLocation,
+          requestedBy: gatePass.requestedBy,
+          driverName: gatePass.driverName,
+          completedByName: session.user.name ?? "Initiator",
+          completedVia: "Initiator Print",
+        }).catch((e: unknown) => console.error("[email] Customer Delivery completed notification (print_gate_out) failed:", e));
+      }
+    }
+
     // For LT: notify destination security + initiators that vehicle is en route
     let printLiveUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
     let printLiveUpdateError: string | null = null;
@@ -1231,47 +1285,61 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       // SAP: update vehicle location to destination now that initiator printed (bypasses source Security Gate OUT)
-      // Only runs if initiator confirmed SAP write in the confirmation dialog (writeSap === true)
+      // Only runs if initiator confirmed SAP write in the confirmation dialog (writeSap === true),
+      // and only when the vehicle's current SAP status is eligible (MMSTA=QP60, SDSTA blank/QS20).
+      // Every other eligible Location Transfer status still completes normally above; only the
+      // SAP write itself is skipped when the vehicle doesn't currently meet this condition.
       if (writeSap !== false && toLoc) {
         try {
-          let targetLocation: PlantLocationTarget | null = null;
+          const sapStatus = await fetchVehicleSapStatus(gatePass.chassis ?? "");
+          if (isSapWriteEligible(sapStatus)) {
+            let targetLocation: PlantLocationTarget | null = null;
 
-          // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
-          if (gatePass.toPlantCode && gatePass.toStorageLocation) {
-            targetLocation = {
-              plantCode: gatePass.toPlantCode,
-              plantDescription: gatePass.toLocation ?? "",
-              storageLocation: gatePass.toStorageLocation,
-              storageDescription: "",
-            };
-          } else {
-            // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
-            const plantOptions = await fetchPlantLocationOptions().catch(() => []);
-            targetLocation = findPlantLocationOption(plantOptions, toLoc);
-            if (!targetLocation) {
-              const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
-              targetLocation = findPlantLocationOption(
-                dbLocations.map((l) => ({
-                  plantCode: l.plantCode,
-                  plantDescription: l.plantDescription,
-                  storageLocation: l.storageLocation,
-                  storageDescription: l.storageDescription,
-                })),
-                toLoc
-              );
+            // Prefer codes stored at creation — works even when destination has no vehicles yet in SAP feed
+            if (gatePass.toPlantCode && gatePass.toStorageLocation) {
+              targetLocation = {
+                plantCode: gatePass.toPlantCode,
+                plantDescription: gatePass.toLocation ?? "",
+                storageLocation: gatePass.toStorageLocation,
+                storageDescription: "",
+              };
+            } else {
+              // Legacy fallback: description-string lookup (only succeeds if location is in live SAP feed or LocationOption table)
+              const plantOptions = await fetchPlantLocationOptions().catch(() => []);
+              targetLocation = findPlantLocationOption(plantOptions, toLoc);
+              if (!targetLocation) {
+                const dbLocations = await prisma.locationOption.findMany({ orderBy: { plantCode: "asc" } });
+                targetLocation = findPlantLocationOption(
+                  dbLocations.map((l) => ({
+                    plantCode: l.plantCode,
+                    plantDescription: l.plantDescription,
+                    storageLocation: l.storageLocation,
+                    storageDescription: l.storageDescription,
+                  })),
+                  toLoc
+                );
+              }
             }
-          }
 
-          if (targetLocation) {
-            printLiveUpdate = await updateVehiclePlantLocation({
-              identifiers: [gatePass.vehicle, gatePass.chassis],
-              destination: targetLocation,
-              sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
-            });
-            console.log("[print_gate_out] SAP location updated:", printLiveUpdate.message);
+            if (targetLocation) {
+              printLiveUpdate = await updateVehiclePlantLocation({
+                identifiers: [gatePass.vehicle, gatePass.chassis],
+                destination: targetLocation,
+                sapFallback: { internalNo: (gatePass as any).sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+              });
+              console.log("[print_gate_out] SAP location updated:", printLiveUpdate.message);
+            } else {
+              printLiveUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
+              console.warn("[print_gate_out] no matching SAP plant location for:", toLoc);
+            }
           } else {
-            printLiveUpdateError = `SAP location not resolved for "${toLoc}" — no matching plant/sloc found. This pass was likely created before the latest fix and has no stored plant/sloc codes.`;
-            console.warn("[print_gate_out] no matching SAP plant location for:", toLoc);
+            console.log("[print_gate_out] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
           }
         } catch (error) {
           printLiveUpdateError = error instanceof Error ? error.message : "Vehicle location API update failed.";
@@ -1344,23 +1412,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         data: { status: "GATE_OUT", departureDate, departureTime, gateOutBy: session.user.name ?? null },
       });
 
-      // SAP write — uses toPlantCode + toStorageLocation
+      // SAP write — uses toPlantCode + toStorageLocation, only when the vehicle's current SAP
+      // status is eligible (MMSTA=QP60, SDSTA blank/QS20). Every other eligible Location
+      // Transfer status still completes normally above; only the SAP write itself is skipped.
       let liveLocationUpdate: { message: string; currentLocation: { label: string; plantCode: string; storageLocation: string } } | null = null;
       let liveLocationUpdateError: string | null = null;
       if (writeSap !== false && gatePass.toPlantCode && gatePass.toStorageLocation) {
         try {
-          const targetLocation: PlantLocationTarget = {
-            plantCode: gatePass.toPlantCode,
-            plantDescription: gatePass.toLocation ?? "",
-            storageLocation: gatePass.toStorageLocation,
-            storageDescription: "",
-          };
-          liveLocationUpdate = await updateVehiclePlantLocation({
-            identifiers: [gatePass.vehicle, gatePass.chassis],
-            destination: targetLocation,
-            sapFallback: { internalNo: gatePass.sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
-          });
-          console.log("[gate_out ASO LT] SAP location updated:", liveLocationUpdate.message);
+          const sapStatus = await fetchVehicleSapStatus(gatePass.chassis ?? "");
+          if (isSapWriteEligible(sapStatus)) {
+            const targetLocation: PlantLocationTarget = {
+              plantCode: gatePass.toPlantCode,
+              plantDescription: gatePass.toLocation ?? "",
+              storageLocation: gatePass.toStorageLocation,
+              storageDescription: "",
+            };
+            liveLocationUpdate = await updateVehiclePlantLocation({
+              identifiers: [gatePass.vehicle, gatePass.chassis],
+              destination: targetLocation,
+              sapFallback: { internalNo: gatePass.sapVehicleId, externalNo: gatePass.vehicle, chassisNo: gatePass.chassis },
+            });
+            console.log("[gate_out ASO LT] SAP location updated:", liveLocationUpdate.message);
+          } else {
+            console.log("[gate_out ASO LT] SAP write skipped — vehicle status not eligible (requires MMSTA=QP60, SDSTA blank/QS20):", sapStatus);
+            await recordSkippedSapWrite({
+              gatePassId: gatePass.id,
+              mmsta: sapStatus?.mmsta ?? "",
+              sdsta: sapStatus?.sdsta ?? "",
+              ltCompletedAt: new Date(),
+            });
+          }
         } catch (error) {
           liveLocationUpdateError = error instanceof Error ? error.message : "SAP location update failed.";
           console.error("[gate_out ASO LT] SAP location update failed:", error);

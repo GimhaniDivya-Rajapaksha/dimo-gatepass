@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fetchSapVehicles } from "@/lib/sap";
-import { fetchPlantLocationOptions, fetchPlantVehicleRows, filterApiLocations, type LocationOption } from "@/lib/location-api";
+import { fetchSapVehicles, fetchRawInVehicles } from "@/lib/sap";
+import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
+import { fetchPlantLocationOptions, fetchPlantVehicleRows, getCachedPlantVehicleRows, filterApiLocations, type LocationOption, type PlantVehicleRow } from "@/lib/location-api";
+import { getPendingDbLocationsByChassis } from "@/lib/sap-reconciliation";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier" | "driverNIC" | "driverName" | "driver";
 
@@ -163,18 +165,28 @@ export async function GET(req: NextRequest) {
       const matnr = searchParams.get("matnr") ?? undefined;
 
       if (chassisNo || matnr) {
-        // Use the unfiltered ALL-vehicles SAP call — it returns every vehicle with its
-        // ext_plant / ext_sloc destinations included. Filter in-memory by VIN / matnr.
-        // (Previously a per-vehicle ?filter=VIN URL was tried here but that endpoint
-        //  returned wrong VINs or no ext data, causing PROMO/FINANCE to be empty.)
-        const allRows = await fetchPlantVehicleRows().catch(() => []);
+        // Exact-VIN filter first — fast (~2s vs ~12-15s+ for the full list), returns only this
+        // vehicle's rows. A prior commit (b2c66ef) found this endpoint unreliable in the past
+        // (returned wrong VINs / rows with no ext_plant/ext_sloc data, causing PROMO/FINANCE to
+        // go empty), so the result is verified before being trusted: if it comes back empty or
+        // with no usable ext destination data, fall back to the full unfiltered call exactly as
+        // before — this can never silently show an incomplete PROMO/FINANCE/Dealer list.
+        let vehicleRows: PlantVehicleRow[] = [];
+        if (chassisNo) {
+          const exactRows = await fetchPlantVehicleRows(chassisNo.toUpperCase()).catch(() => []);
+          if (exactRows.length > 0 && exactRows.some(r => r.extPlant && r.extSloc)) {
+            vehicleRows = exactRows;
+          }
+        }
 
-        // Find this vehicle's rows — prefer chassisNo (VIN), fallback to matnr
-        let vehicleRows = chassisNo
-          ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
-          : [];
-        if (!vehicleRows.length && matnr) {
-          vehicleRows = allRows.filter(r => r.materialNo === matnr);
+        if (!vehicleRows.length) {
+          const allRows = await fetchPlantVehicleRows().catch(() => []);
+          vehicleRows = chassisNo
+            ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
+            : [];
+          if (!vehicleRows.length && matnr) {
+            vehicleRows = allRows.filter(r => r.materialNo === matnr);
+          }
         }
 
         // Build one option per unique ext_plant|ext_sloc destination.
@@ -261,19 +273,76 @@ export async function GET(req: NextRequest) {
         sapCurrentLocation: string;
       }>();
 
-      // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel
-      let [sapResult, plantResult] = await Promise.allSettled([
+      // LT/Test Drive only: also need the raw (unfiltered) /in results, to tell "vehicle has a
+      // business status the admin excluded" apart from "vehicle has no business status at all"
+      // — the /plant merge below must never re-include the former, only the latter.
+      const wantsLtEligibilityCheck = passType === "LOCATION_TRANSFER" || rawPassType === "TEST_DRIVE";
+
+      // Fetch from /in|/out (business status filtered) AND /plant (all vehicles) in parallel.
+      // Customer Delivery never uses /plant data (its results are SAP /out-only, and matnr —
+      // the only other thing /plant feeds — is an LT-only field), so it's skipped entirely for
+      // CD to avoid paying for a large, unused fetch on every search.
+      //
+      // For LT/Test Drive, /plant is still needed (vehicles not yet in business flow only ever
+      // show up there), but the underlying dataset is large (~1.7-2.5MB) and unfiltered — /plant
+      // only supports exact-VIN filtering, not partial search, so there's no way to ask SAP to
+      // narrow it server-side for a partial query. Instead: (1) skip it below a 4-character
+      // query — too short to be a meaningful narrow-down anyway — and (2) reuse a short-TTL
+      // server-side cache (getCachedPlantVehicleRows) instead of re-fetching the full dataset on
+      // every keystroke. The existing in-memory contains-match filter below (using `q`) still
+      // runs exactly as before against whichever data — cached or fresh — comes back, so partial
+      // matches anywhere in the VIN (e.g. last 4 digits) keep working unchanged.
+      const trimmedQ = q.trim();
+      const wantsPlant = rawPassType !== "CUSTOMER_DELIVERY" && (trimmedQ.length === 0 || trimmedQ.length >= 4);
+      // Full 17-character VIN: skip the cache entirely and ask SAP for just this one vehicle
+      // via its exact-match filter (fast, small — confirmed ~2s vs ~12-15s for the full list).
+      // Only exact-length full VINs take this path; every other length (including 4+ character
+      // partial queries) keeps using the cached full list exactly as before.
+      const isFullVin = trimmedQ.length === 17;
+      const fetchPlant = () => (!wantsPlant ? Promise.resolve([]) : isFullVin ? fetchPlantVehicleRows(trimmedQ) : getCachedPlantVehicleRows());
+      let [sapResult, plantResult, rawInResult] = await Promise.allSettled([
         fetchSapVehicles(q, passType),
-        fetchPlantVehicleRows(),
+        fetchPlant(),
+        wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
       ]);
 
-      // Retry once if Azure APIM cold start returned nothing for a real search query
+      // Retry once if Azure APIM cold start returned nothing for a real search query. Only
+      // /in|/out (sapResult) and the raw-/in eligibility check are re-fetched — /plant is only
+      // re-fetched here if it didn't already succeed the first time (e.g. it errored/timed out),
+      // never when it already resolved successfully, so a slow-but-working /plant call is never
+      // paid for twice in the same request.
       if (q.trim() && (sapResult.status === "rejected" || (sapResult.status === "fulfilled" && sapResult.value.length === 0))) {
         await new Promise<void>((r) => setTimeout(r, 1000));
-        [sapResult, plantResult] = await Promise.allSettled([
+        const plantRetryPromise: Promise<PlantVehicleRow[]> =
+          plantResult.status === "fulfilled" ? Promise.resolve(plantResult.value) : fetchPlant();
+        const [newSapResult, newPlantResult, newRawInResult] = await Promise.allSettled([
           fetchSapVehicles(q, passType),
-          fetchPlantVehicleRows(),
+          plantRetryPromise,
+          wantsLtEligibilityCheck ? fetchRawInVehicles(q) : Promise.resolve([]),
         ]);
+        sapResult = newSapResult;
+        plantResult = newPlantResult;
+        rawInResult = newRawInResult;
+      }
+
+      // Build the "excluded by admin-configured LT status" sets + a message for the search UI.
+      const excludedByInternalNo = new Map<string, string>();
+      const excludedByChassis = new Map<string, string>();
+      let excludedVehicleInfo: { vehicle: string; chassisNo: string; status: string } | null = null;
+      if (wantsLtEligibilityCheck && rawInResult.status === "fulfilled") {
+        const ltSets = await getEnabledLtStatusSets();
+        const safeQ = q.trim().toUpperCase();
+        for (const v of rawInResult.value) {
+          if (isLtStatusEligible(v.primaryStatus, ltSets)) continue;
+          if (v.internalNo) excludedByInternalNo.set(v.internalNo.toUpperCase(), v.primaryStatus);
+          if (v.chassisNo) excludedByChassis.set(v.chassisNo.toUpperCase(), v.primaryStatus);
+          if (
+            safeQ && !excludedVehicleInfo &&
+            (v.chassisNo?.toUpperCase().includes(safeQ) || v.vehicleNo?.toUpperCase().includes(safeQ))
+          ) {
+            excludedVehicleInfo = { vehicle: v.vehicleNo || v.chassisNo, chassisNo: v.chassisNo, status: v.primaryStatus };
+          }
+        }
       }
 
       // Build Matnr lookup from /plant to cross-reference SAP /in/out entries
@@ -312,8 +381,12 @@ export async function GET(req: NextRequest) {
         console.warn("[lookups/vehicle] SAP /in|/out error:", sapResult.reason instanceof Error ? sapResult.reason.message : sapResult.reason);
       }
 
-      // Merge plant API vehicles — these cover vehicles not yet in business flow (no QP30/QS60)
-      if (plantResult.status === "fulfilled") {
+      // Merge plant API vehicles — these cover vehicles not yet in business flow (no QP30/QS60).
+      // Customer Delivery is excluded from this fallback entirely: /out is already filtered
+      // server-side to sdsta in {QS60,QS50,QS5X,QS40,QS4X}, and every /plant-only vehicle
+      // reaching this branch (not already deduped via seenInternalNos) is, by definition, one
+      // whose sdsta is empty or outside that set — exactly what must never show for CD.
+      if (plantResult.status === "fulfilled" && rawPassType !== "CUSTOMER_DELIVERY") {
         const safe = q.trim().toUpperCase();
         const filtered = safe
           ? plantResult.value.filter((row) =>
@@ -325,6 +398,13 @@ export async function GET(req: NextRequest) {
 
         filtered.forEach((row, i) => {
           if (row.internalNo && seenInternalNos.has(row.internalNo.toUpperCase())) return;
+          // Never let the /plant fallback bypass the admin-configured LT status filter —
+          // only vehicles with NO business status at all should reach this branch.
+          if (wantsLtEligibilityCheck) {
+            const internalKey = row.internalNo ? row.internalNo.toUpperCase() : "";
+            const chassisKey = row.chassisNo ? row.chassisNo.toUpperCase() : "";
+            if ((internalKey && excludedByInternalNo.has(internalKey)) || (chassisKey && excludedByChassis.has(chassisKey))) return;
+          }
           const identifier = row.externalNo || row.chassisNo || row.internalNo;
           if (!identifier) return;
           const key = `PLANT::${row.internalNo.toUpperCase() || identifier.toUpperCase()}`;
@@ -424,10 +504,21 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Vehicles with an outstanding (un-written) SAP reconciliation record show their
+      // DB-known destination instead of SAP's stale current-location — SAP hasn't been
+      // updated for them yet. Every other vehicle is unaffected.
+      const finalOptions = sorted.slice(0, take);
+      const pendingLocations = await getPendingDbLocationsByChassis(finalOptions.map((o) => o.chassisNo)).catch(() => new Map<string, string>());
+      const optionsWithOverride = pendingLocations.size === 0 ? finalOptions : finalOptions.map((o) => {
+        const override = o.chassisNo ? pendingLocations.get(o.chassisNo.trim().toUpperCase()) : undefined;
+        return override ? { ...o, sapCurrentLocation: override } : o;
+      });
+
       return NextResponse.json({
-        options: sorted.slice(0, take),
+        options: optionsWithOverride,
         source: "combined",
         ...(alreadyDeliveredInfo ? { alreadyDeliveredInfo } : {}),
+        ...(excludedVehicleInfo ? { excludedVehicleInfo } : {}),
       });
     }
 

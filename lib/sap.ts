@@ -12,6 +12,8 @@
  * Response: { "data": [ { ...fields (all lowercase) } ] }
  */
 
+import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
+
 const APIM_BASE = "https://gatepassproxy.azure-api.net";
 const APIM_KEY  = process.env.SAP_APIM_KEY ?? "";
 
@@ -154,7 +156,8 @@ function jsVehicleFilter(vehicles: SapVehicle[], q: string): SapVehicle[] {
 /**
  * Search vehicles from SAP via Azure APIM proxy.
  *
- * passType = "LOCATION_TRANSFER" → /in  (no mmsta filter — all vehicles)
+ * passType = "LOCATION_TRANSFER" → /in, filtered to the admin-configurable LT status
+ *                                    allowlist (mmsta) — see lib/lt-status-config.ts
  * passType = "CUSTOMER_DELIVERY" → /out (sdsta eq 'QS60' — Sales Order Completed)
  * passType = "both"              → both endpoints in parallel, deduplicated by VIN
  */
@@ -181,7 +184,8 @@ export async function fetchSapVehicles(
 
   if (passType === "LOCATION_TRANSFER" || passType === "TEST_DRIVE") {
     // Test Drive reuses the exact same vehicle search/filter as Location Transfer.
-    raw = await fetchIN();
+    const [inVehicles, ltStatusSets] = await Promise.all([fetchIN(), getEnabledLtStatusSets()]);
+    raw = inVehicles.filter((v) => isLtStatusEligible(v.primaryStatus, ltStatusSets));
   } else if (passType === "CUSTOMER_DELIVERY") {
     raw = await fetchOUT();
   } else {
@@ -202,6 +206,68 @@ export async function fetchSapVehicles(
 
   const all = [...seen.values()].filter((v) => v.vehicleNo || v.chassisNo);
   return jsVehicleFilter(all, q);
+}
+
+/**
+ * Raw, unfiltered /in results — no LT status-eligibility filtering applied. Used only to
+ * detect vehicles that DO have a business status in SAP but which the admin-configured LT
+ * allowlist excludes, so callers (app/api/lookups/route.ts) can tell "excluded by status"
+ * apart from "no business status at all" and explain why a vehicle isn't showing.
+ */
+export async function fetchRawInVehicles(q: string): Promise<SapVehicle[]> {
+  const chassisQ = q.trim().length >= 3 ? q.trim().replace(/'/g, "''") : null;
+  const rows = await apimPost("in", chassisQ ? `substringof('${chassisQ}', vhvin)` : "");
+  return rows.map(mapVehicle);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch a single vehicle's current mmsta/sdsta from SAP's /in endpoint — used only to
+ * decide whether a Location Transfer's SAP write should execute (see isSapWriteEligible).
+ * Returns null if the vehicle isn't found or the lookup fails after retrying; callers must
+ * treat that as "cannot confirm eligibility" and skip the SAP write rather than guess.
+ *
+ * Retries up to 3 times with a short backoff — SAP intermittently times out / returns 503
+ * for a moment, and a single failed attempt here previously meant a genuinely-QP60 vehicle
+ * would be skipped at completion time and only recovered later via reconciliation. This
+ * mirrors the same retry philosophy already used for the actual SAP write
+ * (updateVehiclePlantLocation), scoped to only this function — the shared apimPost() helper
+ * used by vehicle search elsewhere is untouched, so search speed is unaffected.
+ */
+export async function fetchVehicleSapStatus(vin: string): Promise<{ mmsta: string; sdsta: string } | null> {
+  const safeVin = vin.trim();
+  if (!safeVin) return null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const rows = await apimPost("in", `vhvin eq '${safeVin.replace(/'/g, "''")}'`);
+      const row = rows[0];
+      if (!row) return null; // SAP answered, vehicle genuinely not found — not a transient failure, don't retry
+      return { mmsta: str(row["mmsta"]), sdsta: str(row["sdsta"]) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isTransient = /503|noresponse|upstream|timeout|temporar|aborted/i.test(message);
+      if (!isTransient || attempt === 3) return null;
+      await sleep(attempt * 1500);
+    }
+  }
+  return null;
+}
+
+/**
+ * SAP write eligibility rule for Location Transfer: only write to SAP when the vehicle's
+ * current status is MMSTA=QP60 AND (SDSTA is blank OR SDSTA=QS20). Every other eligible
+ * Location Transfer status still completes normally in the application — only the SAP
+ * write itself is skipped.
+ */
+export function isSapWriteEligible(status: { mmsta: string; sdsta: string } | null): boolean {
+  if (!status) return false;
+  const mmsta = status.mmsta.trim().toUpperCase();
+  const sdsta = status.sdsta.trim().toUpperCase();
+  return mmsta === "QP60" && (sdsta === "" || sdsta === "QS20");
 }
 
 /**
