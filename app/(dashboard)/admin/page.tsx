@@ -118,17 +118,35 @@ function AssignAttributesModal({
   const [error, setError] = useState("");
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [locationsLoading, setLocationsLoading] = useState(true);
+  const [refreshingLocations, setRefreshingLocations] = useState(false);
+  const [locationRefreshError, setLocationRefreshError] = useState("");
 
   useEffect(() => {
     // The full, original location list (same one the old single "Location" field used) —
     // every plant + sub-location combination, not the deduped plant-only list, so nothing
-    // that existed before is filtered, hidden, or collapsed.
+    // that existed before is filtered, hidden, or collapsed. DB-backed (see
+    // lib/admin-locations.ts) — refreshed from SAP only via the explicit button below.
     fetch("/api/admin/locations")
       .then(r => r.json())
       .then(d => setLocationOptions(d.locations ?? []))
       .catch(() => {})
       .finally(() => setLocationsLoading(false));
   }, []);
+
+  async function refreshLocationsFromSap() {
+    setRefreshingLocations(true);
+    setLocationRefreshError("");
+    try {
+      const res = await fetch("/api/admin/locations/refresh", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Refresh failed.");
+      setLocationOptions(d.locations ?? []);
+    } catch (e) {
+      setLocationRefreshError(e instanceof Error ? e.message : "Refresh failed.");
+    } finally {
+      setRefreshingLocations(false);
+    }
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -262,9 +280,24 @@ function AssignAttributesModal({
         <div className="space-y-4">
           {fields.includes("location") && (
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                {isSecurity ? "Select Location" : "Select Locations"} <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium" style={{ color: "var(--text)" }}>
+                  {isSecurity ? "Select Location" : "Select Locations"} <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={refreshLocationsFromSap}
+                  disabled={refreshingLocations}
+                  className="text-xs font-semibold hover:underline disabled:opacity-50 disabled:no-underline"
+                  style={{ color: "#2563eb" }}
+                  title="Re-fetch the location list from SAP"
+                >
+                  {refreshingLocations ? "Refreshing…" : "Refresh from SAP"}
+                </button>
+              </div>
+              {locationRefreshError && (
+                <p className="text-xs mb-1.5" style={{ color: "#dc2626" }}>{locationRefreshError}</p>
+              )}
               <div ref={locationRef} className="relative">
                 <div
                   className="w-full border rounded-xl px-3 py-2.5 text-sm flex items-center gap-2 cursor-pointer min-h-[42px] flex-wrap"

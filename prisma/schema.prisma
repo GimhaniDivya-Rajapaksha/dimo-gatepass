@@ -387,3 +387,20 @@ model SapReconciliationRecipient {
   email     String   @unique
   createdAt DateTime @default(now())
 }
+
+// DB-backed cache of plant/storage location labels for the Admin "Select Locations" /
+// "Mapped Plants" picker (User Management) ONLY — deliberately separate from LocationOption,
+// which is keyed by real SAP plant/storage codes and used as a live SAP-write fallback for
+// Location Transfer. This table stores label text only (no codes), so it can never affect any
+// SAP write. Populated by an admin-triggered refresh (fetches SAP /plant live and replaces
+// this table's rows) instead of a live SAP call on every page load, since that endpoint has
+// been unreliable/slow. Reading the admin location list is DB-only; SAP is only touched when
+// an admin explicitly clicks "Refresh from SAP".
+model AdminLocationCache {
+  id                 String   @id @default(cuid())
+  plantDescription   String
+  storageDescription String
+  updatedAt          DateTime @updatedAt
+
+  @@unique([plantDescription, storageDescription])
+}
