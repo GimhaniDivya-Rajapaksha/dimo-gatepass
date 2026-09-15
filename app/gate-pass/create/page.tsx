@@ -664,6 +664,13 @@ export default function CreateGatePassPage() {
   const [selectedLocationDetail, setSelectedLocationDetail] = useState<{
     plantCode: string; plantDescription: string; storageLocation: string; storageDescription: string;
   } | null>(null);
+  // Tracks whether lt.toLocation reflects an actual dropdown selection rather than raw typed
+  // text — starts true so a value pre-filled from a draft/resubmit (never "typed" this session)
+  // is trusted as-is; only set false while the user is typing, true again once they pick an
+  // option. Only gates the plain searchable "To Location" dropdown (DIMO/Dealer) — the
+  // Promotion/Finance picker is a closed button+list with no free-text entry, so it can't hit
+  // this issue, and the "OTHER" location type is an intentional free-text field.
+  const [toLocationConfirmed, setToLocationConfirmed] = useState(true);
   const [selectedFromLocationDetail, setSelectedFromLocationDetail] = useState<{
     plantCode: string; storageLocation: string;
   } | null>(null);
@@ -1939,6 +1946,7 @@ export default function CreateGatePassPage() {
           else if (ltBulkVehicles.some((vehicle) => !vehicle.toLocation)) e.toLocation = "Select a destination for every bulk vehicle";
           else if (ltBulkVehicles.some((vehicle) => vehicle.currentLocation && vehicle.toLocation === vehicle.currentLocation)) e.toLocation = "A vehicle destination cannot be the same as its current location";
         } else if (!lt.toLocation) e.toLocation = "Destination location is required";
+        else if (locationType !== "OTHER" && locationType !== "PROMOTION" && locationType !== "FINANCE" && !toLocationConfirmed) e.toLocation = "Please select a valid To Location from the dropdown.";
         else if (selectedVehicleDetail?.currentLocation && lt.toLocation === selectedVehicleDetail.currentLocation) e.toLocation = "To Location cannot be the same as the vehicle's current location";
         if (!lt.outReason) e.outReason = "Reason for going out is required";
       }
@@ -4495,6 +4503,7 @@ export default function CreateGatePassPage() {
                             }
                             setL("toLocation", "");
                             setSelectedLocationDetail(null);
+                            setToLocationConfirmed(true);
                             if (!ltBulkMode) void checkActivePass(o.chassisNo ?? "");
                             setErrors((p) => { const n = { ...p }; delete n.fromLocation; return n; });
                             void fetchVehicleCurrentLocation(o.value, o.chassisNo ?? "", { preferDbLocation: true }).then((result) => {
@@ -4888,7 +4897,7 @@ export default function CreateGatePassPage() {
                     .map(({ value: v, label: lbl }) => (
                       <label key={v || "other"} className="flex items-center gap-2 cursor-pointer">
                         <div
-                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); setLookupOptions(prev => ({ ...prev, location: [] })); }}
+                          onClick={() => { setLocationType(v); setL("toLocation", ""); setSelectedLocationDetail(null); setToLocationConfirmed(true); setLookupOptions(prev => ({ ...prev, location: [] })); }}
                           onMouseDown={() => {
                             if (ltBulkMode) setLtBulkVehicles((prev) => prev.map((vehicle) => ({ ...vehicle, toLocation: "" })));
                           }}
@@ -4956,6 +4965,7 @@ export default function CreateGatePassPage() {
                       onChange={(v) => {
                         setL("toLocation", v);
                         setSelectedLocationDetail(null);
+                        setToLocationConfirmed(false);
                         void fetchLookup("location", v, locationType || undefined);
                       }}
                       onFocus={() => {
@@ -4973,6 +4983,7 @@ export default function CreateGatePassPage() {
                           storageLocation: o.storageLocation ?? "",
                           storageDescription: o.storageDescription ?? "",
                         });
+                        setToLocationConfirmed(true);
                       }}
                     />
                     {selectedLocationDetail && (
