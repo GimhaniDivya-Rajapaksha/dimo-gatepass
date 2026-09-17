@@ -716,6 +716,9 @@ export default function MasterDataPage() {
             {/* Maintenance Mode tab */}
             {tab === "maintenance" && (
               <div className="p-5 max-w-xl">
+                {error && (
+                  <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: "#fee2e2", color: "#dc2626" }}>{error}</div>
+                )}
                 <div className="flex items-center justify-between rounded-xl border p-4 mb-4"
                   style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
                   <div>
