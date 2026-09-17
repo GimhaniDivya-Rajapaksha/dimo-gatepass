@@ -2,8 +2,9 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import { getMaintenanceStatus } from "@/lib/maintenance";
 
-// Node.js runtime (not Edge) — needed so getMaintenanceStatus() can use Prisma directly.
-export const runtime = "nodejs";
+// Proxy files always run on Node.js runtime (declaring `runtime` explicitly is a build
+// error in Next.js 16), so getMaintenanceStatus() can use Prisma directly here with no
+// extra config needed.
 
 // Always reachable for a signed-in non-Admin, even while maintenance mode is on.
 const MAINTENANCE_EXEMPT_PREFIXES = ["/maintenance", "/api/admin/maintenance"];
