@@ -404,3 +404,14 @@ model AdminLocationCache {
 
   @@unique([plantDescription, storageDescription])
 }
+
+// Single-row switch (always id "singleton", enforced in application code via upsert) that
+// puts the whole app into maintenance mode: every non-ADMIN user is redirected to /maintenance
+// on every page until an Admin flips it back off. Manual only — no scheduled auto on/off.
+model MaintenanceMode {
+  id          String   @id @default("singleton")
+  enabled     Boolean  @default(false)
+  message     String?
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}

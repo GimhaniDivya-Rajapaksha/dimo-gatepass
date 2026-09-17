@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify";
+type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify" | "maintenance";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
@@ -52,6 +52,8 @@ export default function MasterDataPage() {
   const [ltStatuses, setLtStatuses] = useState<LtStatusRecord[]>([]);
   const [cdRecipients, setCdRecipients] = useState<CdRecipientRecord[]>([]);
   const [sapReconRecipients, setSapReconRecipients] = useState<SapReconRecipientRecord[]>([]);
+  const [maintenance, setMaintenance] = useState({ enabled: false, message: "" });
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
   const [adQuery, setAdQuery] = useState("");
   const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [adLoading, setAdLoading] = useState(false);
@@ -107,6 +109,12 @@ export default function MasterDataPage() {
         setSapReconRecipients(json.data ?? []);
         return;
       }
+      if (t === "maintenance") {
+        const res = await fetch("/api/admin/maintenance");
+        const json = await res.json();
+        setMaintenance({ enabled: !!json.enabled, message: json.message ?? "" });
+        return;
+      }
       const res = await fetch(`/api/admin/master-data?type=${t}&q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (t === "carrier")   setCarriers(json.data ?? []);
@@ -126,7 +134,7 @@ export default function MasterDataPage() {
 
   // debounced search
   useEffect(() => {
-    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify") return;
+    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify" || tab === "maintenance") return;
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
@@ -312,6 +320,23 @@ export default function MasterDataPage() {
     }
   }
 
+  async function saveMaintenance(next: { enabled: boolean; message: string }) {
+    setMaintenanceSaving(true); setError("");
+    try {
+      const res = await fetch("/api/admin/maintenance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next.enabled, message: next.message }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Failed to update maintenance mode"); return; }
+      setMaintenance({ enabled: !!json.enabled, message: json.message ?? "" });
+      setSuccess(next.enabled ? "Maintenance mode turned ON" : "Maintenance mode turned OFF");
+    } finally {
+      setMaintenanceSaving(false);
+    }
+  }
+
   if (status === "loading") return null;
 
   const tabs: { id: Tab; label: string }[] = [
@@ -322,6 +347,7 @@ export default function MasterDataPage() {
     { id: "ltStatus",  label: "LT Vehicle Statuses" },
     { id: "cdNotify",  label: "CD Notifications" },
     { id: "sapReconNotify", label: "SAP Reconciliation Notifications" },
+    { id: "maintenance", label: "Maintenance Mode" },
   ];
 
   return (
@@ -364,6 +390,13 @@ export default function MasterDataPage() {
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               Only vehicles whose SAP status is checked below will appear in the Location Transfer vehicle dropdown.
               All statuses are selected by default. Changes save immediately and apply the next time vehicles are searched.
+            </p>
+          </div>
+        ) : tab === "maintenance" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              When ON, every user except Admins is redirected to a maintenance screen on every page until an Admin
+              turns it back OFF. There is no automatic schedule — this is a manual switch only.
             </p>
           </div>
         ) : tab === "cdNotify" ? (
@@ -678,6 +711,59 @@ export default function MasterDataPage() {
                   ))}
                 </tbody>
               </table>
+            )}
+
+            {/* Maintenance Mode tab */}
+            {tab === "maintenance" && (
+              <div className="p-5 max-w-xl">
+                <div className="flex items-center justify-between rounded-xl border p-4 mb-4"
+                  style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+                      Maintenance mode is currently {maintenance.enabled ? "ON" : "OFF"}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                      {maintenance.enabled ? "Non-Admin users are seeing the maintenance screen right now." : "All users have normal access."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={maintenanceSaving}
+                    onClick={() => saveMaintenance({ enabled: !maintenance.enabled, message: maintenance.message })}
+                    className="relative w-14 h-8 rounded-full transition-colors disabled:opacity-50 flex-shrink-0"
+                    style={{ background: maintenance.enabled ? "#dc2626" : "#cbd5e1" }}
+                    aria-label="Toggle maintenance mode"
+                  >
+                    <span
+                      className="absolute top-1 w-6 h-6 rounded-full bg-white shadow transition-transform"
+                      style={{ transform: maintenance.enabled ? "translateX(1.75rem)" : "translateX(0.25rem)" }}
+                    />
+                  </button>
+                </div>
+
+                <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
+                  Optional message shown under the maintenance image
+                </label>
+                <textarea
+                  value={maintenance.message}
+                  onChange={e => setMaintenance(p => ({ ...p, message: e.target.value }))}
+                  placeholder="e.g. Expected back online: Sunday, 20th September 2026, 17:00"
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                />
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    disabled={maintenanceSaving}
+                    onClick={() => saveMaintenance(maintenance)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                    style={{ background: "var(--accent)", color: "#fff" }}
+                  >
+                    {maintenanceSaving ? "Saving…" : "Save Message"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
