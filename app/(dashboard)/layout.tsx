@@ -4,12 +4,15 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
+import SapDowntimeNotice from "@/components/ui/SapDowntimeNotice";
+import { isSystemNoticeEnabled } from "@/lib/system-notice";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
   const isSO = session.user.role === "SECURITY_OFFICER";
+  const showSystemNotice = await isSystemNoticeEnabled();
 
   return (
     <div className="flex min-h-screen overflow-x-hidden">
@@ -19,6 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </Suspense>
       )}
       <div className={`flex-1 min-w-0 flex flex-col h-screen overflow-hidden ${isSO ? "" : "md:ml-64"}`}>
+        {showSystemNotice && <SapDowntimeNotice />}
         <DashboardHeader user={session.user} />
         <main className="flex-1 p-6 main-bg overflow-y-auto overflow-x-hidden flex flex-col" style={{ minHeight: 0 }}>
           {children}

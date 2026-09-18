@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify" | "maintenance";
+type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify" | "maintenance" | "systemNotice";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
@@ -54,6 +54,8 @@ export default function MasterDataPage() {
   const [sapReconRecipients, setSapReconRecipients] = useState<SapReconRecipientRecord[]>([]);
   const [maintenance, setMaintenance] = useState({ enabled: false, message: "" });
   const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [systemNoticeEnabled, setSystemNoticeEnabled] = useState(false);
+  const [systemNoticeSaving, setSystemNoticeSaving] = useState(false);
   const [adQuery, setAdQuery] = useState("");
   const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [adLoading, setAdLoading] = useState(false);
@@ -115,6 +117,12 @@ export default function MasterDataPage() {
         setMaintenance({ enabled: !!json.enabled, message: json.message ?? "" });
         return;
       }
+      if (t === "systemNotice") {
+        const res = await fetch("/api/admin/system-notice");
+        const json = await res.json();
+        setSystemNoticeEnabled(!!json.enabled);
+        return;
+      }
       const res = await fetch(`/api/admin/master-data?type=${t}&q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (t === "carrier")   setCarriers(json.data ?? []);
@@ -134,7 +142,7 @@ export default function MasterDataPage() {
 
   // debounced search
   useEffect(() => {
-    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify" || tab === "maintenance") return;
+    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify" || tab === "maintenance" || tab === "systemNotice") return;
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
@@ -337,6 +345,23 @@ export default function MasterDataPage() {
     }
   }
 
+  async function saveSystemNotice(next: boolean) {
+    setSystemNoticeSaving(true); setError("");
+    try {
+      const res = await fetch("/api/admin/system-notice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Failed to update system notice"); return; }
+      setSystemNoticeEnabled(!!json.enabled);
+      setSuccess(next ? "System notice turned ON" : "System notice turned OFF");
+    } finally {
+      setSystemNoticeSaving(false);
+    }
+  }
+
   if (status === "loading") return null;
 
   const tabs: { id: Tab; label: string }[] = [
@@ -348,6 +373,7 @@ export default function MasterDataPage() {
     { id: "cdNotify",  label: "CD Notifications" },
     { id: "sapReconNotify", label: "SAP Reconciliation Notifications" },
     { id: "maintenance", label: "Maintenance Mode" },
+    { id: "systemNotice", label: "System Notice" },
   ];
 
   return (
@@ -397,6 +423,13 @@ export default function MasterDataPage() {
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               When ON, every user except Admins is redirected to a maintenance screen on every page until an Admin
               turns it back OFF. There is no automatic schedule — this is a manual switch only.
+            </p>
+          </div>
+        ) : tab === "systemNotice" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              When ON, the SAP S/4 HANA planned downtime notice is shown at the top of every page for every signed-in
+              user, including Admins. This is an informational banner only — it never blocks access.
             </p>
           </div>
         ) : tab === "cdNotify" ? (
@@ -783,6 +816,60 @@ export default function MasterDataPage() {
                     {maintenanceSaving ? "Saving…" : "Save Message"}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* System Notice tab */}
+            {tab === "systemNotice" && (
+              <div className="p-5 max-w-xl">
+                {error && (
+                  <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: "#fee2e2", color: "#dc2626" }}>{error}</div>
+                )}
+                <div className="flex items-center justify-between rounded-xl border p-4"
+                  style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+                      System notice is currently {systemNoticeEnabled ? "ON" : "OFF"}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                      {systemNoticeEnabled ? "The SAP downtime notice is showing at the top of every page right now." : "No notice is shown to users."}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={systemNoticeEnabled}
+                    disabled={systemNoticeSaving}
+                    onClick={() => saveSystemNotice(!systemNoticeEnabled)}
+                    className="relative w-16 h-9 rounded-full transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                    style={{
+                      background: systemNoticeEnabled
+                        ? "linear-gradient(135deg,#f59e0b,#d97706)"
+                        : "linear-gradient(135deg,#e2e8f0,#cbd5e1)",
+                      boxShadow: systemNoticeEnabled
+                        ? "inset 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(217,119,6,0.25)"
+                        : "inset 0 1px 3px rgba(0,0,0,0.08)",
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      ["--tw-ring-color" as any]: systemNoticeEnabled ? "#fde68a" : "#cbd5e1",
+                    }}
+                    aria-label="Toggle system notice"
+                  >
+                    <span
+                      className="absolute top-1 left-1 w-7 h-7 rounded-full bg-white flex items-center justify-center text-[9px] font-bold transition-transform duration-200 ease-in-out"
+                      style={{
+                        transform: systemNoticeEnabled ? "translateX(1.75rem)" : "translateX(0)",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.15)",
+                        color: systemNoticeEnabled ? "#d97706" : "#94a3b8",
+                      }}
+                    >
+                      {systemNoticeEnabled ? "ON" : "OFF"}
+                    </span>
+                  </button>
+                </div>
+                <p className="text-xs mt-3" style={{ color: "var(--text-muted)" }}>
+                  Notice text: Planned SAP S/4 HANA Downtime — Friday, 18th September 2026, 20:00 H to Sunday, 20th
+                  September 2026, 17:00 H. Impact: All DIMO SAP / VSS Users.
+                </p>
               </div>
             )}
           </div>

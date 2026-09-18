@@ -415,3 +415,14 @@ model MaintenanceMode {
   updatedAt   DateTime @updatedAt
   updatedById String?
 }
+
+// Single-row switch (same "singleton" pattern as MaintenanceMode above) controlling the
+// SAP S/4 HANA downtime notice banner shown at the top of every page. Deliberately separate
+// from MaintenanceMode: this is an informational banner shown to every signed-in user
+// (Admins included), never a block — an independent on/off concern from maintenance mode.
+model SystemNotice {
+  id          String   @id @default("singleton")
+  enabled     Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
