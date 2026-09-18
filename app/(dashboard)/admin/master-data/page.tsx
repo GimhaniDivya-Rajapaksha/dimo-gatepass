@@ -731,16 +731,33 @@ export default function MasterDataPage() {
                   </div>
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={maintenance.enabled}
                     disabled={maintenanceSaving}
                     onClick={() => saveMaintenance({ enabled: !maintenance.enabled, message: maintenance.message })}
-                    className="relative w-14 h-8 rounded-full transition-colors disabled:opacity-50 flex-shrink-0"
-                    style={{ background: maintenance.enabled ? "#dc2626" : "#cbd5e1" }}
+                    className="relative w-16 h-9 rounded-full transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                    style={{
+                      background: maintenance.enabled
+                        ? "linear-gradient(135deg,#ef4444,#dc2626)"
+                        : "linear-gradient(135deg,#e2e8f0,#cbd5e1)",
+                      boxShadow: maintenance.enabled
+                        ? "inset 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(220,38,38,0.25)"
+                        : "inset 0 1px 3px rgba(0,0,0,0.08)",
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      ["--tw-ring-color" as any]: maintenance.enabled ? "#fecaca" : "#cbd5e1",
+                    }}
                     aria-label="Toggle maintenance mode"
                   >
                     <span
-                      className="absolute top-1 w-6 h-6 rounded-full bg-white shadow transition-transform"
-                      style={{ transform: maintenance.enabled ? "translateX(1.75rem)" : "translateX(0.25rem)" }}
-                    />
+                      className="absolute top-1 left-1 w-7 h-7 rounded-full bg-white flex items-center justify-center text-[9px] font-bold transition-transform duration-200 ease-in-out"
+                      style={{
+                        transform: maintenance.enabled ? "translateX(1.75rem)" : "translateX(0)",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.15)",
+                        color: maintenance.enabled ? "#dc2626" : "#94a3b8",
+                      }}
+                    >
+                      {maintenance.enabled ? "ON" : "OFF"}
+                    </span>
                   </button>
                 </div>
 
