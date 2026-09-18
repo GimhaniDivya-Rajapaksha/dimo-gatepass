@@ -406,13 +406,18 @@ model AdminLocationCache {
 }
 
 // Single-row switch (always id "singleton", enforced in application code via upsert) that
-// puts the whole app into maintenance mode: every non-ADMIN user is redirected to /maintenance
-// on every page until an Admin flips it back off. Manual only — no scheduled auto on/off.
+// puts the whole app into SAP maintenance mode: every non-ADMIN user sees a full-screen
+// blurred overlay on top of whatever page they're on (client-side, see
+// components/ui/SapMaintenanceOverlay.tsx) until an Admin flips it back off. startAt/endAt
+// are optional — when endAt is set, the overlay shows a live countdown to it; Admins can
+// extend endAt at any time and the countdown picks up the new value on its next poll.
 model MaintenanceMode {
-  id          String   @id @default("singleton")
-  enabled     Boolean  @default(false)
+  id          String    @id @default("singleton")
+  enabled     Boolean   @default(false)
   message     String?
-  updatedAt   DateTime @updatedAt
+  startAt     DateTime?
+  endAt       DateTime?
+  updatedAt   DateTime  @updatedAt
   updatedById String?
 }
 
