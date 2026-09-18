@@ -1,9 +1,14 @@
-import { redirect } from "next/navigation";
 import { getMaintenanceStatus } from "@/lib/maintenance";
 
+// Deliberately does NOT redirect away when maintenance is off — that decision belongs solely
+// to proxy.ts, which is what actually routes users here in the first place. A second,
+// independent check here previously redirected back to "/" whenever it disagreed with the
+// proxy's own read (e.g. a brief timing/cache mismatch between their separate executions),
+// which caused a genuine infinite redirect loop (ERR_TOO_MANY_REDIRECTS) whenever the two
+// checks landed on different answers a moment apart. Visiting this URL directly while
+// maintenance is actually off is harmless — it just shows the page once, nothing breaks.
 export default async function MaintenancePage() {
   const status = await getMaintenanceStatus();
-  if (!status.enabled) redirect("/");
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#05070d" }}>
