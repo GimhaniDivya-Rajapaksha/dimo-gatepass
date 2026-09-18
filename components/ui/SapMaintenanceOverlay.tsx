@@ -250,7 +250,7 @@ export default function SapMaintenanceOverlay({ initialStatus }: { initialStatus
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] sm:text-xs font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>Maintenance Type</span>
-                  <span className="text-[11px] sm:text-xs font-semibold text-white">Planned System Maintenance</span>
+                  <span className="text-[11px] sm:text-xs font-semibold text-white">SAP & Vss system Upgrade</span>
                 </div>
               </div>
 
@@ -286,25 +286,6 @@ export default function SapMaintenanceOverlay({ initialStatus }: { initialStatus
                   </div>
                 )}
               </div>
-
-              {/* Verbatim notice text */}
-              <div className="mt-4 rounded-2xl px-4 py-3.5 sm:px-5 sm:py-4" style={{ background: "rgba(194,65,12,0.18)", border: "1px solid rgba(194,65,12,0.4)" }}>
-                <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "#fdba74" }}>Notice</div>
-                <p className="text-[11px] sm:text-xs leading-relaxed" style={{ color: "rgba(255,255,255,0.85)" }}>
-                  <strong className="text-white">Notice: Planned SAP S/4 HANA Downtime</strong> — The{" "}
-                  <strong className="text-white">DIMO SAP S/4 HANA Production System</strong> will be unavailable from{" "}
-                  <strong className="text-white">Friday, 18th September 2026, 20:00 H</strong> to{" "}
-                  <strong className="text-white">Sunday, 20th September 2026, 17:00 H</strong> due to the{" "}
-                  <strong className="text-white">SAP S/4 HANA and Proaxia Version Upgrade</strong>. Impact:{" "}
-                  <strong className="text-white">All DIMO SAP / VSS Users</strong>. For any issues, contact the{" "}
-                  <strong className="text-white">SAP Support Desk</strong> at{" "}
-                  <a href={`mailto:${SUPPORT_EMAIL}`} className="underline font-semibold text-white">
-                    {SUPPORT_EMAIL}
-                  </a>
-                  .
-                </p>
-              </div>
-
             </div>
           </motion.div>
         </motion.div>
