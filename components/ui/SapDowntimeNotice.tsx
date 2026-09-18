@@ -2,7 +2,7 @@ export default function SapDowntimeNotice() {
   return (
     <div
       className="px-4 py-2.5 text-xs sm:text-sm text-left leading-relaxed font-medium"
-      style={{ background: "#26408a", color: "#fff" }}
+      style={{ background: "#c2410c", color: "#fff" }}
     >
       <strong>Notice: Planned SAP S/4 HANA Downtime</strong> — The{" "}
       <strong>DIMO SAP S/4 HANA Production System</strong> will be unavailable from{" "}
