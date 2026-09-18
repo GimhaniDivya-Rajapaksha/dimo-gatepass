@@ -3,15 +3,20 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
+import SapDowntimeNotice from "@/components/ui/SapDowntimeNotice";
+import { isSystemNoticeEnabled } from "@/lib/system-notice";
 
 export default async function VehicleReportLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
+  const showSystemNotice = await isSystemNoticeEnabled();
+
   return (
     <div className="flex min-h-screen">
       <Sidebar user={session.user} role={session.user.role} />
       <div className="flex-1 md:ml-64 flex flex-col" style={{ height: "100vh" }}>
+        {showSystemNotice && <SapDowntimeNotice />}
         <DashboardHeader user={session.user} />
         <main className="flex-1 flex flex-col overflow-hidden p-6 main-bg">
           {children}
