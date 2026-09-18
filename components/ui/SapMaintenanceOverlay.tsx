@@ -305,11 +305,6 @@ export default function SapMaintenanceOverlay({ initialStatus }: { initialStatus
                 </p>
               </div>
 
-              {expired && (
-                <p className="mt-3 text-center text-[11px] sm:text-xs" style={{ color: "rgba(255,255,255,0.55)" }}>
-                  The expected completion time has passed — maintenance is taking a little longer than planned. This page checks again automatically.
-                </p>
-              )}
             </div>
           </motion.div>
         </motion.div>
