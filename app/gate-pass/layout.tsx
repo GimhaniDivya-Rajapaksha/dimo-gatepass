@@ -4,16 +4,23 @@ import { redirect } from "next/navigation";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 import SapDowntimeNotice from "@/components/ui/SapDowntimeNotice";
+import SapMaintenanceOverlay from "@/components/ui/SapMaintenanceOverlay";
 import { isSystemNoticeEnabled } from "@/lib/system-notice";
+import { getMaintenanceStatus } from "@/lib/maintenance";
 
 export default async function GatePassLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  const showSystemNotice = await isSystemNoticeEnabled();
+  const isAdmin = session.user.role === "ADMIN";
+  const [showSystemNotice, maintenanceStatus] = await Promise.all([
+    isSystemNoticeEnabled(),
+    isAdmin ? Promise.resolve(null) : getMaintenanceStatus(),
+  ]);
 
   return (
     <div className="flex min-h-screen">
+      {!isAdmin && <div className="print:hidden"><SapMaintenanceOverlay initialStatus={maintenanceStatus} /></div>}
       <div className="print:hidden"><Sidebar user={session.user} role={session.user.role} /></div>
       <div className="flex-1 md:ml-64 print:ml-0 flex flex-col min-h-screen">
         {showSystemNotice && <div className="print:hidden"><SapDowntimeNotice /></div>}

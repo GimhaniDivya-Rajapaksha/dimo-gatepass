@@ -5,17 +5,24 @@ import { Suspense } from "react";
 import Sidebar from "@/components/ui/Sidebar";
 import DashboardHeader from "@/components/ui/DashboardHeader";
 import SapDowntimeNotice from "@/components/ui/SapDowntimeNotice";
+import SapMaintenanceOverlay from "@/components/ui/SapMaintenanceOverlay";
 import { isSystemNoticeEnabled } from "@/lib/system-notice";
+import { getMaintenanceStatus } from "@/lib/maintenance";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
   const isSO = session.user.role === "SECURITY_OFFICER";
-  const showSystemNotice = await isSystemNoticeEnabled();
+  const isAdmin = session.user.role === "ADMIN";
+  const [showSystemNotice, maintenanceStatus] = await Promise.all([
+    isSystemNoticeEnabled(),
+    isAdmin ? Promise.resolve(null) : getMaintenanceStatus(),
+  ]);
 
   return (
     <div className="flex min-h-screen overflow-x-hidden">
+      {!isAdmin && <SapMaintenanceOverlay initialStatus={maintenanceStatus} />}
       {!isSO && (
         <Suspense fallback={<div className="w-64 flex-shrink-0" style={{ background: "#0d1b3e" }} />}>
           <Sidebar user={session.user} role={session.user.role} />

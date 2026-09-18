@@ -38,6 +38,35 @@ function isValidPhone(v: string) {
   return /^[0-9+\-\s]{7,15}$/.test(v.trim());
 }
 
+// ISO string (from the API/DB) -> the "YYYY-MM-DDTHH:mm" shape a <input type="datetime-local">
+// needs, in the browser's local time (matches how the admin picks a time in that same input).
+function toDatetimeLocalValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fmtMaintenanceDateTime(value: string): string {
+  if (!value) return "Not set";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "Not set";
+  return d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtRemaining(endValue: string, now: number): string | null {
+  if (!endValue) return null;
+  const end = new Date(endValue).getTime();
+  if (Number.isNaN(end)) return null;
+  const ms = Math.max(0, end - now);
+  const total = Math.floor(ms / 1000);
+  const h = String(Math.floor(total / 3600)).padStart(2, "0");
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function MasterDataPage() {
   const { data: session, status } = useSession();
@@ -52,8 +81,9 @@ export default function MasterDataPage() {
   const [ltStatuses, setLtStatuses] = useState<LtStatusRecord[]>([]);
   const [cdRecipients, setCdRecipients] = useState<CdRecipientRecord[]>([]);
   const [sapReconRecipients, setSapReconRecipients] = useState<SapReconRecipientRecord[]>([]);
-  const [maintenance, setMaintenance] = useState({ enabled: false, message: "" });
+  const [maintenance, setMaintenance] = useState({ enabled: false, message: "", startAt: "", endAt: "" });
   const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [maintenanceNow, setMaintenanceNow] = useState(() => Date.now());
   const [systemNoticeEnabled, setSystemNoticeEnabled] = useState(false);
   const [systemNoticeSaving, setSystemNoticeSaving] = useState(false);
   const [adQuery, setAdQuery] = useState("");
@@ -114,7 +144,12 @@ export default function MasterDataPage() {
       if (t === "maintenance") {
         const res = await fetch("/api/admin/maintenance");
         const json = await res.json();
-        setMaintenance({ enabled: !!json.enabled, message: json.message ?? "" });
+        setMaintenance({
+          enabled: !!json.enabled,
+          message: json.message ?? "",
+          startAt: toDatetimeLocalValue(json.startAt),
+          endAt: toDatetimeLocalValue(json.endAt),
+        });
         return;
       }
       if (t === "systemNotice") {
@@ -146,6 +181,14 @@ export default function MasterDataPage() {
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
+
+  // Live "Remaining" ticker for the Maintenance Mode tab's status summary — only runs while
+  // that tab is open and an end time is actually configured.
+  useEffect(() => {
+    if (tab !== "maintenance" || !maintenance.endAt) return;
+    const id = setInterval(() => setMaintenanceNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [tab, maintenance.endAt]);
 
   function searchAd(q: string) {
     setAdQuery(q);
@@ -328,21 +371,43 @@ export default function MasterDataPage() {
     }
   }
 
-  async function saveMaintenance(next: { enabled: boolean; message: string }) {
+  async function saveMaintenance(next: { enabled: boolean; message: string; startAt: string; endAt: string }) {
     setMaintenanceSaving(true); setError("");
     try {
       const res = await fetch("/api/admin/maintenance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next.enabled, message: next.message }),
+        body: JSON.stringify({
+          enabled: next.enabled,
+          message: next.message,
+          startAt: next.startAt || null,
+          endAt: next.endAt || null,
+        }),
       });
       const json = await res.json();
       if (!res.ok) { setError(json.error ?? "Failed to update maintenance mode"); return; }
-      setMaintenance({ enabled: !!json.enabled, message: json.message ?? "" });
+      setMaintenance({
+        enabled: !!json.enabled,
+        message: json.message ?? "",
+        startAt: toDatetimeLocalValue(json.startAt),
+        endAt: toDatetimeLocalValue(json.endAt),
+      });
       setSuccess(next.enabled ? "Maintenance mode turned ON" : "Maintenance mode turned OFF");
     } finally {
       setMaintenanceSaving(false);
     }
+  }
+
+  // Bumps the end time by N minutes from whichever is later — the current configured end
+  // time, or now (covers both "extend an already-running window" and "no end time set yet").
+  function extendMaintenanceBy(minutes: number) {
+    const currentEnd = maintenance.endAt ? new Date(maintenance.endAt) : null;
+    const base = currentEnd && !Number.isNaN(currentEnd.getTime()) && currentEnd.getTime() > Date.now()
+      ? currentEnd
+      : new Date();
+    const nextEnd = toDatetimeLocalValue(new Date(base.getTime() + minutes * 60_000).toISOString());
+    setMaintenance(p => ({ ...p, endAt: nextEnd }));
+    void saveMaintenance({ ...maintenance, endAt: nextEnd });
   }
 
   async function saveSystemNotice(next: boolean) {
@@ -748,59 +813,120 @@ export default function MasterDataPage() {
 
             {/* Maintenance Mode tab */}
             {tab === "maintenance" && (
-              <div className="p-5 max-w-xl">
+              <div className="p-5 max-w-2xl">
                 {error && (
                   <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: "#fee2e2", color: "#dc2626" }}>{error}</div>
                 )}
-                <div className="flex items-center justify-between rounded-xl border p-4 mb-4"
-                  style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-                      Maintenance mode is currently {maintenance.enabled ? "ON" : "OFF"}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {maintenance.enabled ? "Non-Admin users are seeing the maintenance screen right now." : "All users have normal access."}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={maintenance.enabled}
-                    disabled={maintenanceSaving}
-                    onClick={() => saveMaintenance({ enabled: !maintenance.enabled, message: maintenance.message })}
-                    className="relative w-16 h-9 rounded-full transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                    style={{
-                      background: maintenance.enabled
-                        ? "linear-gradient(135deg,#ef4444,#dc2626)"
-                        : "linear-gradient(135deg,#e2e8f0,#cbd5e1)",
-                      boxShadow: maintenance.enabled
-                        ? "inset 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(220,38,38,0.25)"
-                        : "inset 0 1px 3px rgba(0,0,0,0.08)",
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      ["--tw-ring-color" as any]: maintenance.enabled ? "#fecaca" : "#cbd5e1",
-                    }}
-                    aria-label="Toggle maintenance mode"
-                  >
-                    <span
-                      className="absolute top-1 left-1 w-7 h-7 rounded-full bg-white flex items-center justify-center text-[9px] font-bold transition-transform duration-200 ease-in-out"
+
+                {/* Status summary */}
+                <div className="rounded-xl border p-4 mb-4" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2.5 w-2.5">
+                        {maintenance.enabled && (
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: "#dc2626" }} />
+                        )}
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: maintenance.enabled ? "#dc2626" : "#94a3b8" }} />
+                      </span>
+                      <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+                        {maintenance.enabled ? "Maintenance Active" : "Maintenance mode is OFF"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={maintenance.enabled}
+                      disabled={maintenanceSaving}
+                      onClick={() => saveMaintenance({ ...maintenance, enabled: !maintenance.enabled })}
+                      className="relative w-16 h-9 rounded-full transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
                       style={{
-                        transform: maintenance.enabled ? "translateX(1.75rem)" : "translateX(0)",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.15)",
-                        color: maintenance.enabled ? "#dc2626" : "#94a3b8",
+                        background: maintenance.enabled
+                          ? "linear-gradient(135deg,#ef4444,#dc2626)"
+                          : "linear-gradient(135deg,#e2e8f0,#cbd5e1)",
+                        boxShadow: maintenance.enabled
+                          ? "inset 0 1px 3px rgba(0,0,0,0.15), 0 0 0 1px rgba(220,38,38,0.25)"
+                          : "inset 0 1px 3px rgba(0,0,0,0.08)",
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        ["--tw-ring-color" as any]: maintenance.enabled ? "#fecaca" : "#cbd5e1",
                       }}
+                      aria-label="Toggle maintenance mode"
                     >
-                      {maintenance.enabled ? "ON" : "OFF"}
-                    </span>
-                  </button>
+                      <span
+                        className="absolute top-1 left-1 w-7 h-7 rounded-full bg-white flex items-center justify-center text-[9px] font-bold transition-transform duration-200 ease-in-out"
+                        style={{
+                          transform: maintenance.enabled ? "translateX(1.75rem)" : "translateX(0)",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.15)",
+                          color: maintenance.enabled ? "#dc2626" : "#94a3b8",
+                        }}
+                      >
+                        {maintenance.enabled ? "ON" : "OFF"}
+                      </span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <p className="font-medium mb-0.5" style={{ color: "var(--text-muted)" }}>Start</p>
+                      <p style={{ color: "var(--text)" }}>{fmtMaintenanceDateTime(maintenance.startAt)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium mb-0.5" style={{ color: "var(--text-muted)" }}>Expected End</p>
+                      <p style={{ color: "var(--text)" }}>{fmtMaintenanceDateTime(maintenance.endAt)}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium mb-0.5" style={{ color: "var(--text-muted)" }}>Remaining</p>
+                      <p className="font-mono font-semibold" style={{ color: "var(--text)" }}>
+                        {maintenance.enabled ? (fmtRemaining(maintenance.endAt, maintenanceNow) ?? "—") : "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Schedule + message form */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Start date/time</label>
+                    <input
+                      type="datetime-local"
+                      value={maintenance.startAt}
+                      onChange={e => setMaintenance(p => ({ ...p, startAt: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Expected end date/time</label>
+                    <input
+                      type="datetime-local"
+                      value={maintenance.endAt}
+                      onChange={e => setMaintenance(p => ({ ...p, endAt: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>Extend:</span>
+                      {[15, 30, 60].map(mins => (
+                        <button
+                          key={mins}
+                          type="button"
+                          disabled={maintenanceSaving}
+                          onClick={() => extendMaintenanceBy(mins)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                          style={{ background: "#e4ecf8", color: "#1E4FA0" }}
+                        >
+                          +{mins < 60 ? `${mins}m` : "1h"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>
-                  Optional message shown under the maintenance image
+                  Optional message shown in the maintenance overlay
                 </label>
                 <textarea
                   value={maintenance.message}
                   onChange={e => setMaintenance(p => ({ ...p, message: e.target.value }))}
-                  placeholder="e.g. Expected back online: Sunday, 20th September 2026, 17:00"
+                  placeholder="e.g. Thank you for your patience while we complete this upgrade."
                   rows={3}
                   className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
                   style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
@@ -813,7 +939,7 @@ export default function MasterDataPage() {
                     className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
                     style={{ background: "var(--accent)", color: "#fff" }}
                   >
-                    {maintenanceSaving ? "Saving…" : "Save Message"}
+                    {maintenanceSaving ? "Saving…" : "Update"}
                   </button>
                 </div>
               </div>
