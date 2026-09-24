@@ -78,8 +78,10 @@ export async function GET(req: NextRequest) {
         data = await prisma.brandOption.findMany({ orderBy: { name: "asc" } });
       }
       return NextResponse.json({ data });
-    } catch {
-      // Table may not exist yet — return defaults so the UI is still usable
+    } catch (e) {
+      // Table may not exist yet — return defaults so the UI is still usable, but log the
+      // real cause so a genuine outage doesn't look identical to "table not created yet".
+      console.error("[master-data/brand] list failed:", e);
       return NextResponse.json({ data: [] });
     }
   }
@@ -162,8 +164,12 @@ export async function POST(req: NextRequest) {
     try {
       const record = await prisma.brandOption.create({ data: { name: name.trim() } });
       return NextResponse.json({ record });
-    } catch {
-      return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
+    } catch (e) {
+      if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "P2002") {
+        return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
+      }
+      console.error("[master-data/brand] create failed:", e);
+      return NextResponse.json({ error: "Unable to add brand right now. Please try again." }, { status: 500 });
     }
   }
 
@@ -249,8 +255,12 @@ export async function PUT(req: NextRequest) {
     try {
       const record = await prisma.brandOption.update({ where: { id }, data: { name: name.trim() } });
       return NextResponse.json({ record });
-    } catch {
-      return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
+    } catch (e) {
+      if (typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "P2002") {
+        return NextResponse.json({ error: "Brand already exists" }, { status: 409 });
+      }
+      console.error("[master-data/brand] update failed:", e);
+      return NextResponse.json({ error: "Unable to update brand right now. Please try again." }, { status: 500 });
     }
   }
 
