@@ -4,7 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify" | "maintenance" | "systemNotice";
+type Tab = "carrier" | "driver" | "outReason" | "brand" | "ltStatus" | "cdNotify" | "sapReconNotify" | "maintenance" | "systemNotice" | "plantCache";
 
 type CarrierRecord = { id: string; companyName: string; registrationNo: string; createdAt: string };
 type DriverRecord  = { id: string; name: string; nic: string; licenceNo: string | null; contact: string | null; carrierId: string | null; carrier: { id: string; companyName: string; registrationNo: string } | null; createdAt: string };
@@ -86,6 +86,34 @@ export default function MasterDataPage() {
   const [maintenanceNow, setMaintenanceNow] = useState(() => Date.now());
   const [systemNoticeEnabled, setSystemNoticeEnabled] = useState(false);
   const [systemNoticeSaving, setSystemNoticeSaving] = useState(false);
+  const [plantCache, setPlantCache] = useState<{
+    lastSync: { startedAt: string; finishedAt: string | null; status: string; vehicleCount: number | null; locationCount: number | null; trigger: string; error: string | null } | null;
+    vehicleCount: number;
+    materialCount: number;
+  }>({ lastSync: null, vehicleCount: 0, materialCount: 0 });
+  const [plantCacheSyncing, setPlantCacheSyncing] = useState(false);
+  const [plantCacheRows, setPlantCacheRows] = useState<{
+    chassisNo: string; internalNo: string; externalNo: string; materialNo: string;
+    plantDescription: string; storageDescription: string;
+    destinations: { plantDescription: string; storageDescription: string }[];
+    syncedAt: string;
+  }[]>([]);
+  const [plantCacheTotal, setPlantCacheTotal] = useState(0);
+  const [plantCacheSearch, setPlantCacheSearch] = useState("");
+  const [plantCacheRowsLoading, setPlantCacheRowsLoading] = useState(false);
+  const [plantCacheMaterialRows, setPlantCacheMaterialRows] = useState<{
+    materialNo: string; vehicleCount: number;
+    destinations: { plantDescription: string; storageDescription: string }[];
+    lastSyncedAt: string | null;
+  }[]>([]);
+  const [plantCacheMaterialTotal, setPlantCacheMaterialTotal] = useState(0);
+  const [expandedMaterials, setExpandedMaterials] = useState<Set<string>>(new Set());
+  const [materialFetchSingle, setMaterialFetchSingle] = useState("");
+  const [materialFetchBatch, setMaterialFetchBatch] = useState("");
+  const [materialFetchRunning, setMaterialFetchRunning] = useState(false);
+  const [materialFetchResults, setMaterialFetchResults] = useState<{
+    materialNo: string; success: boolean; vehicleCount: number; destinationCount: number; error?: string;
+  }[]>([]);
   const [adQuery, setAdQuery] = useState("");
   const [adOptions, setAdOptions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [adLoading, setAdLoading] = useState(false);
@@ -158,6 +186,12 @@ export default function MasterDataPage() {
         setSystemNoticeEnabled(!!json.enabled);
         return;
       }
+      if (t === "plantCache") {
+        const res = await fetch("/api/admin/plant-cache");
+        const json = await res.json();
+        setPlantCache({ lastSync: json.lastSync ?? null, vehicleCount: json.vehicleCount ?? 0, materialCount: json.materialCount ?? 0 });
+        return;
+      }
       const res = await fetch(`/api/admin/master-data?type=${t}&q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (t === "carrier")   setCarriers(json.data ?? []);
@@ -177,10 +211,41 @@ export default function MasterDataPage() {
 
   // debounced search
   useEffect(() => {
-    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify" || tab === "maintenance" || tab === "systemNotice") return;
+    if (tab === "ltStatus" || tab === "cdNotify" || tab === "sapReconNotify" || tab === "maintenance" || tab === "systemNotice" || tab === "plantCache") return;
     const t = setTimeout(() => load(tab, search), 300);
     return () => clearTimeout(t);
   }, [search, tab, load]);
+
+  // Empty search → material-grouped view (the useful default, since SAP's destination list is
+  // per-material, not per chassis). Non-empty search → flat per-vehicle view so a chassis
+  // number can actually be found; that's the only time the Chassis No column is shown.
+  const loadPlantCacheRows = useCallback(async (q: string) => {
+    setPlantCacheRowsLoading(true);
+    try {
+      if (!q.trim()) {
+        const res = await fetch(`/api/admin/plant-cache/materials?take=50`);
+        const json = await res.json();
+        setPlantCacheMaterialRows(json.rows ?? []);
+        setPlantCacheMaterialTotal(json.total ?? 0);
+      } else {
+        const res = await fetch(`/api/admin/plant-cache/vehicles?q=${encodeURIComponent(q)}&take=50`);
+        const json = await res.json();
+        setPlantCacheRows(json.rows ?? []);
+        setPlantCacheTotal(json.total ?? 0);
+      }
+    } catch {
+      setPlantCacheMaterialRows([]); setPlantCacheMaterialTotal(0);
+      setPlantCacheRows([]); setPlantCacheTotal(0);
+    } finally {
+      setPlantCacheRowsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "plantCache") return;
+    const t = setTimeout(() => { void loadPlantCacheRows(plantCacheSearch); }, 300);
+    return () => clearTimeout(t);
+  }, [plantCacheSearch, tab, loadPlantCacheRows]);
 
   // Live "Remaining" ticker for the Maintenance Mode tab's status summary — only runs while
   // that tab is open and an end time is actually configured.
@@ -427,6 +492,66 @@ export default function MasterDataPage() {
     }
   }
 
+  function togglePlantCacheMaterial(materialNo: string) {
+    setExpandedMaterials(prev => {
+      const next = new Set(prev);
+      if (next.has(materialNo)) next.delete(materialNo); else next.add(materialNo);
+      return next;
+    });
+  }
+
+  async function syncPlantCacheNow() {
+    setPlantCacheSyncing(true); setError("");
+    try {
+      const res = await fetch("/api/admin/plant-cache", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Plant cache sync failed"); return; }
+      await Promise.all([load("plantCache"), loadPlantCacheRows(plantCacheSearch)]);
+      setSuccess(`Plant cache synced — ${json.vehicleCount ?? 0} vehicles, ${json.locationCount ?? 0} locations`);
+    } catch {
+      setError("Plant cache sync failed");
+    } finally {
+      setPlantCacheSyncing(false);
+    }
+  }
+
+  async function runMaterialFetch(materialNos: string[]) {
+    if (materialNos.length === 0) return;
+    setMaterialFetchRunning(true); setError("");
+    try {
+      const res = await fetch("/api/admin/plant-cache/material", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ materialNos }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? "Material fetch failed"); return; }
+      setMaterialFetchResults(json.results ?? []);
+      setSuccess(`Material fetch complete — ${json.succeeded ?? 0} succeeded, ${json.failed ?? 0} failed`);
+      await Promise.all([load("plantCache"), loadPlantCacheRows(plantCacheSearch)]);
+    } catch {
+      setError("Material fetch failed");
+    } finally {
+      setMaterialFetchRunning(false);
+    }
+  }
+
+  function handleMaterialFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      setMaterialFetchBatch(prev => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function parseMaterialBatch(text: string): string[] {
+    return [...new Set(text.split(/[\n,;\t]+/).map(s => s.trim()).filter(Boolean))];
+  }
+
   if (status === "loading") return null;
 
   const tabs: { id: Tab; label: string }[] = [
@@ -439,6 +564,7 @@ export default function MasterDataPage() {
     { id: "sapReconNotify", label: "SAP Reconciliation Notifications" },
     { id: "maintenance", label: "Maintenance Mode" },
     { id: "systemNotice", label: "System Notice" },
+    { id: "plantCache", label: "Plant/Material Cache" },
   ];
 
   return (
@@ -579,6 +705,15 @@ export default function MasterDataPage() {
                 </div>
               )}
             </div>
+          </div>
+        ) : tab === "plantCache" ? (
+          <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              A local copy of SAP&apos;s vehicle/material/plant-location data, used only for destination-dropdown and
+              current-location display (never for Location Transfer / Customer Delivery eligibility, or SAP writes —
+              those stay fully live). Syncs automatically once a day at midnight; use &quot;Sync Now&quot; below to
+              refresh it immediately.
+            </p>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 px-5 py-4"
@@ -996,6 +1131,246 @@ export default function MasterDataPage() {
                   Notice text: Planned SAP S/4 HANA Downtime — Friday, 18th September 2026, 20:00 H to Sunday, 20th
                   September 2026, 17:00 H. Impact: All DIMO SAP / VSS Users.
                 </p>
+              </div>
+            )}
+
+            {/* Plant/Material Cache tab */}
+            {tab === "plantCache" && (
+              <div className="p-5">
+                {error && (
+                  <div className="mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: "#fee2e2", color: "#dc2626" }}>{error}</div>
+                )}
+                <div className="rounded-xl border p-4 max-w-2xl" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+                        Last sync: {plantCache.lastSync
+                          ? `${fmtMaintenanceDateTime(plantCache.lastSync.startedAt)} — ${plantCache.lastSync.status}${plantCache.lastSync.trigger === "MANUAL" ? " (manual)" : " (automatic)"}`
+                          : "Never synced yet"}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                        {plantCache.vehicleCount} vehicles cached, {plantCache.materialCount} materials cached.
+                      </p>
+                      {plantCache.lastSync?.status === "FAILED" && plantCache.lastSync.error && (
+                        <p className="text-xs mt-1" style={{ color: "#dc2626" }}>Last sync error: {plantCache.lastSync.error}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={plantCacheSyncing}
+                      onClick={syncPlantCacheNow}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                    >
+                      {plantCacheSyncing ? "Syncing…" : "Sync Now"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fetch by Material Number — calls SAP /plant filtered by Matnr (not used anywhere
+                    else in this app, only ever tried with Vhvin before), one material at a time.
+                    Test a single material first before pasting/uploading a full list. */}
+                <div className="mt-5 rounded-xl border p-4 max-w-3xl" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "var(--text)" }}>Fetch by Material Number</p>
+                  <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+                    Calls SAP directly for a specific material (Matnr) and caches whatever it returns. Try a single
+                    material first to confirm SAP accepts this filter before running a full list.
+                  </p>
+
+                  <div className="flex items-center gap-2 mb-4">
+                    <input
+                      type="text" placeholder="e.g. W1K205076"
+                      value={materialFetchSingle} onChange={e => setMaterialFetchSingle(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter" && materialFetchSingle.trim()) void runMaterialFetch([materialFetchSingle.trim()]); }}
+                      className="w-64 px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                    <button
+                      type="button"
+                      disabled={materialFetchRunning || !materialFetchSingle.trim()}
+                      onClick={() => void runMaterialFetch([materialFetchSingle.trim()])}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                    >
+                      {materialFetchRunning ? "Fetching…" : "Fetch One"}
+                    </button>
+                  </div>
+
+                  <p className="text-xs font-medium mb-1.5" style={{ color: "var(--text)" }}>Or fetch a batch</p>
+                  <textarea
+                    value={materialFetchBatch} onChange={e => setMaterialFetchBatch(e.target.value)}
+                    placeholder="Paste material numbers here — one per line, or comma-separated…"
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none font-mono resize-y"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--text)" }}
+                  />
+                  <div className="flex items-center gap-2 mt-2">
+                    <label className="px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all"
+                      style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text)" }}>
+                      Upload .txt / .csv
+                      <input type="file" accept=".txt,.csv" className="hidden" onChange={handleMaterialFileUpload} />
+                    </label>
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      {parseMaterialBatch(materialFetchBatch).length} material{parseMaterialBatch(materialFetchBatch).length === 1 ? "" : "s"} ready
+                    </span>
+                    <button
+                      type="button"
+                      disabled={materialFetchRunning || parseMaterialBatch(materialFetchBatch).length === 0}
+                      onClick={() => void runMaterialFetch(parseMaterialBatch(materialFetchBatch))}
+                      className="ml-auto px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                    >
+                      {materialFetchRunning ? "Fetching…" : "Fetch All"}
+                    </button>
+                  </div>
+
+                  {materialFetchResults.length > 0 && (
+                    <div className="mt-4 rounded-lg border overflow-hidden" style={{ borderColor: "var(--border)" }}>
+                      <div className="max-h-64 overflow-y-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+                              {["Material No", "Result", "Vehicles", "Destinations"].map((h, i) => (
+                                <th key={i} className="px-3 py-2 text-left font-semibold uppercase tracking-wide"
+                                  style={{ color: "var(--text-muted)" }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {materialFetchResults.map((r, i) => (
+                              <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                                <td className="px-3 py-2 font-medium" style={{ color: "var(--text)" }}>{r.materialNo}</td>
+                                <td className="px-3 py-2" style={{ color: r.success ? "#16a34a" : "#dc2626" }}>
+                                  {r.success ? "OK" : (r.error || "Failed")}
+                                </td>
+                                <td className="px-3 py-2" style={{ color: "var(--text)" }}>{r.vehicleCount}</td>
+                                <td className="px-3 py-2" style={{ color: "var(--text)" }}>{r.destinationCount}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Cached content viewer — lets an admin see real data, not just counts, while testing.
+                    Empty search = grouped by Material No (SAP's destinations are per-material, so this
+                    is the more meaningful default). Typed search = flat per-vehicle results, with the
+                    Chassis No column only shown here since that's the only time it's useful. */}
+                <div className="mt-5">
+                  <div className="flex items-center justify-between gap-4 mb-3">
+                    <input
+                      type="text" placeholder="Search by chassis, material no, or plant…"
+                      value={plantCacheSearch} onChange={e => setPlantCacheSearch(e.target.value)}
+                      className="w-80 px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "var(--surface2)", borderColor: "var(--border)", color: "var(--text)" }}
+                    />
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      {plantCacheRowsLoading
+                        ? "Loading…"
+                        : plantCacheSearch.trim()
+                          ? `Showing ${plantCacheRows.length} of ${plantCacheTotal} vehicles`
+                          : `Showing ${plantCacheMaterialRows.length} of ${plantCacheMaterialTotal} materials`}
+                    </span>
+                  </div>
+
+                  {!plantCacheSearch.trim() ? (
+                    <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border)" }}>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
+                            {["Material No", "Vehicles", "Extended Locations", "Last Synced"].map((h, i) => (
+                              <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
+                                style={{ color: "var(--text-muted)" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plantCacheMaterialRows.length === 0 ? (
+                            <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                              {plantCacheRowsLoading ? "Loading…" : "No cached materials found — try a sync."}
+                            </td></tr>
+                          ) : plantCacheMaterialRows.map(m => {
+                            const isExpanded = expandedMaterials.has(m.materialNo);
+                            return (
+                              <tr key={m.materialNo} style={{ borderBottom: "1px solid var(--border)", verticalAlign: "top" }}>
+                                <td className="px-4 py-2.5 text-xs font-medium" style={{ color: "var(--text)" }}>{m.materialNo}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>{m.vehicleCount}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>
+                                  <button type="button" onClick={() => togglePlantCacheMaterial(m.materialNo)}
+                                    className="font-medium underline decoration-dotted" style={{ color: "var(--accent)" }}>
+                                    {m.destinations.length} location{m.destinations.length === 1 ? "" : "s"} — {isExpanded ? "hide" : "show all"}
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5 max-w-2xl">
+                                      {m.destinations.map((d, i) => (
+                                        <span key={i} className="px-2 py-1 rounded-lg text-[11px]"
+                                          style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)" }}>
+                                          {d.plantDescription} - {d.storageDescription}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>
+                                  {m.lastSyncedAt ? fmtMaintenanceDateTime(m.lastSyncedAt) : "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border)" }}>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ background: "var(--surface2)", borderBottom: "2px solid var(--border)" }}>
+                            {["Chassis No", "Internal No", "Material No", "Current Location", "Destinations", "Synced At"].map((h, i) => (
+                              <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide"
+                                style={{ color: "var(--text-muted)" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plantCacheRows.length === 0 ? (
+                            <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+                              {plantCacheRowsLoading ? "Loading…" : "No cached vehicles found — try a sync, or adjust your search."}
+                            </td></tr>
+                          ) : plantCacheRows.map(r => {
+                            const isExpanded = expandedMaterials.has(r.chassisNo);
+                            return (
+                              <tr key={r.chassisNo} style={{ borderBottom: "1px solid var(--border)", verticalAlign: "top" }}>
+                                <td className="px-4 py-2.5 font-mono text-xs" style={{ color: "var(--text)" }}>{r.chassisNo}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>{r.internalNo || "—"}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>{r.materialNo || "—"}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>{r.plantDescription} - {r.storageDescription}</td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text)" }}>
+                                  <button type="button" onClick={() => togglePlantCacheMaterial(r.chassisNo)}
+                                    className="font-medium underline decoration-dotted" style={{ color: "var(--accent)" }}>
+                                    {r.destinations.length} location{r.destinations.length === 1 ? "" : "s"} — {isExpanded ? "hide" : "show all"}
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5 max-w-xl">
+                                      {r.destinations.map((d, i) => (
+                                        <span key={i} className="px-2 py-1 rounded-lg text-[11px]"
+                                          style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text)" }}>
+                                          {d.plantDescription} - {d.storageDescription}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-xs" style={{ color: "var(--text-muted)" }}>{fmtMaintenanceDateTime(r.syncedAt)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

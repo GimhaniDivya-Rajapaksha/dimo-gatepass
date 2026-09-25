@@ -243,6 +243,56 @@ export async function fetchPlantVehicleRows(vehicleFilter?: string): Promise<Pla
   }));
 }
 
+/**
+ * Same /plant endpoint as fetchPlantVehicleRows, filtered by material code (Matnr) instead of
+ * chassis (Vhvin) — used only by the admin Plant/Material Cache tab's "fetch by material"
+ * tool (lib/plant-cache.ts), never by any live search/lookup path. Purely additive: does not
+ * change fetchPlantVehicleRows or anything that calls it.
+ */
+export async function fetchPlantRowsByMaterial(materialNo: string): Promise<PlantVehicleRow[]> {
+  const url = `${APIM_BASE}/dimogatepass/${APIM_ENV}/plant?filter=${encodeURIComponent(`Matnr eq '${materialNo}'`)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: buildHeaders(),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Plant API ${res.status}: ${text.slice(0, 300)}`);
+  }
+
+  const json = (await res.json()) as { data?: PlantApiRow[] } | PlantApiRow[];
+  const rows = Array.isArray(json) ? json : (json.data ?? []);
+  return rows.map((row) => ({
+    id: [
+      pick(row, "Vhcle"),
+      pick(row, "Vhcex"),
+      pick(row, "Vhvin"),
+      pick(row, "Werks"),
+      pick(row, "Lgort"),
+      pick(row, "ext_plant"),
+      pick(row, "ext_sloc"),
+    ].join("|"),
+    internalNo: pick(row, "Vhcle"),
+    externalNo: pick(row, "Vhcex"),
+    chassisNo: pick(row, "Vhvin"),
+    materialNo: pick(row, "Matnr"),
+    plantCode: pick(row, "Werks"),
+    plantDescription: pick(row, "name1", "Name1"),
+    storageLocation: pick(row, "Lgort"),
+    storageDescription: pick(row, "LgortDesc"),
+    vehicleGuid: pick(row, "Vguid"),
+    moduleGuid: pick(row, "Modguid"),
+    modelCode: pick(row, "Mcodecs"),
+    extPlant: pick(row, "ext_plant"),
+    extSloc: pick(row, "ext_sloc"),
+    extPlantDesc: pick(row, "ext_p_des"),
+    extSlocDesc: pick(row, "ext_sloc_des"),
+  }));
+}
+
 // Short-TTL in-process cache for the UNFILTERED /plant call specifically — used only by the
 // vehicle search's fallback merge (app/api/lookups/route.ts), which otherwise re-fetches the
 // same ~1.7-2.5MB dataset on every keystroke. Every other caller of fetchPlantVehicleRows()

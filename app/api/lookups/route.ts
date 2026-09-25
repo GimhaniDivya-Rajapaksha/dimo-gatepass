@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSapVehicles, fetchRawInVehicles } from "@/lib/sap";
 import { getEnabledLtStatusSets, isLtStatusEligible } from "@/lib/lt-status-config";
-import { fetchPlantLocationOptions, fetchPlantVehicleRows, getCachedPlantVehicleRows, filterApiLocations, type LocationOption, type PlantVehicleRow } from "@/lib/location-api";
+import { fetchPlantVehicleRows, filterApiLocations, type LocationOption, type PlantVehicleRow } from "@/lib/location-api";
+import { getCachedPlantRows, getCachedPlantRowsForChassis, getCachedPlantLocationOptions, getCachedDestinationsForMaterial, cachePlantRowsForChassis } from "@/lib/plant-cache";
 import { getPendingDbLocationsByChassis } from "@/lib/sap-reconciliation";
 
 type LookupField = "location" | "requestedBy" | "outReason" | "vehicle" | "approver" | "companyName" | "carrierRegNo" | "carrier" | "driverNIC" | "driverName" | "driver";
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
 
     try {
       const [apiLocations, outReasons, approvers, companies, carriers] = await Promise.all([
-        fetchPlantLocationOptions().catch(() => []),
+        getCachedPlantLocationOptions().catch(() => []),
         fields.includes("outReason") ? prisma.outReasonOption.findMany({ orderBy: { value: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("approver") ? prisma.user.findMany({ where: { role: approverLookupRole as any }, orderBy: { name: "asc" }, take: 50 }) : Promise.resolve([]),
         fields.includes("companyName") ? prisma.carrierOption.findMany({ orderBy: { companyName: "asc" }, take: 50 }) : Promise.resolve([]),
@@ -165,28 +166,35 @@ export async function GET(req: NextRequest) {
       const matnr = searchParams.get("matnr") ?? undefined;
 
       if (chassisNo || matnr) {
-        // Exact-VIN filter first — fast (~2s vs ~12-15s+ for the full list), returns only this
-        // vehicle's rows. A prior commit (b2c66ef) found this endpoint unreliable in the past
+        // Cache first (our own DB, synced nightly + on-demand) — fast, no live SAP call. A
+        // prior commit (b2c66ef) found the live filtered /plant endpoint unreliable in the past
         // (returned wrong VINs / rows with no ext_plant/ext_sloc data, causing PROMO/FINANCE to
-        // go empty), so the result is verified before being trusted: if it comes back empty or
-        // with no usable ext destination data, fall back to the full unfiltered call exactly as
-        // before — this can never silently show an incomplete PROMO/FINANCE/Dealer list.
+        // go empty), so the result is still verified before being trusted: if the cache comes
+        // back empty or with no usable ext destination data (e.g. vehicle arrived in SAP since
+        // the last sync), fall back to one live exact-VIN SAP call — never the old full
+        // unfiltered fetch — so this can never silently show an incomplete PROMO/FINANCE/Dealer
+        // list.
         let vehicleRows: PlantVehicleRow[] = [];
         if (chassisNo) {
-          const exactRows = await fetchPlantVehicleRows(chassisNo.toUpperCase()).catch(() => []);
-          if (exactRows.length > 0 && exactRows.some(r => r.extPlant && r.extSloc)) {
-            vehicleRows = exactRows;
+          const cachedRows = await getCachedPlantRowsForChassis(chassisNo).catch(() => []);
+          if (cachedRows.length > 0 && cachedRows.some(r => r.extPlant && r.extSloc)) {
+            vehicleRows = cachedRows;
+          } else {
+            const liveRows = await fetchPlantVehicleRows(chassisNo.toUpperCase()).catch(() => []);
+            if (liveRows.length > 0 && liveRows.some(r => r.extPlant && r.extSloc)) {
+              vehicleRows = liveRows;
+              // Self-healing: cache this vehicle now so the same chassis doesn't need a live
+              // SAP call again next time. Fire-and-forget — never slows down or breaks this
+              // response if the write fails.
+              void cachePlantRowsForChassis(chassisNo.toUpperCase(), liveRows).catch((e) => {
+                console.warn(`[PlantCache] failed to cache live fallback for ${chassisNo}:`, e instanceof Error ? e.message : e);
+              });
+            }
           }
         }
 
-        if (!vehicleRows.length) {
-          const allRows = await fetchPlantVehicleRows().catch(() => []);
-          vehicleRows = chassisNo
-            ? allRows.filter(r => r.chassisNo.toUpperCase() === chassisNo.toUpperCase())
-            : [];
-          if (!vehicleRows.length && matnr) {
-            vehicleRows = allRows.filter(r => r.materialNo === matnr);
-          }
+        if (!vehicleRows.length && matnr) {
+          vehicleRows = await getCachedDestinationsForMaterial(matnr).catch(() => []);
         }
 
         // Build one option per unique ext_plant|ext_sloc destination.
@@ -220,10 +228,10 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredOptions)).slice(0, take) });
       }
 
-      // No vehicle selected — SAP live data only for all types (DIMO/DEALER/PROMOTION/FINANCE).
+      // No vehicle selected — cached SAP data for all types (DIMO/DEALER/PROMOTION/FINANCE).
       // DEALER's DB fallback (locationOption additions) has been removed per explicit instruction —
       // every type now sources purely from SAP's ext_plant/ext_sloc destinations, no DB additions.
-      const apiLocations = await fetchPlantLocationOptions().catch(() => []);
+      const apiLocations = await getCachedPlantLocationOptions().catch(() => []);
       const filteredApi = filterApiLocations(apiLocations, q, locationType);
 
       return NextResponse.json({ options: (await expandByLocationLabels(prisma, filteredApi)).slice(0, take) });
@@ -284,22 +292,29 @@ export async function GET(req: NextRequest) {
       // CD to avoid paying for a large, unused fetch on every search.
       //
       // For LT/Test Drive, /plant is still needed (vehicles not yet in business flow only ever
-      // show up there), but the underlying dataset is large (~1.7-2.5MB) and unfiltered — /plant
-      // only supports exact-VIN filtering, not partial search, so there's no way to ask SAP to
-      // narrow it server-side for a partial query. Instead: (1) skip it below a 4-character
-      // query — too short to be a meaningful narrow-down anyway — and (2) reuse a short-TTL
-      // server-side cache (getCachedPlantVehicleRows) instead of re-fetching the full dataset on
-      // every keystroke. The existing in-memory contains-match filter below (using `q`) still
-      // runs exactly as before against whichever data — cached or fresh — comes back, so partial
-      // matches anywhere in the VIN (e.g. last 4 digits) keep working unchanged.
+      // show up there). The underlying dataset is large and unfiltered — /plant only supports
+      // exact-VIN filtering, not partial search — so partial queries read our own DB cache
+      // (synced nightly + on-demand, see lib/plant-cache.ts) instead of live SAP. Skip below a
+      // 4-character query — too short to be a meaningful narrow-down anyway. The existing
+      // in-memory contains-match filter below (using `q`) still runs exactly as before against
+      // whichever data comes back, so partial matches anywhere in the VIN (e.g. last 4 digits)
+      // keep working unchanged.
       const trimmedQ = q.trim();
       const wantsPlant = rawPassType !== "CUSTOMER_DELIVERY" && (trimmedQ.length === 0 || trimmedQ.length >= 4);
-      // Full 17-character VIN: skip the cache entirely and ask SAP for just this one vehicle
-      // via its exact-match filter (fast, small — confirmed ~2s vs ~12-15s for the full list).
-      // Only exact-length full VINs take this path; every other length (including 4+ character
-      // partial queries) keeps using the cached full list exactly as before.
+      // Full 17-character VIN: check the cache first (instant, no network call); if this
+      // vehicle isn't cached yet (new since the last sync), fall back to one live exact-match
+      // SAP call (fast, small — confirmed ~2s vs ~12-15s for the full list). Every other length
+      // (including 4+ character partial queries) reads the full cached list.
       const isFullVin = trimmedQ.length === 17;
-      const fetchPlant = () => (!wantsPlant ? Promise.resolve([]) : isFullVin ? fetchPlantVehicleRows(trimmedQ) : getCachedPlantVehicleRows());
+      const fetchPlant = () => {
+        if (!wantsPlant) return Promise.resolve([]);
+        if (isFullVin) {
+          return getCachedPlantRowsForChassis(trimmedQ).then((rows) =>
+            rows.length > 0 ? rows : fetchPlantVehicleRows(trimmedQ)
+          );
+        }
+        return getCachedPlantRows();
+      };
       let [sapResult, plantResult, rawInResult] = await Promise.allSettled([
         fetchSapVehicles(q, passType),
         fetchPlant(),

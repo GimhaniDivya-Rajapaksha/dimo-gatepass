@@ -431,3 +431,94 @@ model SystemNotice {
   updatedAt   DateTime @updatedAt
   updatedById String?
 }
+
+// ── SAP /plant local cache ──────────────────────────────────────────────────
+// SAP's unfiltered /plant response is a full cross-join: every vehicle row is repeated once
+// per destination location in the whole system (one real vehicle can produce 100+ rows). These
+// four tables normalize that away — one row per distinct vehicle, one row per distinct
+// location, and a deduped material↔location pairing — instead of storing the raw response
+// 1:1, which would balloon storage and defeat the whole point of caching it.
+//
+// Read-only/UI data only: never used for Location Transfer / Customer Delivery status
+// eligibility (/in, /out), the pre-write SAP re-check (fetchVehicleSapStatus /
+// isSapWriteEligible), or the live /plant fetch inside updateVehiclePlantLocation immediately
+// before a SAP write — those remain 100% live SAP calls, unchanged.
+
+model PlantMaterial {
+  id         String   @id @default(cuid())
+  materialNo String   @unique // Matnr
+  updatedAt  DateTime @updatedAt
+
+  vehicles     PlantVehicleCache[]
+  destinations PlantMaterialDestination[]
+}
+
+// Deduped catalog of every plant/storage-location pair seen anywhere in a /plant sync —
+// both vehicles' current locations and their destination (ext_plant/ext_sloc) options.
+model PlantLocationNode {
+  id                 String   @id @default(cuid())
+  plantCode          String // Werks / ext_plant
+  storageLocation    String // Lgort / ext_sloc
+  plantDescription   String // name1 / ext_p_des
+  storageDescription String // LgortDesc / ext_sloc_des
+  updatedAt          DateTime @updatedAt
+
+  destinationFor PlantMaterialDestination[]
+
+  @@unique([plantCode, storageLocation])
+}
+
+// Many-to-many: which destination locations have ever been seen for a given material code.
+// A material can map to many destinations; a destination can accept many materials.
+model PlantMaterialDestination {
+  id         String   @id @default(cuid())
+  materialId String
+  locationId String
+  lastSeenAt DateTime @updatedAt
+
+  material PlantMaterial     @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  location PlantLocationNode @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, locationId])
+}
+
+// One row per distinct vehicle (chassis) — the fields that stay constant across that vehicle's
+// repeated /plant rows. This vehicle's own current plant/storage location, kept exactly as SAP
+// reports it (not inferred from the material-level mapping above).
+model PlantVehicleCache {
+  id                 String   @id @default(cuid())
+  chassisNo          String   @unique // Vhvin
+  internalNo         String // Vhcle
+  externalNo         String // Vhcex
+  materialNo         String // Matnr (denormalized for a fast lookup without a join)
+  materialId         String?
+  plantCode          String // Werks (current)
+  plantDescription   String // name1
+  storageLocation    String // Lgort (current)
+  storageDescription String // LgortDesc
+  vehicleGuid        String // Vguid
+  moduleGuid         String // Modguid
+  modelCode          String // Mcodecs
+  syncedAt           DateTime @updatedAt
+
+  material PlantMaterial? @relation(fields: [materialId], references: [id])
+
+  @@index([materialNo])
+  @@index([internalNo])
+  @@index([externalNo])
+}
+
+// One row per sync run (automatic midnight run or an admin's manual "Sync Now") — shown on the
+// Master Data "Plant/Material Cache" tab so an admin can see when data was last refreshed.
+model PlantCacheSyncLog {
+  id            String    @id @default(cuid())
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  status        String // RUNNING | SUCCESS | FAILED
+  vehicleCount  Int?
+  locationCount Int?
+  trigger       String // AUTO | MANUAL
+  mode          String? // BULK | INCREMENTAL — set only once the sync has decided which path it used
+  triggeredById String?
+  error         String?
+}

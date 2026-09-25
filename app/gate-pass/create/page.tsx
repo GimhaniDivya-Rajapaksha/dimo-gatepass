@@ -725,6 +725,43 @@ export default function CreateGatePassPage() {
       }
     } catch { /* non-critical */ }
   }
+
+  // "Can't find your location?" — Location Transfer only, lets the person creating the pass
+  // trigger a live SAP lookup for this exact vehicle right now, instead of waiting on an admin
+  // to notice and resync. Locked to one in-flight request at a time; never touches anything
+  // else about how the destination dropdown works.
+  const [refreshingVehicleLocation, setRefreshingVehicleLocation] = useState(false);
+  const [refreshLocationMessage, setRefreshLocationMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [locationRefreshKey, setLocationRefreshKey] = useState(0);
+
+  async function refreshVehicleLocationFromSap() {
+    const chassisNo = selectedVehicleDetail?.chassisNo;
+    if (!chassisNo || refreshingVehicleLocation) return;
+    setRefreshingVehicleLocation(true);
+    setRefreshLocationMessage(null);
+    try {
+      const res = await fetch("/api/gate-pass/refresh-vehicle-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chassisNo }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setRefreshLocationMessage({ type: "error", text: json.error ?? "Could not fetch from SAP right now." });
+        return;
+      }
+      setRefreshLocationMessage({ type: "ok", text: "Updated from SAP — reloading locations…" });
+      if (locationType && locationType !== "OTHER") {
+        void fetchLookup("location", lt.toLocation, locationType);
+      }
+      setLocationRefreshKey(k => k + 1); // forces TwoColumnLocationPicker (Promotion/Finance) to reload
+    } catch {
+      setRefreshLocationMessage({ type: "error", text: "Could not fetch from SAP right now." });
+    } finally {
+      setRefreshingVehicleLocation(false);
+    }
+  }
+
   const [ltBulkVehicles, setLtBulkVehicles] = useState<Array<{
     vehicle: string;
     chassisNo: string;
@@ -4931,6 +4968,7 @@ export default function CreateGatePassPage() {
                     <div>
                       <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text)" }}>Location <span className="text-red-500">*</span></label>
                       <TwoColumnLocationPicker
+                        key={locationRefreshKey}
                         value={lt.toLocation}
                         displayValue={selectedLocationDetail?.storageDescription}
                         locationType={locationType}
@@ -4948,6 +4986,24 @@ export default function CreateGatePassPage() {
                         }}
                       />
                       {errors.toLocation && <p className="text-red-500 text-xs mt-1">{errors.toLocation}</p>}
+                      {passType === "LOCATION_TRANSFER" && selectedVehicleDetail?.chassisNo && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            disabled={refreshingVehicleLocation}
+                            onClick={() => void refreshVehicleLocationFromSap()}
+                            className="text-xs font-medium underline decoration-dotted disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ color: "#2563eb" }}
+                          >
+                            {refreshingVehicleLocation ? "Fetching from SAP…" : "Can't find your location? Fetch from SAP"}
+                          </button>
+                          {refreshLocationMessage && (
+                            <p className="text-xs mt-1" style={{ color: refreshLocationMessage.type === "ok" ? "#16a34a" : "#dc2626" }}>
+                              {refreshLocationMessage.text}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : locationType === "OTHER" ? (
@@ -4993,6 +5049,24 @@ export default function CreateGatePassPage() {
                         <span><span className="font-semibold" style={{ color: "var(--text)" }}>Plant:</span> {selectedLocationDetail.plantCode} – {selectedLocationDetail.plantDescription}</span>
                         <span><span className="font-semibold" style={{ color: "var(--text)" }}>Sloc:</span> {selectedLocationDetail.storageLocation}</span>
                         <span><span className="font-semibold" style={{ color: "var(--text)" }}>Description:</span> {selectedLocationDetail.storageDescription}</span>
+                      </div>
+                    )}
+                    {passType === "LOCATION_TRANSFER" && selectedVehicleDetail?.chassisNo && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          disabled={refreshingVehicleLocation}
+                          onClick={() => void refreshVehicleLocationFromSap()}
+                          className="text-xs font-medium underline decoration-dotted disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ color: "#2563eb" }}
+                        >
+                          {refreshingVehicleLocation ? "Fetching from SAP…" : "Can't find your location? Fetch from SAP"}
+                        </button>
+                        {refreshLocationMessage && (
+                          <p className="text-xs mt-1" style={{ color: refreshLocationMessage.type === "ok" ? "#16a34a" : "#dc2626" }}>
+                            {refreshLocationMessage.text}
+                          </p>
+                        )}
                       </div>
                     )}
                   </Field>

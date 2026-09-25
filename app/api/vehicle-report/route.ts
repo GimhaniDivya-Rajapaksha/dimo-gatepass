@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fetchPlantLocationOptions, fetchPlantVehicleRows, findPlantVehicleRow } from "@/lib/location-api";
+import { fetchPlantVehicleRows, findPlantVehicleRow } from "@/lib/location-api";
+import { getCachedPlantLocationOptions } from "@/lib/plant-cache";
 import { getPendingDbLocationsByChassis, getLastCompletedToLocationByChassis } from "@/lib/sap-reconciliation";
 import { fetchVehicleSapStatus } from "@/lib/sap";
 
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     }),
     fetchPlantVehicleRows(chassisNo || vehicleNo || undefined).catch(() => []),
-    fetchPlantLocationOptions().catch(() => []),
+    getCachedPlantLocationOptions().catch(() => []),
   ]);
 
   const stats = {

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { fetchPlantVehicleRows, findPlantVehicleRow, formatPlantLocationLabel } from "@/lib/location-api";
+import { findPlantVehicleRow, formatPlantLocationLabel } from "@/lib/location-api";
+import { getCachedPlantRows } from "@/lib/plant-cache";
 
 type LocationLookupItem = {
   key?: string;
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
   const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
   if (items.length === 0) return NextResponse.json({ locations: {} });
 
-  const rows = await fetchPlantVehicleRows().catch(() => []);
+  const rows = await getCachedPlantRows().catch(() => []);
   const locations: Record<string, string | null> = {};
 
   for (const item of items) {

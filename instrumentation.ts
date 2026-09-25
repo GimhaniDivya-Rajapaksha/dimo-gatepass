@@ -7,5 +7,8 @@ export async function register() {
 
     const { startSapReconciliationScheduler } = await import("./lib/sapReconciliationScheduler");
     startSapReconciliationScheduler();
+
+    const { startPlantCacheScheduler } = await import("./lib/plantCacheScheduler");
+    startPlantCacheScheduler();
   }
 }
